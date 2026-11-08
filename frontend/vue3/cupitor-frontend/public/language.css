@@ -271,6 +271,130 @@ body:is(.practice-mode, .rec-playing) #userDataError {
     align-items: center;
 }
 
+/* Find on page: a compact browser-like bar inside the webapp itself, so it
+   works on Android's WebView without relying on native browser chrome. */
+#cupPageFindToggle[aria-expanded="true"] {
+    background: #eaf2ff;
+    border-color: #608cdd;
+    color: #174b9b;
+}
+.cup-page-find[hidden] { display: none !important; }
+.cup-page-find {
+    position: fixed;
+    /* Above the study cards and transport overlays, not just the search page. */
+    z-index: 100010;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    right: max(10px, env(safe-area-inset-right, 0px));
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    width: min(440px, calc(100vw - 20px));
+    padding: 7px 8px;
+    border: 1px solid #cad5e3;
+    border-radius: 10px;
+    background: #fff;
+    color: #24354a;
+    box-shadow: 0 8px 30px rgba(20, 42, 73, .22);
+    font-family: system-ui, -apple-system, sans-serif;
+}
+.cup-page-find-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0 8px;
+    border: 1px solid #c5d3e4;
+    border-radius: 6px;
+    background: #fff;
+    color: #718096;
+}
+.cup-page-find-field:focus-within {
+    border-color: #3c76da;
+    box-shadow: 0 0 0 2px rgba(65, 121, 217, .17);
+}
+.cup-page-find-field svg { flex-shrink: 0; }
+#cupPageFindInput {
+    display: block;
+    box-sizing: border-box;
+    min-width: 0;
+    flex: 1 1 auto;
+    width: 100%;
+    height: 34px;
+    padding: 5px 0;
+    border: 0;
+    outline: 0;
+    box-shadow: none;
+    background: transparent;
+    color: #1c2838;
+    font: 14px system-ui, -apple-system, sans-serif;
+    line-height: 22px;
+}
+.cup-page-find-count {
+    flex: 0 0 auto;
+    min-width: 65px;
+    color: #607184;
+    font: 12px/1.25 system-ui, -apple-system, sans-serif;
+    text-align: center;
+    white-space: nowrap;
+}
+.cup-page-find[data-match-count="0"] .cup-page-find-count:not(:empty) {
+    color: #bb3e36;
+}
+.cup-page-find-action {
+    display: inline-grid;
+    flex: 0 0 29px;
+    width: 29px;
+    height: 32px;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #43546c;
+    cursor: pointer;
+    padding: 0;
+}
+.cup-page-find-action:hover:not(:disabled) { background: #ebf0f7; }
+.cup-page-find-action:focus-visible { outline: 2px solid #3e7be1; outline-offset: 1px; }
+.cup-page-find-action:disabled { opacity: .3; cursor: default; }
+/* Native CSS Highlights do not mutate Vue-rendered text or search results. */
+::highlight(cupitor-page-find-all) {
+    background-color: #ffe16c;
+    color: #17252f;
+}
+::highlight(cupitor-page-find-active) {
+    background-color: #f17a23;
+    color: #111c29;
+    text-decoration: underline 2px #155eef;
+    text-underline-offset: 3px;
+}
+/* Older embedded WebViews use small <mark> elements instead. */
+mark.cup-page-find-fallback {
+    background: #ffe16c !important;
+    color: #17252f !important;
+}
+mark.cup-page-find-current {
+    background: #f17a23 !important;
+    color: #111c29 !important;
+    outline: 2px solid #155eef;
+    border-radius: 2px;
+}
+@media (max-width: 500px) {
+    .cup-page-find {
+        top: calc(6px + env(safe-area-inset-top, 0px));
+        left: max(5px, env(safe-area-inset-left, 0px));
+        right: max(5px, env(safe-area-inset-right, 0px));
+        width: auto;
+        gap: 3px;
+        padding: 6px 5px;
+    }
+    .cup-page-find-count { min-width: 61px; font-size: 11px; }
+    .cup-page-find-action { flex-basis: 29px; }
+    #cupPageFindInput { font-size: 16px; }
+}
+
 .lang-toolbar-separator {
     width: 1px;
     height: 22px;
@@ -5046,6 +5170,25 @@ body.rec-playing #translationSlot, body.practice-mode #translationSlot { visibil
 .manual-hit:hover { background: #eceff8; }
 .manual-hit-playlist { font-size: 0.78em; color: #777; margin-right: 4px; }
 
+/* Card content is reading text, not a centered control. Keep both study
+   views left-aligned on desktop and mobile, including manual/HTML cards and
+   subtitle context. Intentionally formatted rich-text paragraphs can still
+   supply their own alignment; this only fixes the inherited default. */
+#practiceMode .practice-face,
+#practiceMode .practice-front,
+#practiceMode .practice-back,
+#practiceMode .practice-back-target,
+#practiceMode .practice-manual-text,
+#recPlayingSubs,
+#recPlayingSubs .rec-ps-row,
+#recPlayingSubs .rec-ps-main,
+#recPlayingSubs .rec-ps-sec,
+#recPlayingSubs .card-html,
+#recPlayingAudio .rec-pa-face,
+#practiceAudio .rec-pa-face {
+    text-align: left;
+}
+
 /* A manual card written as HTML (card-html.js): its own markup lays it out,
    so the pre-wrap that keeps a plain card's line breaks is turned off. */
 #practiceMode .practice-manual-text.card-html,
@@ -5245,6 +5388,33 @@ body.study-split-active.study-media-combined.practice-mode #practiceMode .practi
 #richCardEditor .cup-card-align-right { text-align: right; }
 #richCardEditor .cup-card-align-justify { text-align: justify; }
 
+/* Mobile rich-card editor: collapse the multi-row CKEditor toolbar until
+   explicitly requested. The content remains editable and scrollable. */
+.rich-card-editor-mobile #richCardEditor .rce-toolbar-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    gap: 6px;
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    background: #f4f7fb;
+    color: #28476c;
+    font: 600 14px/1.3 system-ui, sans-serif;
+    cursor: pointer;
+}
+.rich-card-editor-mobile #richCardEditor .rce-toolbar-toggle:focus-visible {
+    outline: 2px solid #3377db;
+    outline-offset: 2px;
+}
+.rich-card-editor-mobile #richCardEditor .ck-editor__top .ck-toolbar[hidden] {
+    display: none !important;
+}
+@media (max-width: 799px) {
+    .rich-card-editor-mobile #richCardEditor .ck-editor__top { min-height: 0; }
+}
 #richCardEditor .rce-paste-option {
     display: flex;
     align-items: center;

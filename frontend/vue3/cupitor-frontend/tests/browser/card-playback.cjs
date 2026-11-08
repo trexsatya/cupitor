@@ -79,6 +79,12 @@ async function checkCardPlayback(browser, mobile) {
     assert.equal(await page.evaluate(() => window._appSettings.recPlayYouTubeClipSeconds), 20)
     await start('both')
     await videoPlaying()
+    assert.deepEqual(await page.evaluate(() => {
+      const panel = document.querySelector('#recPlayingSubs');
+      const text = panel.querySelector('.rec-ps-main, .card-html, .rec-ps-err');
+      return [getComputedStyle(panel).textAlign,
+        text ? getComputedStyle(text).textAlign : getComputedStyle(panel).textAlign];
+    }), ['left', 'left'], 'Player card text is left-aligned')
     assert.equal(await page.locator('.rec-pb-clip-range').textContent(), 'YouTube clip 00:01:00 – 00:01:12 · automatic end')
     assert.deepEqual(await page.evaluate(() => window.__loads), [], 'linked clip plays before recordings')
     await click('#recPlayingPauseBtn')
@@ -164,6 +170,10 @@ async function checkCardPlayback(browser, mobile) {
     await page.evaluate(() => window.openPracticeMode({ queue: [{ ...window.__cards[0], targetAudioUrl: null }, window.__cards[1]], temporary: true }))
     await page.waitForFunction(() => document.body.classList.contains('study-media-combined') &&
       document.querySelector('#practiceAudio .rec-pa-el') && document.querySelector('#practiceMode .practice-manual-text'))
+    assert.deepEqual(await page.evaluate(() => [
+      getComputedStyle(document.querySelector('#practiceMode .practice-front-face')).textAlign,
+      getComputedStyle(document.querySelector('#practiceMode .practice-manual-text')).textAlign,
+    ]), ['left', 'left'], 'Practice face and manual card text are left-aligned')
     const checkStack = async () => {
       await page.waitForFunction(() => {
         const audio = document.querySelector('#practiceAudio')?.getBoundingClientRect()

@@ -120,7 +120,11 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Test search, scrolling and dialogs on desktop and mobile
+        env:
+          SCREENSHOT_DIR: test-results/dialog-browser-results
         run: |
+          node tests/browser/page-find.cjs
+          node tests/browser/card-tts.cjs
           node tests/browser/rich-card-scroll.cjs
           node tests/browser/study-page-scroll.cjs
           node tests/browser/spotify-practice.cjs

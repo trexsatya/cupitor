@@ -89,6 +89,7 @@ export function organizeSettingsPanel(panel) {
     ['playback', 'recPlaySrcTgtGapSeconds', 'Source → target (seconds)', 'Leave empty to use the gap between cards.'],
     ['playback', 'recPlayYouTubeClipSeconds', 'Untimed YouTube clip (seconds)', 'Used when a link has no end timestamp.'],
     ['playback', 'recManualPlaybackMode', 'Cards with a link and recordings', 'Choose which media to play when a card has both.'],
+    ['playback', 'recPlayTtsFallback', 'Speak cards without saved audio (TTS)', 'Off by default. Use device speech only for manual cards without a recording or playable linked clip.'],
     ['practice', 'practiceRevealMode', 'Answer reveal', 'How the answer appears during Practice.']
   ]
   controls.forEach(args => control(...args))

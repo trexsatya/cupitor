@@ -41,9 +41,11 @@ const fs = require('node:fs')
         '<script src="/classic.js"></script>',
         '<script type="module">',
         'import { sizeRichCardEditingArea } from "/language/rich-card-layout.js";',
+        'import { installMobileRichToolbar } from "/language/rich-card-mobile-toolbar.js";',
         'window.resizeEditingArea = () => sizeRichCardEditingArea(document.querySelector("#richCardEditor"));',
         'window.desktopEditor = ' + (!mobile) + ';',
         'window.editor = await ClassicEditor.create(document.querySelector(".rce-host"));',
+        'window.mobileToolbar = installMobileRichToolbar(editor, document.querySelector("#richCardEditor"), { mobile: !window.desktopEditor });',
         'editor.setData(Array.from({length:95},(_,i)=>"<p>Paragraph "+i+" '+
           'containing enough words to make it wrap and scroll inside the editor, not the dialog.</p>").join(""));',
         'window.sizedOnOpen = window.desktopEditor ? window.resizeEditingArea() : null;',
@@ -60,6 +62,29 @@ const fs = require('node:fs')
       })
       await page.goto('http://editor.test/')
       await page.waitForFunction(() => window.ready && document.querySelector('.ck-editor__editable'))
+      if (mobile) {
+        const toggle = page.locator('.rce-toolbar-toggle')
+        await toggle.waitFor({state:'visible'})
+        assert.equal(await page.locator('.ck-editor__top .ck-toolbar').isHidden(), true,
+          'Mobile rich formatting buttons start collapsed')
+        assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
+        if (process.env.SCREENSHOT_DIR) {
+          fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+          await page.screenshot({path: path.join(process.env.SCREENSHOT_DIR, 'cupitor-rich-editor-mobile-collapsed.png')})
+        }
+        await toggle.click()
+        assert.equal(await page.locator('.ck-editor__top .ck-toolbar').isVisible(), true)
+        assert.equal(await toggle.getAttribute('aria-expanded'), 'true')
+        if (process.env.SCREENSHOT_DIR) {
+          await page.screenshot({path: path.join(process.env.SCREENSHOT_DIR, 'cupitor-rich-editor-mobile-expanded.png')})
+        }
+        await toggle.click()
+        assert.equal(await page.locator('.ck-editor__top .ck-toolbar').isHidden(), true,
+          'Formatting toolbar collapses again without closing editor')
+      } else {
+        assert.equal(await page.locator('.rce-toolbar-toggle').count(), 0,
+          'Desktop rich controls remain expanded with no toggle')
+      }
       if (!mobile) assert.equal(await page.evaluate(() => window.sizedOnOpen), true,
         'Desktop CKEditor wrapper must be found and sized on open')
       const metrics = () => page.locator('.ck-editor__editable').evaluate(el => ({
