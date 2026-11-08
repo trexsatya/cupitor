@@ -41,9 +41,11 @@ const fs = require('node:fs')
         '<script src="/classic.js"></script>',
         '<script type="module">',
         'import { sizeRichCardEditingArea } from "/language/rich-card-layout.js";',
+        'import { initMobileRichCardToolbar } from "/language/rich-card-mobile-toolbar.js";',
         'window.resizeEditingArea = () => sizeRichCardEditingArea(document.querySelector("#richCardEditor"));',
         'window.desktopEditor = ' + (!mobile) + ';',
         'window.editor = await ClassicEditor.create(document.querySelector(".rce-host"));',
+        'window.mobileFormattingToggle = initMobileRichCardToolbar(document.querySelector("#richCardEditor"));',
         'editor.setData(Array.from({length:95},(_,i)=>"<p>Paragraph "+i+" '+
           'containing enough words to make it wrap and scroll inside the editor, not the dialog.</p>").join(""));',
         'window.sizedOnOpen = window.desktopEditor ? window.resizeEditingArea() : null;',
@@ -62,6 +64,26 @@ const fs = require('node:fs')
       await page.waitForFunction(() => window.ready && document.querySelector('.ck-editor__editable'))
       if (!mobile) assert.equal(await page.evaluate(() => window.sizedOnOpen), true,
         'Desktop CKEditor wrapper must be found and sized on open')
+      const toggle = page.locator('#richCardEditor .rce-mobile-tools-toggle')
+      assert.equal(await toggle.count(), 1, 'rich editor has one mobile formatting toggle')
+      if (mobile) {
+        assert.equal(await toggle.isVisible(), true)
+        assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
+        assert.equal(await page.locator('#richCardEditor .ck-editor__top').isVisible(), false,
+          'mobile CKEditor toolbar defaults collapsed')
+        await toggle.click()
+        assert.equal(await toggle.getAttribute('aria-expanded'), 'true')
+        assert.equal(await page.locator('#richCardEditor .ck-editor__top').isVisible(), true)
+        await toggle.click()
+        assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
+        assert.equal(await page.locator('#richCardEditor .ck-editor__top').isVisible(), false)
+        assert(await page.locator('.ck-editor__editable').isVisible(),
+          'editing surface stays visible when formatting controls collapse')
+      } else {
+        assert.equal(await toggle.isVisible(), false,
+          'desktop always shows normal CKEditor formatting toolbar')
+        assert.equal(await page.locator('#richCardEditor .ck-editor__top').isVisible(), true)
+      }
       const metrics = () => page.locator('.ck-editor__editable').evaluate(el => ({
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
