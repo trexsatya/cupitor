@@ -29,6 +29,13 @@ async function check(browser, mobile) {
   })
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
+    // Open the actual results layout first. Before the first search the
+    // app intentionally hides both results panes and they have zero height.
+    await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
+    await page.locator('#searchText').fill('färgsprakande')
+    await page.locator('#searchText').press('Tab')
+    await page.waitForFunction(() => window._subtitleSearchCompletion?.complete &&
+      document.querySelector('#result .srt-file'))
     await page.evaluate(async wav => {
       await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise])
       window.AudioBridge = { postMessage(raw) {
