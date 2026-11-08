@@ -122,6 +122,7 @@ jobs:
       - name: Test search, scrolling and dialogs on desktop and mobile
         run: |
           node tests/browser/rich-card-scroll.cjs
+          node tests/browser/study-page-scroll.cjs
           node tests/browser/spotify-practice.cjs
           node tests/browser/notification-practice.cjs
           node tests/browser/study-calls.cjs
