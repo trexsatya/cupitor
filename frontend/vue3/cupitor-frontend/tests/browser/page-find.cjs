@@ -81,7 +81,26 @@ async function run(browser, mobile, legacy) {
       state: document.querySelector('#cupPageFindBar')?.__cupPageFind?.getState(),
       marks: document.querySelectorAll('mark.cup-page-find-fallback').length,
       rows: document.querySelectorAll('.fixture-row').length,
-      rects: [...document.querySelectorAll('.fixture-row')].map(x => [x.getBoundingClientRect().width,x.getBoundingClientRect().height])
+      rects: [...document.querySelectorAll('.fixture-row')].map(x => [x.getBoundingClientRect().width,x.getBoundingClientRect().height]),
+      candidates: (() => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        const out = [];
+        let n;
+        while ((n = walker.nextNode())) {
+          if (!n.textContent.includes('färgsprakande')) continue;
+          const element = n.parentElement;
+          const begin = n.textContent.indexOf('färgsprakande');
+          const range = document.createRange();
+          range.setStart(n,begin);range.setEnd(n,begin+13);
+          out.push({text:n.textContent.slice(0,62),tag:element?.tagName,
+            hidden:element?.closest('[hidden]')?.tagName,
+            editable:element?.closest('[contenteditable]')?.tagName,
+            closest:element?.closest('#cupPageFindBar,script,style,noscript,template,textarea,input,select,option,button,svg,[hidden],[inert],[aria-hidden="true"],[contenteditable],.ck-editor__editable')?.tagName,
+            display:getComputedStyle(element).display,
+            rects:[...range.getClientRects()].map(r=>[r.width,r.height])});
+        }
+        return out;
+      })()
     }))))
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 3')
     assert.equal(await count.textContent(), '1 of 3', 'only 3 visible non-editable matches')
