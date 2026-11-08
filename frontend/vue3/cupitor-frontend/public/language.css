@@ -281,7 +281,8 @@ body:is(.practice-mode, .rec-playing) #userDataError {
 .cup-page-find[hidden] { display: none !important; }
 .cup-page-find {
     position: fixed;
-    z-index: 20010;
+    /* Above the study cards and transport overlays, not just the search page. */
+    z-index: 100010;
     top: calc(8px + env(safe-area-inset-top, 0px));
     right: max(10px, env(safe-area-inset-right, 0px));
     box-sizing: border-box;
