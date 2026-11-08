@@ -6,6 +6,14 @@ test.each([
 ])('Practice key %s performs %s', (key, action) => {
   expect(keyboardShortcut({ key }, { practice: true })).toBe(action)
 })
+test('browser-style Find shortcuts are discoverable in keyboard help', () => {
+  const search = KEYBOARD_SHORTCUTS.filter(x => x.scope === 'Search')
+  expect(search.find(x => x.keys.includes('Ctrl/Cmd + F'))?.label).toMatch(/Find visible text/)
+  expect(search.find(x => x.keys.includes('Shift + Enter'))?.label).toMatch(/previous/)
+  expect(search.find(x => x.keys.includes('Ctrl/Cmd + G'))?.label).toMatch(/next/i)
+  expect(search.find(x => x.keys.includes('F3'))?.label).toMatch(/next/i)
+})
+
 test('slash focuses search or clicks the Practice search button', () => {
   expect(keyboardShortcut({ key: '/' })).toBe('search')
   expect(keyboardShortcut({ key: '/' }, { practice: true })).toBe('practice-search')
