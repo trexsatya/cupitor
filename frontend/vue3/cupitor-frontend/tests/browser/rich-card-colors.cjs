@@ -113,17 +113,17 @@ const fs = require('node:fs')
           });
           return editor.getData();
         };
-        const single = paste('one\\ntwo\\nthree');
-        const blank = paste('one\\n\\nthree');
-        const windows = paste('one\\r\\ntwo');
+        const single = paste('one\ntwo\nthree');
+        const blank = paste('one\n\nthree');
+        const windows = paste('one\r\ntwo');
         const inline = paste('one');
         return { single, blank, windows, inline };
       });
       assert.equal((linePastes.single.match(/<p>/g) || []).length, 1,
         'a single newline should not create another paragraph');
-      assert.match(linePastes.single, /one<br\\s*\\/?>(?:\\s*)two<br\\s*\\/?>(?:\\s*)three/);
-      assert.match(linePastes.blank, /one<br\\s*\\/?>(?:\\s*)<br\\s*\\/?>(?:\\s*)three/);
-      assert.match(linePastes.windows, /one<br\\s*\\/?>(?:\\s*)two/);
+      assert.match(linePastes.single, /one<br[^>]*>\s*two<br[^>]*>\s*three/);
+      assert.match(linePastes.blank, /one<br[^>]*>\s*<br[^>]*>\s*three/);
+      assert.match(linePastes.windows, /one<br[^>]*>\s*two/);
       assert.match(linePastes.inline, /Before one/);
       await page.close()
       console.log(`Rich card formatting colors and paste toggle: ${mobile ? 'mobile' : 'desktop'} passed`)
