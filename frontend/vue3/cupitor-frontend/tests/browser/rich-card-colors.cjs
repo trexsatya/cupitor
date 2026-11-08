@@ -103,9 +103,11 @@ const fs = require('node:fs')
         const keep = document.querySelector('#preservePasteFormatting');
         keep.checked = false;
         const paste = text => {
-          editor.setData('<p>Before </p>');
+          // Paste between words: CKEditor trims trailing ordinary spaces
+          // when parsing setData(), which makes an end-of-block space test invalid.
+          editor.setData('<p>Before after</p>');
           const p = editor.model.document.getRoot().getChild(0);
-          editor.model.change(w => w.setSelection(editor.model.createPositionAt(p, 'end')));
+          editor.model.change(w => w.setSelection(editor.model.createPositionAt(p, 7)));
           pipeline.fire('inputTransformation', {
             content: editor.data.processor.toView('<p>ignored clipboard HTML</p>'),
             dataTransfer: { getData: type => type === 'text/plain' ? text : '' },
@@ -124,7 +126,9 @@ const fs = require('node:fs')
       assert.match(linePastes.single, /one<br[^>]*>\s*two<br[^>]*>\s*three/);
       assert.match(linePastes.blank, /one<br[^>]*>\s*<br[^>]*>\s*three/);
       assert.match(linePastes.windows, /one<br[^>]*>\s*two/);
-      assert.match(linePastes.inline, /Before one/);
+      assert.match(linePastes.inline, /Before oneafter/);
+      assert.equal((linePastes.inline.match(/<p>/g) || []).length, 1,
+        'an inline paste must stay in the existing paragraph');
       await page.close()
       console.log(`Rich card formatting colors and paste toggle: ${mobile ? 'mobile' : 'desktop'} passed`)
     }
