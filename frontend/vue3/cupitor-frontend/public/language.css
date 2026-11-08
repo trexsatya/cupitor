@@ -5169,6 +5169,25 @@ body.rec-playing #translationSlot, body.practice-mode #translationSlot { visibil
 .manual-hit:hover { background: #eceff8; }
 .manual-hit-playlist { font-size: 0.78em; color: #777; margin-right: 4px; }
 
+/* Card content is reading text, not a centered control. Keep both study
+   views left-aligned on desktop and mobile, including manual/HTML cards and
+   subtitle context. Intentionally formatted rich-text paragraphs can still
+   supply their own alignment; this only fixes the inherited default. */
+#practiceMode .practice-face,
+#practiceMode .practice-front,
+#practiceMode .practice-back,
+#practiceMode .practice-back-target,
+#practiceMode .practice-manual-text,
+#recPlayingSubs,
+#recPlayingSubs .rec-ps-row,
+#recPlayingSubs .rec-ps-main,
+#recPlayingSubs .rec-ps-sec,
+#recPlayingSubs .card-html,
+#recPlayingAudio .rec-pa-face,
+#practiceAudio .rec-pa-face {
+    text-align: left;
+}
+
 /* A manual card written as HTML (card-html.js): its own markup lays it out,
    so the pre-wrap that keeps a plain card's line breaks is turned off. */
 #practiceMode .practice-manual-text.card-html,
