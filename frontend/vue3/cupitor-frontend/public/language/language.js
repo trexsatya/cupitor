@@ -20946,7 +20946,7 @@ async function playRecording(opts) {
         const clips = playback.recordings ? _cardClipsInOrder(it) : []
         // Text-only manual cards are otherwise skipped in Player. When the
         // user opts in, speak their two faces in the chosen session order.
-        if (_canSpeakSilentCard(it)) {
+        if (typeof _canSpeakSilentCard === 'function' && _canSpeakSilentCard(it)) {
           clips.push(...ttsFaceSequence(_cardFacesInOrder(it), { enabled: true }))
         }
         // Legacy cards kept their single recording in mediaUrl.
