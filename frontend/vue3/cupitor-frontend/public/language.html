@@ -48,6 +48,7 @@
       });
     </script>
     <script type="module" src="/language/language.js"></script>
+    <script type="module" src="/language/page-find.js"></script>
     <script type="module" src="/language/word-maps-entry.js"></script>
     <link href="/language.css" rel="stylesheet"/>
     <link rel="stylesheet" href="/vendor/fontawesome-all.css">
@@ -256,9 +257,11 @@
                     <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
                     <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
                 </button>
-                <button id="toggleMediaRelatedContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle player" data-toggle-state="collapsed" data-view-id="mediaRelatedContainer">
-                    <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
-                    <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
+                <button type="button" id="cupPageFindToggle" class="lang-tool-btn lang-tool-btn--icon" title="Find on page (Ctrl/Cmd+F)" aria-label="Find on page" aria-controls="cupPageFindBar" aria-expanded="false">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" role="presentation" aria-hidden="true">
+                        <circle cx="10.8" cy="10.8" r="6.7"></circle>
+                        <path d="m16 16 5 5"></path>
+                    </svg>
                 </button>
                 <button id="toggleMediaContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle video" data-toggle-state="collapsed" data-view-id="mediaContainer">
                     <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
@@ -271,6 +274,19 @@
                         <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708"/>
                     </svg>
                 </button>
+            </div>
+
+            <!-- In-page text Find, separate from the SRT/library search below.
+                 Fixed to the viewport so it works in the Android WebView too. -->
+            <div id="cupPageFindBar" class="cup-page-find" role="search" aria-label="Find on page" hidden>
+                <label class="cup-page-find-field" for="cupPageFindInput">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.7"/><path d="m16 16 5 5"/></svg>
+                    <input id="cupPageFindInput" type="search" placeholder="Find on page" aria-label="Find on page" autocomplete="off" spellcheck="false">
+                </label>
+                <span id="cupPageFindCount" class="cup-page-find-count" aria-live="polite"></span>
+                <button type="button" id="cupPageFindPrevious" class="cup-page-find-action" title="Previous match (Shift+Enter)" aria-label="Previous match" disabled><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 15 6-6 6 6"/></svg></button>
+                <button type="button" id="cupPageFindNext" class="cup-page-find-action" title="Next match (Enter)" aria-label="Next match" disabled><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+                <button type="button" id="cupPageFindClose" class="cup-page-find-action" title="Close Find (Esc)" aria-label="Close Find"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
             </div>
 
             <div id="searchSourceChips" class="search-source-chips" role="group" aria-label="Search sources">
