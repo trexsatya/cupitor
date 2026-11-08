@@ -114,7 +114,7 @@ async function check(browser, mobile) {
     await page.waitForFunction(() => !document.body.classList.contains('rec-playing'))
     await assertPreserved('minimizing Player')
 
-    await page.evaluate(() => document.getElementById('recPlayingRestorePill').click())
+    await page.evaluate(() => window.restorePlayingRecording({ resume: false }))
     await page.waitForFunction(() => document.body.classList.contains('rec-playing'))
     await assertPreserved('restoring Player')
 
