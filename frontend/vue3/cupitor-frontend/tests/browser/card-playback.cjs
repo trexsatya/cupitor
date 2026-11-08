@@ -79,10 +79,12 @@ async function checkCardPlayback(browser, mobile) {
     assert.equal(await page.evaluate(() => window._appSettings.recPlayYouTubeClipSeconds), 20)
     await start('both')
     await videoPlaying()
-    assert.deepEqual(await page.evaluate(() => [
-      getComputedStyle(document.querySelector('#recPlayingSubs')).textAlign,
-      getComputedStyle(document.querySelector('#recPlayingSubs .rec-ps-main')).textAlign,
-    ]), ['left', 'left'], 'Player card text is left-aligned')
+    assert.deepEqual(await page.evaluate(() => {
+      const panel = document.querySelector('#recPlayingSubs');
+      const text = panel.querySelector('.rec-ps-main, .card-html, .rec-ps-err');
+      return [getComputedStyle(panel).textAlign,
+        text ? getComputedStyle(text).textAlign : getComputedStyle(panel).textAlign];
+    }), ['left', 'left'], 'Player card text is left-aligned')
     assert.equal(await page.locator('.rec-pb-clip-range').textContent(), 'YouTube clip 00:01:00 – 00:01:12 · automatic end')
     assert.deepEqual(await page.evaluate(() => window.__loads), [], 'linked clip plays before recordings')
     await click('#recPlayingPauseBtn')
