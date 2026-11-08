@@ -270,9 +270,26 @@ async function checkViewSwitching(browser) {
       // On desktop, double-clicking the displayed word should select it for copying.
       if (!mobile) {
         const manualText = page.locator('#practiceMode .practice-front-face .practice-manual-text').first()
-        await manualText.dblclick()
+        // The card spans the face width; its center can be empty when text
+        // is left-aligned. Target the rendered word rather than the container.
+        const wordPoint = await manualText.evaluate(el => {
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+          let node
+          while ((node = walker.nextNode())) {
+            const match = /\S+/.exec(node.textContent)
+            if (!match) continue
+            const range = document.createRange()
+            range.setStart(node, match.index)
+            range.setEnd(node, match.index + match[0].length)
+            const rect = range.getBoundingClientRect()
+            if (rect.width && rect.height) return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2,
+              word: match[0] }
+          }
+          throw new Error('Manual card has no rendered word to double-click')
+        })
+        await page.mouse.dblclick(wordPoint.x, wordPoint.y)
         const selected = await page.evaluate(() => String(window.getSelection() || '').trim())
-        assert(selected.length > 0, 'desktop double-click selects manual-card text')
+        assert.equal(selected, wordPoint.word, 'desktop double-click selects the displayed manual-card word')
         assert.equal(await page.evaluate(() => window._practiceFlipped), false,
           'selecting a word must not flip the Practice card')
         await page.evaluate(() => window.getSelection()?.removeAllRanges())
