@@ -29,6 +29,8 @@ import { installRichCardShortcuts } from './rich-card-shortcuts.js';
 import { sizeRichCardEditingArea } from './rich-card-layout.js';
 import { installRichCardFormatting } from './rich-card-formatting.js';
 import { installRichCardPasteControl } from './rich-card-paste.js';
+import { installMobileRichToolbar } from './rich-card-mobile-toolbar.js';
+import { cardCanUseTts, cardTtsText, ttsFaceSequence, speakTts } from './card-tts.js';
 import { createPracticeVideoCues } from './practice-video.js';
 import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video.js';
 import { createAppLifecycleClock } from './app-lifecycle.js';
@@ -2559,6 +2561,8 @@ window._appSettings = {
   recPlayGapSeconds: 30,
   recPlayYouTubeClipSeconds: 20,
   recManualPlaybackMode: 'both',
+  // Opt-in speech only when a manual card has no playable saved audio/link.
+  recPlayTtsFallback: false,
   // Background music hushed by hand from its panel. Kept with the settings
   // rather than in a variable that dies with the page: someone who silenced
   // the music did so for a reason, and having it start again on its own after
@@ -2960,6 +2964,7 @@ function loadAppSettings() {
   $('#recPlayGapSeconds').val(_interItemGapSeconds())
   $('#recPlayYouTubeClipSeconds').val(clipFallbackSeconds(window._appSettings.recPlayYouTubeClipSeconds))
   $('#recManualPlaybackMode').val(_manualPlaybackPreference())
+  $('#recPlayTtsFallback').prop('checked', !!window._appSettings.recPlayTtsFallback)
   // Blank input = "no override", so an unset source→target gap must render
   // empty rather than as a 0 the user never chose.
   const _stGap = _srcTgtGapSeconds()
@@ -4075,6 +4080,15 @@ $('document').ready(e => {
     saveAppSettings()
   })
   $('#recManualPlaybackMode').on('change', e => _setManualPlaybackPreference($(e.target).val()))
+  $('#recPlayTtsFallback').on('change', function () {
+    window._appSettings.recPlayTtsFallback = this.checked
+    saveAppSettings()
+    if (window._practiceActive) _renderPracticeCard()
+    if (window._playingRecording && !window._practiceActive) {
+      window._recNavGotoIndex = window._recPlayIndex
+      _interruptRecordingPlayback()
+    }
+  })
 
   // Leaving either box empty or half-typed ("-") is rejected by the setters,
   // which would otherwise strand the field showing something the setting
@@ -15458,6 +15472,16 @@ function _cardFacesInOrder(it) {
 function _cardClipsInOrder(it) { return _cardFacesInOrder(it).filter(f => f.url) }
 function _cardHasAudio(it) { return _cardAudioUrls(it).length > 0 }
 
+function _canSpeakSilentCard(it) {
+  if (!_isManualItem(it)) return false
+  const media = _parseMediaUrl(it && it.mediaUrl)
+  return cardCanUseTts(it, {
+    enabled: window._appSettings?.recPlayTtsFallback === true,
+    hasLinked: !!spotifyClips(it).length || _cardHasVideoLink(it) || media?.kind === 'audio',
+    canSpeak: !!(window.speechSynthesis?.speak && typeof window.SpeechSynthesisUtterance === 'function'),
+  })
+}
+
 // Whether a manual card has anything the player can actually sound.
 //
 // Carrying a link is not the same as having something to play. A card whose
@@ -15471,7 +15495,7 @@ function _cardHasPlayableMedia(it) {
   if (_cardHasAudio(it)) return true
   if (_cardHasVideoLink(it)) return true
   const media = _parseMediaUrl(it && it.mediaUrl)
-  return !!media && media.kind === 'audio'
+  return (!!media && media.kind === 'audio') || _canSpeakSilentCard(it)
 }
 
 // Whether the card has a video for the embedded player to show. The stored
@@ -15857,6 +15881,7 @@ async function _openRichCardEditor($box, label) {
     // Each editor opens with this unchecked. The clipboard hook updates
     // immediately when the user toggles it without recreating the editor.
     installRichCardPasteControl(editor, $d.find('.rce-keep-paste-format')[0])
+    installMobileRichToolbar(editor, $d[0], { mobile: !desktopEditor })
     // CKEditor has undo/redo commands; bind native desktop keys explicitly
     // to the active rich card, without affecting the surrounding manual form.
     $d.find('.ck-editor__editable').on('keydown.richCardUndo', ev => {
@@ -20432,6 +20457,34 @@ async function _showPracticeAudioPanel(it) {
   el._practiceCard = it
 }
 
+// Speak one face of an otherwise silent manual card. Navigation, Stop and
+// headset Pause share the existing _recTTS state, so no old card keeps
+// speaking over the next one.
+async function _playSilentCardTtsAndWait(face, itemToken) {
+  if (!face?.tts) return
+  const current = () => window._playingRecording && !window._practiceActive &&
+    window._recPlayItemToken === itemToken && !window._recNavRequest &&
+    !Number.isInteger(window._recNavGotoIndex)
+  if (!current()) return
+  const lang = face.key === 'target' ? 'en-US' : speechLocale(_ttsLangCode(), 'en-US')
+  let utterance = null
+  _setRecPlayPhase('clip')
+  const task = speakTts(face.text, {
+    synth: window.speechSynthesis, Utterance: window.SpeechSynthesisUtterance,
+    lang, rate: _preferredRecordingAudioRate(), isCurrent: current,
+    onBegin(u) {
+      utterance = u
+      window._recTTS = { kind: 'speech', utterance: u,
+        cancel: () => { try { window.speechSynthesis.cancel() } catch (_) {} } }
+    },
+    onFinish() {
+      if (window._recTTS?.utterance === utterance) window._recTTS = null
+    },
+  })
+  if (window._recTTS?.utterance === utterance) window._recTTS.cancel = task.cancel
+  await task.promise
+}
+
 async function _playManualAudioAndWait(url, faceLabel) {
   const itemToken = window._recPlayItemToken
   let dataUrl = null
@@ -20891,6 +20944,11 @@ async function playRecording(opts) {
       // In Both mode these follow the linked clip; Recorded audio skips it.
       {
         const clips = playback.recordings ? _cardClipsInOrder(it) : []
+        // Text-only manual cards are otherwise skipped in Player. When the
+        // user opts in, speak their two faces in the chosen session order.
+        if (_canSpeakSilentCard(it)) {
+          clips.push(...ttsFaceSequence(_cardFacesInOrder(it), { enabled: true }))
+        }
         // Legacy cards kept their single recording in mediaUrl.
         if (playback.recordings && !clips.length && (it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)) && it.mediaUrl) {
           clips.push({ key: 'source', label: 'Source', icon: 'ᔆ', text: (it && it.source) || '', url: it.mediaUrl })
@@ -20913,7 +20971,8 @@ async function playRecording(opts) {
           }
           // Label the player so it's obvious which face is sounding, since
           // both faces of one card play back to back with no visual break.
-          await _playManualAudioAndWait(clips[ci].url, clips.length > 1 ? clips[ci].label : '')
+          if (clips[ci].tts) await _playSilentCardTtsAndWait(clips[ci], itemToken)
+          else await _playManualAudioAndWait(clips[ci].url, clips.length > 1 ? clips[ci].label : '')
           // Stop / prev / next during a clip must not start the next one.
           if (!sessionPlaying() || navPending()) break
         }
@@ -21715,6 +21774,42 @@ function stopPlayingRecording() {
 }
 
 // ─── Practice (flashcard) mode ───────────────────────────────────────────
+// Practice never auto-speaks on reveal: Play reads the face currently on
+// screen, and pressing Play again stops it. A card change or minimize cancels.
+let _practiceTts = null
+function _stopPracticeTts() {
+  const active = _practiceTts
+  _practiceTts = null
+  if (active) { try { active.cancel() } catch (_) {} }
+  $('#practiceMode .practice-play').attr('aria-pressed', 'false')
+}
+function _togglePracticeTts(it) {
+  if (_practiceTts) { _stopPracticeTts(); return }
+  if (!_canSpeakSilentCard(it)) return
+  const front = window._practiceFrontIsSource !== false ? 'source' : 'target'
+  const key = window._practiceFlipped ? (front === 'source' ? 'target' : 'source') : front
+  const text = cardTtsText(it[key])
+  if (!text) return
+  const idx = window._practiceIdx
+  const token = window._practiceClipToken
+  const task = speakTts(text, {
+    synth: window.speechSynthesis, Utterance: window.SpeechSynthesisUtterance,
+    lang: key === 'target' ? 'en-US' : speechLocale(_ttsLangCode(), 'en-US'),
+    rate: _practiceVideoRate(),
+    isCurrent: () => window._practiceActive && !window._practiceMinimized &&
+      window._practiceIdx === idx && window._practiceClipToken === token &&
+      window._practiceCards?.[idx] === it,
+  })
+  _practiceTts = task
+  $('#practiceMode .practice-play').attr('aria-pressed', 'true')
+  task.promise.finally(() => {
+    if (_practiceTts === task) {
+      _practiceTts = null
+      $('#practiceMode .practice-play').attr('aria-pressed', 'false')
+    }
+  })
+}
+
 const _practiceVideoCues = createPracticeVideoCues({
   getPlayer: () => window.ytPlayer,
   isReady: () => window.ytPlayerReady && typeof window.ytPlayer?.cueVideoById === 'function',
@@ -21723,6 +21818,7 @@ const _practiceVideoCues = createPracticeVideoCues({
 })
 let _practiceRenderToken = 0
 function _newPracticeVideoRequest({ mute = false, keepSpotify = false } = {}) {
+  _stopPracticeTts()
   if (!keepSpotify) spotifyPlayer.stop()
   window._manualCueToken = (window._manualCueToken || 0) + 1
   if (!window.ytPlayerReady) window._ytReadyAutoplaySuppressed = true
@@ -22189,6 +22285,7 @@ function _searchCurrentPracticeWord() {
 }
 
 function minimizePracticeMode() {
+  _stopPracticeTts()
   // Hiding an <audio> does not silence it, and minimising hides the panel by
   // dropping the body class — the same trap closing the view has to avoid.
   try { _stopPracticeAudio() } catch (_) {}
@@ -22616,6 +22713,7 @@ async function playPracticeClip() {
   // The visible Play button uses this entry point. Dispatch before creating
   // a YouTube request, which intentionally stops/hides the Spotify session.
   if (spotifyClips(it).length) return _togglePracticePlayback()
+  if (_canSpeakSilentCard(it)) return _togglePracticeTts(it)
   const videoRequest = _newPracticeVideoRequest()
   // Each clip gets a token so a stale stop-watcher (or a card switch mid-load)
   // can't pause a later clip.
@@ -23453,6 +23551,12 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   // (video) card renders by the restore-block at the top of _renderPracticeCard.
   $p.find('.practice-ctx-ctrl').hide()
   $p.find('.practice-play, .practice-speed').hide()
+  // A speech fallback is a manual-card Play action; recordings keep their
+  // existing audio controls, and linked clips still use their own player.
+  $p.find('.practice-play').toggle(_canSpeakSilentCard(it))
+    .attr('title', 'Speak card text (TTS)')
+    .attr('aria-label', 'Speak card text')
+    .attr('aria-pressed', 'false')
   // Manual cards have no SRT source to swap → no replace option.
   $p.find('.practice-replace').hide()
   // The other user's cards cannot be changed (the handlers refuse too).
@@ -23710,6 +23814,7 @@ function _practiceSpotifyOptions(it) {
 function _togglePracticePlayback() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
+  if (_canSpeakSilentCard(it)) return _togglePracticeTts(it)
   if (spotifyClips(it).length) {
     const st = _pracRec
     if (st?.phase === 'recording') return
