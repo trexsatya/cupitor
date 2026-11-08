@@ -2328,11 +2328,11 @@ body.rec-paused #recStartBtn { /* hidden via JS toggle, keep CSS no-op */ }
     border: 1px solid #b71c1c;
 }
 
-/* ── Play-recording mode: declutter the page so the user focuses on the
-   playing YouTube clip. We deliberately don't drive playback via the live
-   #result DOM (search results aren't deterministic), so the rules below
-   hide the search UI / vocab panel / result list entirely. The recorded
-   item's context is shown in #recPlayingBanner instead. */
+/* ── Study views cover the page without changing the page's layout.
+   Keep the search UI, vocabulary and results in flow while Player/Practice
+   is open: display:none collapses the document and resets the user's window
+   position (mobile) and #result.scrollTop (desktop). The opaque study layer
+   covers them, while visibility:hidden disables interaction. */
 body.rec-playing,
 body.practice-mode {
     background: #0a0a0a !important;
@@ -2374,7 +2374,8 @@ body.practice-mode #result,
 body.practice-mode #translationPanel,
 body.practice-mode #mediaRelatedContainer,
 body.practice-mode #search-pagination {
-    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
 }
 
 /* Pin the YouTube player to a fixed slot at the top of the viewport.
@@ -4852,7 +4853,8 @@ body.rec-playing #scrollButton, body.practice-mode #scrollButton { display: none
 #translationSlot .xl-summary { height: 38px; box-sizing: border-box; overflow: hidden; white-space: nowrap; }
 #translationSlot .xl-word { overflow: hidden; text-overflow: ellipsis; }
 #translationSlot .xl-body { max-height: min(40vh, 260px); overflow-y: auto; border-top: 1px solid #cfd8e3; box-shadow: 0 5px 8px #0002; }
-body.rec-playing #translationSlot, body.practice-mode #translationSlot { display: none; }
+/* Preserve the reserved translation row so the document does not jump. */
+body.rec-playing #translationSlot, body.practice-mode #translationSlot { visibility: hidden; pointer-events: none; }
 .channel-filter-list { max-height: 45vh; overflow: auto; margin-top: 10px; }
 .channel-filter-list label { display: block; padding: 5px; }
 .cache-manager-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid #ddd; }
