@@ -6,8 +6,10 @@ export function plainTextPasteHtml(text) {
   const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
   // A single-line paste should be inline, not split the current paragraph.
   if (lines.length === 1) return escape(lines[0]);
-  // Retain line breaks and empty lines, without accepting any source HTML.
-  return lines.map(line => '<p>' + (line ? escape(line) : '<br>') + '</p>').join('');
+  // Plain-text newlines are soft breaks, not paragraph boundaries. Creating
+  // one <p> per line introduces paragraph spacing on every copy/paste cycle.
+  // Keep genuine empty lines as consecutive <br> elements instead.
+  return '<p>' + lines.map(escape).join('<br>') + '</p>';
 }
 
 export function installRichCardPasteControl(editor, checkbox) {
