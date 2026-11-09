@@ -134,6 +134,10 @@ async function run(browser, mobile, legacy) {
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === 'No matches')
     await input.fill('blueberry')
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 1')
+    if (screenshotDir && !legacy) {
+      await page.screenshot({ path: path.join(screenshotDir,
+        mobile ? 'cupitor-find-practice-mobile.png' : 'cupitor-find-practice-desktop.png') })
+    }
     await page.evaluate(() => {
       document.querySelector('#practiceMode .practice-front').textContent = 'Next item with pear'
     })
@@ -155,6 +159,10 @@ async function run(browser, mobile, legacy) {
     await page.locator('#recPlayingBanner .rec-pb-find-btn').click()
     await input.fill('apricot')
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 1')
+    if (screenshotDir && !legacy) {
+      await page.screenshot({ path: path.join(screenshotDir,
+        mobile ? 'cupitor-find-player-mobile.png' : 'cupitor-find-player-desktop.png') })
+    }
     assert.equal((await status()).focused, true, 'Player toolbar opens the same Find bar')
     // The Find panel is accessible above an open dialog, rather than trapped
     // below its high-z-index backdrop. Closing Find leaves the dialog intact.
