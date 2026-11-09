@@ -96,6 +96,39 @@ const fs = require('node:fs')
         'default paste mode must remove source bold formatting');
       assert.match(pasted.on, /<(?:strong|b)(?:\s|>)/i,
         'enabling paste formatting must preserve source bold text');
+      // A newline is a soft break, not a new paragraph. Repeated paste
+      // cycles must not increase the number of paragraphs or blank lines.
+      const linePastes = await page.evaluate(() => {
+        const pipeline = editor.plugins.get('ClipboardPipeline');
+        const keep = document.querySelector('#preservePasteFormatting');
+        keep.checked = false;
+        const paste = text => {
+          // Paste between words: CKEditor trims trailing ordinary spaces
+          // when parsing setData(), which makes an end-of-block space test invalid.
+          editor.setData('<p>Before after</p>');
+          const p = editor.model.document.getRoot().getChild(0);
+          editor.model.change(w => w.setSelection(editor.model.createPositionAt(p, 7)));
+          pipeline.fire('inputTransformation', {
+            content: editor.data.processor.toView('<p>ignored clipboard HTML</p>'),
+            dataTransfer: { getData: type => type === 'text/plain' ? text : '' },
+            method: 'paste',
+          });
+          return editor.getData();
+        };
+        const single = paste('one\ntwo\nthree');
+        const blank = paste('one\n\nthree');
+        const windows = paste('one\r\ntwo');
+        const inline = paste('one');
+        return { single, blank, windows, inline };
+      });
+      assert.equal((linePastes.single.match(/<p>/g) || []).length, 1,
+        'a single newline should not create another paragraph');
+      assert.match(linePastes.single, /one<br[^>]*>\s*two<br[^>]*>\s*three/);
+      assert.match(linePastes.blank, /one<br[^>]*>\s*<br[^>]*>\s*three/);
+      assert.match(linePastes.windows, /one<br[^>]*>\s*two/);
+      assert.match(linePastes.inline, /Before oneafter/);
+      assert.equal((linePastes.inline.match(/<p>/g) || []).length, 1,
+        'an inline paste must stay in the existing paragraph');
       await page.close()
       console.log(`Rich card formatting colors and paste toggle: ${mobile ? 'mobile' : 'desktop'} passed`)
     }
