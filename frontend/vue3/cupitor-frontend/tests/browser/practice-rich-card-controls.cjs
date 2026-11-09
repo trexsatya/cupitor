@@ -1,6 +1,7 @@
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
 const path = require('node:path')
+const fs = require('node:fs')
 
 ;(async () => {
   const browser = await chromium.launch({
@@ -84,9 +85,11 @@ const path = require('node:path')
         const url = new URL(route.request().url())
         if (url.pathname === '/')
           return route.fulfill({ contentType: 'text/html', body: html })
-        return route.fulfill({
-          path: path.join(__dirname, '../../public', url.pathname),
-        })
+        const filename = path.join(__dirname, '../../public', url.pathname)
+        // The themed jQuery UI CSS refers to optional legacy icon sprites
+        // that are not shipped. Missing decoration should not abort the run.
+        if (!fs.existsSync(filename)) return route.fulfill({ status: 404, body: '' })
+        return route.fulfill({ path: filename })
       })
       await page.goto('http://editor.test/')
       await page.waitForFunction(() => window.ready)
