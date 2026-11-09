@@ -76,7 +76,19 @@ export function installStudyChrome() {
   document.addEventListener('pointerdown', event => {
     if (!view || event.button !== 0 || event.target.closest('.ui-dialog')) return;
     keyboard = false;
-    const persistent = !!event.target.closest(persistentControls);
+    // Desktop users must be able to select/copy a manual card even after
+    // the transport controls have faded. Consuming the first mouse click as
+    // a "wake tap" also suppresses the following dblclick selection.
+    // Preserve the original wake-tap behavior for touch and non-text areas.
+    const selectingManualText = event.pointerType === 'mouse' &&
+      !!event.target.closest('#practiceMode .practice-manual-text');
+    if (selectingManualText) {
+      ignoreDoubleUntil = 0;
+      swallow = null;
+      clearTimeout(releaseTimer);
+      coverVideo();
+    }
+    const persistent = selectingManualText || !!event.target.closest(persistentControls);
     pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, hidden: !chrome.isVisible() && !persistent, persistent, moved: false, view };
     if (!pointer.hidden && !persistent) chrome.show();
   }, true);
