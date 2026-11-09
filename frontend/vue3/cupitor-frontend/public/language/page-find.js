@@ -61,11 +61,10 @@ export function initPageFind(doc = document) {
     const el = node.parentElement;
     if (!el || !el.isConnected) return false;
     // This is a page-wide Find, including visible dialog, card and button
-    // labels. Never search the Find bar itself. Native input/textarea values
-    // are not text nodes, and legacy highlight <mark>s must not edit a live
-    // rich editor's document; CSS Highlights can safely highlight it.
-    if (el.closest('#cupPageFindBar,script,style,noscript,template,textarea,input,select,option,svg,[hidden],[inert],[aria-hidden="true"]')) return false;
-    if (!supportsHighlights && el.closest('[contenteditable],.ck-editor__editable')) return false;
+    // labels, but never the Find bar or fields being actively edited. Input
+    // values are not DOM text nodes and wrapping rich-editable text would
+    // break undo/selection on older Android WebViews.
+    if (el.closest('#cupPageFindBar,script,style,noscript,template,textarea,input,select,option,svg,[hidden],[inert],[aria-hidden="true"],[contenteditable],.ck-editor__editable')) return false;
     // Layout reads are expensive on very large result lists. Perform them
     // only for text nodes already containing the requested word.
     for (let parent = el; parent && parent !== doc.documentElement; parent = parent.parentElement) {
