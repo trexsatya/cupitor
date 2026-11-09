@@ -315,7 +315,7 @@ async function checkStudyChrome(browser) {
         await page.evaluate(() => window.openPracticeMode({ queue: [
           { id: 'selectable-manual', manual: true, source: 'Hej', target: 'Hello' }
         ], single: true }))
-        const manualText = page.locator('#practiceMode .practice-front-face .practice-manual-text')
+        const manualText = page.locator('#practiceMode .practice-front-face .practice-front .practice-manual-text').first()
         await manualText.waitFor({ state: 'visible' })
         await hide()
         await page.evaluate(() => getSelection()?.removeAllRanges())
