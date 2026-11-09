@@ -273,9 +273,20 @@ export function initPageFind(doc = document) {
   // intentionally hidden. The buttons use this one shared Find bar/state.
   doc.addEventListener('click', event => {
     const target = event.target.nodeType === 1 ? event.target : event.target.parentElement;
-    if (!target?.closest('.cup-page-find-study-trigger')) return;
+    const trigger = target?.closest('.cup-page-find-study-trigger');
+    if (!trigger) return;
     event.preventDefault();
     event.stopPropagation();
+    // Close the menu before scanning so the newly opened Find bar searches
+    // the visible card, not the menu covering it.
+    if (trigger.closest('.practice-settings-panel')) {
+      doc.querySelector('#practiceMode .practice-settings')?.click();
+    } else if (trigger.closest('.rec-pb-details')) {
+      const banner = trigger.closest('#recPlayingBanner');
+      if (banner?.classList.contains('rec-pb-expanded')) {
+        banner.querySelector('.rec-pb-info-btn')?.click();
+      }
+    }
     open();
   });
   closeButton.addEventListener('click', close);
