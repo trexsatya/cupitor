@@ -45,7 +45,7 @@ function fixture() {
     '<button type="button" class="practice-search" aria-label="Search this word">🔎</button>',
     '</div><div class="practice-settings-panel" style="display:none">',
     '<button type="button" class="cup-page-find-study-trigger practice-find" aria-label="Find on page">Find on page</button>',
-    '</div><div class="practice-card"><div class="practice-flipper">
+    '</div><div class="practice-card"><div class="practice-flipper">',
     '<div class="practice-face practice-front-face"><div class="practice-front">blueberry current card</div></div>',
     '</div></div></div>',
     '<div id="recPlayingBanner" style="display:none"><div class="rec-pb-top">',
