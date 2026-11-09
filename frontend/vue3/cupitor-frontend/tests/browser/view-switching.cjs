@@ -272,7 +272,16 @@ async function checkViewSwitching(browser) {
         const manualText = page.locator('#practiceMode .practice-front-face .practice-manual-text').first()
         // The card spans the face width; its center can be empty when text
         // is left-aligned. Target the rendered word rather than the container.
-        const wordPoint = await manualText.evaluate(el => {
+        // Switching Player → Practice can start the flipper's transform
+        // transition. Measuring a word while it is moving leaves the pointer
+        // aimed at its old coordinates, causing an intermittent empty native
+        // selection on busy CI runners.
+        await manualText.evaluate(async el => {
+          const flipper = el.closest('.practice-flipper')
+          const animations = flipper?.getAnimations({ subtree: true }) || []
+          await Promise.allSettled(animations.filter(a => a.playState === 'running').map(a => a.finished))
+        })
+        const locateWord = () => manualText.evaluate(el => {
           const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
           let node
           while ((node = walker.nextNode())) {
@@ -281,15 +290,28 @@ async function checkViewSwitching(browser) {
             const range = document.createRange()
             range.setStart(node, match.index)
             range.setEnd(node, match.index + match[0].length)
-            const rect = range.getBoundingClientRect()
-            if (rect.width && rect.height) return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2,
+            const rect = Array.from(range.getClientRects()).find(r => r.width && r.height)
+            if (rect) return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2,
               word: match[0] }
           }
           throw new Error('Manual card has no rendered word to double-click')
         })
-        await page.mouse.dblclick(wordPoint.x, wordPoint.y)
-        const selected = await page.evaluate(() => String(window.getSelection() || '').trim())
-        assert.equal(selected, wordPoint.word, 'desktop double-click selects the displayed manual-card word')
+        let selected = ''
+        let wordPoint
+        const attempts = []
+        for (let attempt = 0; attempt < 2; attempt++) {
+          // Recompute the text position on each attempt. A responsive reflow
+          // or delayed card animation must not make the second click stale.
+          wordPoint = await locateWord()
+          await page.mouse.dblclick(wordPoint.x, wordPoint.y, { delay: 80 })
+          selected = await page.evaluate(() => String(window.getSelection() || '').trim())
+          if (selected === wordPoint.word) break
+          attempts.push({ expected: wordPoint.word, selected, hit: await page.evaluate(({ x, y }) =>
+            document.elementFromPoint(x, y)?.className || '', wordPoint) })
+          await page.waitForTimeout(100)
+        }
+        assert.equal(selected, wordPoint.word,
+          'desktop double-click selects the displayed manual-card word; attempts=' + JSON.stringify(attempts))
         assert.equal(await page.evaluate(() => window._practiceFlipped), false,
           'selecting a word must not flip the Practice card')
         await page.evaluate(() => window.getSelection()?.removeAllRanges())
