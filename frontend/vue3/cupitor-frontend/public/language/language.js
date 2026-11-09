@@ -27,6 +27,7 @@ import { installRichCardUnderline } from './rich-card-underline.js';
 import { installRichCardParagraphTools } from './rich-card-paragraph.js';
 import { installRichCardShortcuts } from './rich-card-shortcuts.js';
 import { sizeRichCardEditingArea, observeRichCardEditingArea } from './rich-card-layout.js';
+import { arrangeRichCardDialog } from './rich-card-modal.js';
 import { installRichCardFormatting } from './rich-card-formatting.js';
 import { installRichCardPasteControl } from './rich-card-paste.js';
 import { installMobileRichToolbar } from './rich-card-mobile-toolbar.js';
@@ -15806,11 +15807,13 @@ async function _openRichCardEditor($box, label) {
   let editor = null
   let initial = null
   let stopLayoutObserver = () => {}
+  let restoreDialogStack = () => {}
   const done = () => {
     stopLayoutObserver()
     if (editor) { editor.destroy().catch(() => {}); editor = null }
     try { $d.dialog('destroy') } catch (_) {}
     $d.remove()
+    restoreDialogStack()
   }
   const windowWidth = $(window).width()
   const windowHeight = $(window).height()
@@ -15861,14 +15864,13 @@ async function _openRichCardEditor($box, label) {
     },
     close: done,
   })
-  // Over the card editor, which is lifted to 100020 to clear Practice and the
-  // player — at the usual dialog height this opened behind it. Its backdrop
-  // comes up with it, just under.
-  try {
-    $d.closest('.ui-dialog')[0].style.setProperty('z-index', '100030', 'important')
-    const ov = $d.dialog('instance').overlay
-    if (ov && ov[0]) ov[0].style.setProperty('z-index', '100029', 'important')
-  } catch (_) {}
+  // Practice dialogs are lifted almost to the maximum z-index. The fixed
+  // 100030 layer used here could place the rich editor *behind* the parent,
+  // trapping its Apply/Cancel/Close buttons. Coordinate the nested modal and
+  // restore the parent when this dialog closes, even on startup failure.
+  restoreDialogStack = arrangeRichCardDialog($d, $box, {
+    studyActive: _screenOverlayOpen(), studyZ: DIALOG_ABOVE_OVERLAY_Z,
+  })
   try {
     editor = await ClassicEditor.create($d.find('.rce-host')[0], {
       toolbar: ['heading', '|', 'bold', 'italic', 'link', 'uploadImage', 'bulletedList', 'numberedList',
