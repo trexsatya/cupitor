@@ -118,6 +118,9 @@ async function run(browser, mobile, legacy) {
       await page.screenshot({ path: path.join(screenshotDir,
         mobile ? 'cupitor-webapp-find-mobile.png' : 'cupitor-webapp-find-desktop.png') })
     }
+    await input.press('Escape')
+    assert.equal(await bar.isVisible(), false)
+    assert.equal((await status()).total, 0, 'closing clears matches')
     // Find belongs to the entire visible HTML document. The app hides its
     // main page toolbar/results when Practice or Player opens; each study
     // toolbar exposes the same Find bar and cards change without navigation.
@@ -147,21 +150,22 @@ async function run(browser, mobile, legacy) {
       document.querySelector('#recPlayingBanner').style.display = 'block'
       document.querySelector('#recPlayingSubs').style.display = 'block'
     })
-    await input.fill('apricot')
-    await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 1')
+    await input.press('Escape')
     assert.equal(await page.locator('#recPlayingBanner .rec-pb-find-btn').isVisible(), true)
     await page.locator('#recPlayingBanner .rec-pb-find-btn').click()
+    await input.fill('apricot')
+    await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 1')
     assert.equal((await status()).focused, true, 'Player toolbar opens the same Find bar')
     // The Find panel is accessible above an open dialog, rather than trapped
     // below its high-z-index backdrop. Closing Find leaves the dialog intact.
     await page.evaluate(() => {
       const dialog = document.querySelector('#dialogFixture')
-      dialog.style.cssText = 'display:block;position:fixed;top:80px;left:20px;' +
-        'width:320px;height:220px;background:white;z-index:2147483647'
+      dialog.style.cssText = 'display:block;position:fixed;inset:0;' +
+        'background:white;z-index:2147483647'
     })
     await input.fill('mandarin')
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 1')
-    await page.locator('#recPlayingBanner .rec-pb-find-btn').click()
+    await page.keyboard.press('Control+f')
     const reachable = await page.evaluate(() => {
       const bar = document.querySelector('#cupPageFindBar')
       const rect = bar.getBoundingClientRect()
@@ -178,8 +182,6 @@ async function run(browser, mobile, legacy) {
     await page.locator('#cupPageFindToggle').click()
     await input.fill('färgsprakande')
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 3')
-    await input.press('Escape')
-
     await input.press('Escape')
     assert.equal(await bar.isVisible(), false)
     assert.equal((await status()).total, 0, 'closing clears matches')
