@@ -307,6 +307,39 @@ async function checkStudyChrome(browser) {
       }
       await page.locator('#recPlayingCloseBtn').click()
       await page.evaluate(() => window.__playerTask)
+      // A manual card is not an empty wake-up target: double-clicking its
+      // words should select them even while study controls are auto-hidden.
+      // This regressed in the built Player/Practice view-switching check when
+      // a wake tap swallowed the first click of a desktop double-click.
+      if (!mobile) {
+        await page.evaluate(() => window.openPracticeMode({ queue: [
+          { id: 'selectable-manual', manual: true, source: 'Hej', target: 'Hello' }
+        ], single: true }))
+        const manualText = page.locator('#practiceMode .practice-front-face .practice-front .practice-manual-text').first()
+        await manualText.waitFor({ state: 'visible' })
+        await hide()
+        await page.evaluate(() => getSelection()?.removeAllRanges())
+        const point = await manualText.evaluate(el => {
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+          let node
+          while ((node = walker.nextNode())) {
+            const match = /\S+/.exec(node.textContent)
+            if (!match) continue
+            const range = document.createRange()
+            range.setStart(node, match.index)
+            range.setEnd(node, match.index + match[0].length)
+            const r = range.getBoundingClientRect()
+            if (r.width && r.height) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+          }
+          throw new Error('No visible word in manual card')
+        })
+        await page.mouse.dblclick(point.x, point.y)
+        assert.equal(await page.evaluate(() => String(getSelection() || '').trim()), 'Hej',
+          'manual card words remain selectable while study controls are hidden')
+        assert.equal(await page.evaluate(() => window._practiceFlipped), false,
+          'selecting manual card text must not flip the card')
+        await page.locator('#practiceMode .practice-close').click()
+      }
       assert.equal(await page.locator('#studyControlsWakeSurface').isVisible(), false)
       assert.equal(await page.evaluate(() => document.body.classList.contains('study-controls-hidden')), false)
       assert.deepEqual(errors, [])

@@ -15731,7 +15731,7 @@ if ($.ui && $.ui.dialog && !$.ui.dialog.prototype._cupCkAllowed) {
   $.widget('ui.dialog', $.ui.dialog, {
     _cupCkAllowed: true,
     _allowInteraction(event) {
-      if ($(event.target).closest('.ck, .ck-body-wrapper').length) return true
+      if ($(event.target).closest('.ck, .ck-body-wrapper, #cupPageFindBar').length) return true
       return this._super(event)
     },
   })
@@ -18342,6 +18342,7 @@ function _renderPlayingBanner(it, idx, total) {
       </div>
       <div class="rec-pb-details">
         <button type="button" class="rec-pb-practice-btn" title="Practice this item" aria-label="Switch to Practice">${_studyControlIcon('practice', 'Practice')}</button>
+        <button type="button" class="cup-page-find-study-trigger rec-pb-find-btn" title="Find visible text on page (Ctrl/Cmd+F)" aria-label="Find on page" aria-controls="cupPageFindBar">Find on page</button>
         <div class="rec-pb-head"></div>
         <div class="rec-pb-meta"></div>
         <div class="rec-pb-times">
@@ -21947,6 +21948,9 @@ function openPracticeMode(opts) {
       </div>
       <div class="practice-settings-panel" style="display:none;">
         <button type="button" class="keyboard-shortcuts-btn">Keyboard shortcuts</button>
+        <div class="practice-settings-row">
+          <button type="button" class="cup-page-find-study-trigger practice-find" aria-label="Find on page" title="Find visible text on page (Ctrl/Cmd+F)" aria-controls="cupPageFindBar">Find on page</button>
+        </div>
         <label class="practice-settings-row">
           <input type="checkbox" class="practice-speakover-toggle">
           <span>Show speakover</span>

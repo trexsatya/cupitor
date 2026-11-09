@@ -22,8 +22,10 @@ export function initPageFind(doc = document) {
   let marks = [];
   let index = -1;
   let timer = null;
+  let refreshTimer = null;
   let priorFocus = null;
   let usingCssHighlights = false;
+  let observer = null;
 
   const supportsHighlights = !!(doc.defaultView?.CSS?.highlights &&
     typeof doc.defaultView.Highlight === 'function');
@@ -58,7 +60,11 @@ export function initPageFind(doc = document) {
   function visibleText(node) {
     const el = node.parentElement;
     if (!el || !el.isConnected) return false;
-    if (el.closest('#cupPageFindBar,script,style,noscript,template,textarea,input,select,option,button,svg,[hidden],[inert],[aria-hidden="true"],[contenteditable],.ck-editor__editable')) return false;
+    // This is a page-wide Find, including visible dialog, card and button
+    // labels, but never the Find bar or fields being actively edited. Input
+    // values are not DOM text nodes and wrapping rich-editable text would
+    // break undo/selection on older Android WebViews.
+    if (el.closest('#cupPageFindBar,script,style,noscript,template,textarea,input,select,option,svg,[hidden],[inert],[aria-hidden="true"],[contenteditable],.ck-editor__editable')) return false;
     // Layout reads are expensive on very large result lists. Perform them
     // only for text nodes already containing the requested word.
     for (let parent = el; parent && parent !== doc.documentElement; parent = parent.parentElement) {
@@ -133,12 +139,16 @@ export function initPageFind(doc = document) {
     }
     const current = (mark?.isConnected ? mark : range).getBoundingClientRect();
     const viewport = doc.defaultView;
-    if (current.top < 68 || current.bottom > viewport.innerHeight - 24) {
+    // Player/Practice overlays sit above the page. Never shift the hidden
+    // main document while locating a match inside one of these study views.
+    const studyActive = doc.body.classList.contains('practice-mode') ||
+      doc.body.classList.contains('rec-playing');
+    if (!studyActive && (current.top < 68 || current.bottom > viewport.innerHeight - 24)) {
       viewport.scrollBy({ top: current.top - Math.max(80, viewport.innerHeight * 0.38), behavior: 'instant' });
     }
   }
 
-  function renderActive() {
+  function renderActive({ scroll = true } = {}) {
     if (!ranges.length) { showCount(); return; }
     if (usingCssHighlights) {
       doc.defaultView.CSS.highlights.set(ACTIVE_HIGHLIGHT, new doc.defaultView.Highlight(ranges[index]));
@@ -147,25 +157,69 @@ export function initPageFind(doc = document) {
         mark?.classList.toggle('cup-page-find-current', n === index);
       }
     }
-    scrollActiveIntoView();
+    if (scroll) scrollActiveIntoView();
     showCount();
   }
 
-  function search(value, direction = 0) {
+  function watchDom() {
+    observer?.observe(doc.body, {
+      subtree: true, childList: true, characterData: true,
+      attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'inert'],
+    });
+  }
+
+  // The app replaces/rotates cards without reloading the document. A cached
+  // Range can remain connected while its text is completely different, so
+  // checking isConnected alone misses card navigation and dialog changes.
+  function requestRefresh() {
+    if (bar.hidden || refreshTimer !== null) return;
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      if (!bar.hidden) search(input.value, 0, true);
+    }, 180);
+  }
+
+  const layoutTargets = '#practiceMode,#recPlayingSubs,#recPlayingBanner,#mainControlInputs,' +
+    '#resultContainer,.ui-dialog,.ui-dialog-content,.practice-flipper,.practice-face,' +
+    '.practice-front,.practice-back,.practice-back-target,[hidden],[aria-hidden],[inert],body';
+  if (typeof doc.defaultView.MutationObserver === 'function') {
+    observer = new doc.defaultView.MutationObserver(records => {
+      if (records.some(record => {
+        const el = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+        if (!el || bar.contains(el) || el.closest('script,style,noscript,template')) return false;
+        // Ignore frequent media progress/style changes that do not affect
+        // which text is visible. Only layout containers need style watching.
+        return record.type !== 'attributes' || el.matches(layoutTargets);
+      })) requestRefresh();
+    });
+  }
+
+  function search(value, direction = 0, refresh = false) {
     const needle = String(value || '').trim();
     const stale = ranges.some((r, i) => !(marks[i]?.isConnected || r.startContainer?.isConnected));
-    if (needle !== query || stale) {
-      clearHighlights();
-      query = needle;
-      if (query) {
-        ranges = collectMatches(query);
-        index = direction < 0 ? ranges.length - 1 : 0;
-        highlightMatches();
+    const changed = needle !== query || stale || refresh;
+    if (changed) {
+      const oldIndex = index;
+      // Fallback <mark> creation/removal mutates the DOM; it must not schedule
+      // its own infinite refresh loop. Reconnect after the search is complete.
+      observer?.disconnect();
+      try {
+        clearHighlights();
+        query = needle;
+        if (query) {
+          ranges = collectMatches(query);
+          index = refresh && oldIndex >= 0
+            ? Math.min(oldIndex, ranges.length - 1)
+            : (direction < 0 ? ranges.length - 1 : 0);
+          highlightMatches();
+        }
+      } finally {
+        if (!bar.hidden) watchDom();
       }
     } else if (ranges.length && direction) {
       index = (index + direction + ranges.length) % ranges.length;
     }
-    if (ranges.length) renderActive();
+    if (ranges.length) renderActive({ scroll: !refresh });
     else showCount();
     return { current: ranges.length ? index + 1 : 0, total: ranges.length };
   }
@@ -179,6 +233,10 @@ export function initPageFind(doc = document) {
   }
 
   function open() {
+    // Reparenting this fixed bar out of any page layout also places it above
+    // high-z-index study dialogs and their backdrops, even when a playlist
+    // item is open and the normal toolbar has been hidden.
+    doc.body.appendChild(bar);
     if (bar.hidden) {
       priorFocus = doc.activeElement;
       bar.hidden = false;
@@ -186,6 +244,8 @@ export function initPageFind(doc = document) {
       const selected = doc.defaultView.getSelection()?.toString().trim() || '';
       if (selected && selected.length <= 100 && !selected.includes('\n')) input.value = selected;
       search(input.value);
+    } else {
+      search(input.value, 0, true);
     }
     input.focus({ preventScroll: true });
     input.select();
@@ -193,6 +253,8 @@ export function initPageFind(doc = document) {
 
   function close() {
     if (timer) { clearTimeout(timer); timer = null; }
+    if (refreshTimer !== null) { clearTimeout(refreshTimer); refreshTimer = null; }
+    observer?.disconnect();
     bar.hidden = true;
     toggle.setAttribute('aria-expanded', 'false');
     clearHighlights();
@@ -207,6 +269,26 @@ export function initPageFind(doc = document) {
   }
 
   toggle.addEventListener('click', () => bar.hidden ? open() : close());
+  // Player and Practice have their own toolbars because the main toolbar is
+  // intentionally hidden. The buttons use this one shared Find bar/state.
+  doc.addEventListener('click', event => {
+    const target = event.target.nodeType === 1 ? event.target : event.target.parentElement;
+    const trigger = target?.closest('.cup-page-find-study-trigger');
+    if (!trigger) return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Close the menu before scanning so the newly opened Find bar searches
+    // the visible card, not the menu covering it.
+    if (trigger.closest('.practice-settings-panel')) {
+      doc.querySelector('#practiceMode .practice-settings')?.click();
+    } else if (trigger.closest('.rec-pb-details')) {
+      const banner = trigger.closest('#recPlayingBanner');
+      if (banner?.classList.contains('rec-pb-expanded')) {
+        banner.querySelector('.rec-pb-info-btn')?.click();
+      }
+    }
+    open();
+  });
   closeButton.addEventListener('click', close);
   previous.addEventListener('click', () => findNext(-1));
   next.addEventListener('click', () => findNext(1));

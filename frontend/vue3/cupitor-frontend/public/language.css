@@ -281,8 +281,9 @@ body:is(.practice-mode, .rec-playing) #userDataError {
 .cup-page-find[hidden] { display: none !important; }
 .cup-page-find {
     position: fixed;
-    /* Above the study cards and transport overlays, not just the search page. */
-    z-index: 100010;
+    /* Player/Practice and modal card editors use the highest study layer.
+       Bring Find to the end of <body> on open so it remains usable there. */
+    z-index: 2147483647;
     top: calc(8px + env(safe-area-inset-top, 0px));
     right: max(10px, env(safe-area-inset-right, 0px));
     box-sizing: border-box;
@@ -298,6 +299,34 @@ body:is(.practice-mode, .rec-playing) #userDataError {
     box-shadow: 0 8px 30px rgba(20, 42, 73, .22);
     font-family: system-ui, -apple-system, sans-serif;
 }
+/* Page Find belongs in Practice's More panel and Player's expandable
+   details, not alongside the existing 'Search this word' magnifier. */
+#practiceMode .practice-settings-panel .practice-find,
+#recPlayingBanner .rec-pb-details .rec-pb-find-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7px 12px;
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 5px;
+    background: rgba(255,255,255,.12);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.3;
+    cursor: pointer;
+}
+#practiceMode .practice-settings-panel .practice-find { width: 100%; }
+#practiceMode .practice-settings-panel .practice-find:hover,
+#recPlayingBanner .rec-pb-details .rec-pb-find-btn:hover {
+    background: rgba(255,255,255,.23);
+}
+#practiceMode .practice-settings-panel .practice-find:focus-visible,
+#recPlayingBanner .rec-pb-details .rec-pb-find-btn:focus-visible {
+    outline: 2px solid #80cbc4;
+    outline-offset: 2px;
+}
+
 .cup-page-find-field {
     display: flex;
     align-items: center;
