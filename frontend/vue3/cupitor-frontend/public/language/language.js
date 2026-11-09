@@ -15731,7 +15731,7 @@ if ($.ui && $.ui.dialog && !$.ui.dialog.prototype._cupCkAllowed) {
   $.widget('ui.dialog', $.ui.dialog, {
     _cupCkAllowed: true,
     _allowInteraction(event) {
-      if ($(event.target).closest('.ck, .ck-body-wrapper').length) return true
+      if ($(event.target).closest('.ck, .ck-body-wrapper, #cupPageFindBar').length) return true
       return this._super(event)
     },
   })
@@ -18333,6 +18333,7 @@ function _renderPlayingBanner(it, idx, total) {
         <button type="button" class="rec-pb-replay-btn" title="Replay this item at 0.75×" aria-label="Replay current item">${_studyControlIcon('replay', '↻ Replay')}</button>
         <button type="button" class="rec-pb-swap-btn" title="Practise the other way round — Target first" aria-label="Swap Source and Target">⇄</button>
         <button type="button" class="rec-pb-music-btn" title="Background music" aria-label="Background music">♫</button>
+        <button type="button" class="cup-page-find-study-trigger rec-pb-find-btn" title="Find on page (Ctrl/Cmd+F)" aria-label="Find on page" aria-controls="cupPageFindBar">⌕</button>
         <button type="button" class="rec-pb-info-btn" title="Show details" aria-label="Show details" aria-expanded="false">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
@@ -21937,6 +21938,7 @@ function openPracticeMode(opts) {
         <button type="button" class="practice-shuffle" aria-label="Shuffle" title="Shuffle order" aria-pressed="false">🔀</button>
         <button type="button" class="practice-settings" aria-label="Practice settings" title="Reveal mode / direction / delete" aria-expanded="false">⋯</button>
         <button type="button" class="practice-search" aria-label="Search this word" title="Search this word (minimizes)">🔎</button>
+        <button type="button" class="cup-page-find-study-trigger practice-find" aria-label="Find on page" title="Find on page (Ctrl/Cmd+F)" aria-controls="cupPageFindBar">⌕</button>
         <button type="button" class="practice-minimize" aria-label="Minimize" title="Minimize">⌄</button>
         <button type="button" class="practice-close" aria-label="Close practice" title="Close">✕</button>
         <button type="button" class="practice-player-btn" aria-label="Switch to Player" title="Play this item">${_studyControlIcon('player', 'Player')}</button>
