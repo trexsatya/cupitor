@@ -40,7 +40,7 @@ const fs = require('node:fs')
         '<div class="ui-dialog-buttonpane">Apply / Cancel</div></div>',
         '<script src="/classic.js"></script>',
         '<script type="module">',
-        'import { sizeRichCardEditingArea } from "/language/rich-card-layout.js";',
+        'import { sizeRichCardEditingArea, observeRichCardEditingArea } from "/language/rich-card-layout.js";',
         'import { installMobileRichToolbar } from "/language/rich-card-mobile-toolbar.js";',
         'window.resizeEditingArea = () => sizeRichCardEditingArea(document.querySelector("#richCardEditor"));',
         'window.desktopEditor = ' + (!mobile) + ';',
@@ -49,6 +49,7 @@ const fs = require('node:fs')
         'editor.setData(Array.from({length:95},(_,i)=>"<p>Paragraph "+i+" '+
           'containing enough words to make it wrap and scroll inside the editor, not the dialog.</p>").join(""));',
         'window.sizedOnOpen = window.desktopEditor ? window.resizeEditingArea() : null;',
+        'window.stopEditorLayoutWatch = window.desktopEditor ? observeRichCardEditingArea(document.querySelector("#richCardEditor")) : () => {};',
         'window.ready = true;',
         '</script></body></html>',
       ].join('')
@@ -98,6 +99,12 @@ const fs = require('node:fs')
         'Long rich-card content must overflow the editable, not stretch the modal: ' +
         JSON.stringify(before))
       assert.equal(before.overflowY, 'auto', 'editable owns vertical scrolling')
+      if (!mobile) {
+        const available = await page.locator('#richCardEditor').evaluate(el => el.clientHeight)
+        assert(before.clientHeight > available * 0.65,
+          'The editing surface must use the tall dialog instead of a fixed 360px fallback: ' +
+          JSON.stringify({ before, available }))
+      }
       const editable = page.locator('.ck-editor__editable')
       if (!mobile) {
         // CKEditor can scroll to its insertion point while loading setData().
@@ -135,6 +142,46 @@ const fs = require('node:fs')
         await page.mouse.wheel(0, 450)
         await page.waitForFunction(() => document.querySelector('.ck-editor__editable').scrollTop > 80,
           { timeout: 5000 })
+
+        // A bottom-line click/selection must not scroll the dialog or shrink
+        // CKEditor: only the editable is scrollable, and it keeps its position.
+        await editable.evaluate(el => { el.scrollTop = el.scrollHeight })
+        const bottomBefore = await editable.evaluate(el => ({
+          scroll: el.scrollTop, height: el.clientHeight, max: el.scrollHeight - el.clientHeight,
+        }))
+        await page.locator('.ck-editor__editable p').last().click()
+        await page.waitForTimeout(100)
+        const bottomAfter = await page.evaluate(() => {
+          const el = document.querySelector('.ck-editor__editable')
+          return {
+            scroll: el.scrollTop, height: el.clientHeight, max: el.scrollHeight - el.clientHeight,
+            rootScroll: document.querySelector('#richCardEditor').scrollTop,
+            dialogScroll: document.querySelector('.ui-dialog').scrollTop,
+          }
+        })
+        assert(bottomAfter.scroll > bottomAfter.max - 180,
+          'Clicking the last line must not jump back to the top: ' + JSON.stringify({ bottomBefore, bottomAfter }))
+        assert.equal(bottomAfter.rootScroll, 0)
+        assert.equal(bottomAfter.dialogScroll, 0)
+        assert(Math.abs(bottomAfter.height - bottomBefore.height) <= 2,
+          'Clicking text must not collapse the expanded editor')
+
+        // A temporary focus loss can reflow CKEditor in a desktop WebView.
+        // Refit on focus without changing the caret/selection or scroll position.
+        await page.evaluate(() => {
+          const el = document.querySelector('.ck-editor__editable')
+          el.style.height = '160px'
+          window.dispatchEvent(new Event('blur'))
+          window.dispatchEvent(new Event('focus'))
+        })
+        await page.waitForFunction(expected =>
+          Math.abs(document.querySelector('.ck-editor__editable').clientHeight - expected) <= 2,
+          bottomBefore.height)
+        const restored = await editable.evaluate(el => ({
+          height: el.clientHeight, scroll: el.scrollTop,
+        }))
+        assert(restored.scroll > 80, 'Refocusing must retain the editor scroll position')
+        console.log('Desktop: full-height editor, last-line click and window-refocus recovery passed')
       } else {
         assert.equal(before.touchAction, 'pan-y', 'mobile editor allows native vertical swipes')
         const scrollTop = await editable.evaluate(el => { el.scrollTop = 240; return el.scrollTop })
@@ -142,6 +189,7 @@ const fs = require('node:fs')
       }
       console.log((mobile ? 'Mobile' : 'Desktop') +
         ': rich card overflow, independent scrolling and desktop resize passed')
+      await page.evaluate(() => window.stopEditorLayoutWatch())
       await page.close()
     }
   } finally { await browser.close() }

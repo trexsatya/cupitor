@@ -26,7 +26,7 @@ import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
 import { installRichCardUnderline } from './rich-card-underline.js';
 import { installRichCardParagraphTools } from './rich-card-paragraph.js';
 import { installRichCardShortcuts } from './rich-card-shortcuts.js';
-import { sizeRichCardEditingArea } from './rich-card-layout.js';
+import { sizeRichCardEditingArea, observeRichCardEditingArea } from './rich-card-layout.js';
 import { installRichCardFormatting } from './rich-card-formatting.js';
 import { installRichCardPasteControl } from './rich-card-paste.js';
 import { installMobileRichToolbar } from './rich-card-mobile-toolbar.js';
@@ -15805,7 +15805,9 @@ async function _openRichCardEditor($box, label) {
   $d.attr('data-practice-face', backFace ? 'back' : 'front')
   let editor = null
   let initial = null
+  let stopLayoutObserver = () => {}
   const done = () => {
+    stopLayoutObserver()
     if (editor) { editor.destroy().catch(() => {}); editor = null }
     try { $d.dialog('destroy') } catch (_) {}
     $d.remove()
@@ -15915,6 +15917,9 @@ async function _openRichCardEditor($box, label) {
     // destroy this one later, so do it now.
     if (seq !== _richEditorSeq || !document.body.contains($d[0])) { editor.destroy().catch(() => {}); editor = null; return }
     editor.setData(_faceToEditorHtml($box.val()))
+    // Track the *real* CKEditor wrapper as it changes size on resize, focus,
+    // window restoration and toolbar reflow. This must be torn down on close.
+    if (desktopEditor) stopLayoutObserver = observeRichCardEditingArea($d[0])
     syncEditingArea()
     requestAnimationFrame(syncEditingArea)
     initial = editor.getData()
