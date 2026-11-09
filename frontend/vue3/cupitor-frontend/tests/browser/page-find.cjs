@@ -41,12 +41,17 @@ function fixture() {
     '<div contenteditable="true">färgsprakande editor</div>',
     '<input value="färgsprakande inside an input"></section></div>',
     '<div id="practiceMode" style="display:none"><div class="practice-topbar">',
-    '<button type="button" class="cup-page-find-study-trigger practice-find" aria-label="Find on page">⌕</button>',
-    '</div><div class="practice-card"><div class="practice-flipper">',
+    '<button type="button" class="practice-settings" aria-label="Practice settings">⋯</button>',
+    '<button type="button" class="practice-search" aria-label="Search this word">🔎</button>',
+    '</div><div class="practice-settings-panel" style="display:none">',
+    '<button type="button" class="cup-page-find-study-trigger practice-find" aria-label="Find on page">Find on page</button>',
+    '</div><div class="practice-card"><div class="practice-flipper">
     '<div class="practice-face practice-front-face"><div class="practice-front">blueberry current card</div></div>',
     '</div></div></div>',
     '<div id="recPlayingBanner" style="display:none"><div class="rec-pb-top">',
-    '<button type="button" class="cup-page-find-study-trigger rec-pb-find-btn" aria-label="Find on page">⌕</button>',
+    '<button type="button" class="rec-pb-info-btn" aria-label="Show details">ℹ</button>',
+    '</div><div class="rec-pb-details" style="display:none">',
+    '<button type="button" class="cup-page-find-study-trigger rec-pb-find-btn" aria-label="Find on page">Find on page</button>',
     '</div></div>',
     '<div id="recPlayingSubs" style="display:none"><p>apricot playing subtitle</p></div>',
     '<div id="dialogFixture" style="display:none"><p>mandarin in a visible dialog</p></div>',
@@ -128,8 +133,33 @@ async function run(browser, mobile, legacy) {
       document.body.classList.add('practice-mode', 'practice-no-video')
       document.querySelector('#practiceMode').style.display = 'flex'
     })
+    await page.evaluate(() => {
+      const settings = document.querySelector('#practiceMode .practice-settings')
+      settings.addEventListener('click', () => {
+        const panel = document.querySelector('#practiceMode .practice-settings-panel')
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none'
+      })
+      const info = document.querySelector('#recPlayingBanner .rec-pb-info-btn')
+      info.addEventListener('click', () => {
+        const banner = document.querySelector('#recPlayingBanner')
+        const panel = banner.querySelector('.rec-pb-details')
+        const expand = !banner.classList.contains('rec-pb-expanded')
+        banner.classList.toggle('rec-pb-expanded', expand)
+        panel.style.display = expand ? 'block' : 'none'
+      })
+    })
+    assert.equal(await page.locator('#practiceMode .practice-find').isVisible(), false,
+      'Find must not add another topbar magnifier')
+    await page.locator('#practiceMode .practice-settings').click()
+    assert.equal(await page.locator('#practiceMode .practice-find').isVisible(), true)
+    if (screenshotDir && !legacy) {
+      await page.screenshot({ path: path.join(screenshotDir,
+        mobile ? 'cupitor-practice-more-find-mobile.png' : 'cupitor-practice-more-find-desktop.png') })
+    }
     await page.locator('#practiceMode .practice-find').click()
     assert.equal(await bar.isVisible(), true, 'Practice Find must be clickable')
+    assert.equal(await page.locator('#practiceMode .practice-settings-panel').isVisible(), false,
+      'More panel closes when opening Find')
     await input.fill('färgsprakande')
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === 'No matches')
     await input.fill('blueberry')
@@ -155,15 +185,20 @@ async function run(browser, mobile, legacy) {
       document.querySelector('#recPlayingSubs').style.display = 'block'
     })
     await input.press('Escape')
+    assert.equal(await page.locator('#recPlayingBanner .rec-pb-find-btn').isVisible(), false,
+      'Player Find must be in details, not the topbar')
+    await page.locator('#recPlayingBanner .rec-pb-info-btn').click()
     assert.equal(await page.locator('#recPlayingBanner .rec-pb-find-btn').isVisible(), true)
     await page.locator('#recPlayingBanner .rec-pb-find-btn').click()
+    assert.equal(await page.locator('#recPlayingBanner .rec-pb-details').isVisible(), false,
+      'Player details close when opening Find')
     await input.fill('apricot')
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 1')
     if (screenshotDir && !legacy) {
       await page.screenshot({ path: path.join(screenshotDir,
         mobile ? 'cupitor-find-player-mobile.png' : 'cupitor-find-player-desktop.png') })
     }
-    assert.equal((await status()).focused, true, 'Player toolbar opens the same Find bar')
+    assert.equal((await status()).focused, true, 'Player details open the same Find bar')
     // The Find panel is accessible above an open dialog, rather than trapped
     // below its high-z-index backdrop. Closing Find leaves the dialog intact.
     await page.evaluate(() => {
