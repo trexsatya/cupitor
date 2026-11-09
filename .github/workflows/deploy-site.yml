@@ -126,6 +126,7 @@ jobs:
           node tests/browser/page-find.cjs
           node tests/browser/card-tts.cjs
           node tests/browser/rich-card-scroll.cjs
+          node tests/browser/practice-rich-card-controls.cjs
           node tests/browser/study-page-scroll.cjs
           node tests/browser/spotify-practice.cjs
           node tests/browser/notification-practice.cjs
