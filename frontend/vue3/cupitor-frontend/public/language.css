@@ -299,30 +299,30 @@ body:is(.practice-mode, .rec-playing) #userDataError {
     box-shadow: 0 8px 30px rgba(20, 42, 73, .22);
     font-family: system-ui, -apple-system, sans-serif;
 }
-/* Same Find action in the Player and Practice headers, which are displayed
-   while the main page toolbar is deliberately hidden. */
-#practiceMode .practice-find,
-#recPlayingBanner .rec-pb-find-btn {
-    flex: 0 0 auto;
-    width: 30px;
-    height: 30px;
-    min-width: 30px;
+/* Page Find belongs in Practice's More panel and Player's expandable
+   details, not alongside the existing 'Search this word' magnifier. */
+#practiceMode .practice-settings-panel .practice-find,
+#recPlayingBanner .rec-pb-details .rec-pb-find-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0;
-    border: none;
-    border-radius: 50%;
-    background: rgba(255,255,255,.14);
+    padding: 7px 12px;
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 5px;
+    background: rgba(255,255,255,.12);
     color: #fff;
-    font-size: 23px;
-    line-height: 1;
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.3;
     cursor: pointer;
 }
-#practiceMode .practice-find:hover,
-#recPlayingBanner .rec-pb-find-btn:hover { background: rgba(255,255,255,.27); }
-#practiceMode .practice-find:focus-visible,
-#recPlayingBanner .rec-pb-find-btn:focus-visible {
+#practiceMode .practice-settings-panel .practice-find { width: 100%; }
+#practiceMode .practice-settings-panel .practice-find:hover,
+#recPlayingBanner .rec-pb-details .rec-pb-find-btn:hover {
+    background: rgba(255,255,255,.23);
+}
+#practiceMode .practice-settings-panel .practice-find:focus-visible,
+#recPlayingBanner .rec-pb-details .rec-pb-find-btn:focus-visible {
     outline: 2px solid #80cbc4;
     outline-offset: 2px;
 }
