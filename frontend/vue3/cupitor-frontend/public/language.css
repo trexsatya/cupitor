@@ -5324,21 +5324,25 @@ body.study-split-active.study-media-combined.practice-mode #practiceMode .practi
     min-height: 0;
     overflow: hidden;
 }
-.rich-card-editor-desktop #richCardEditor .rce-host,
+/* ClassicEditor replaces the source host with a sibling .ck-editor. The
+   earlier rule omitted this wrapper, leaving a ~360px editor in a tall dialog.
+   Let every flex level fill the jQuery UI content box without a second scrollbar.
+   The JS observer also provides exact heights when the toolbar reflows. */
+.rich-card-editor-desktop #richCardEditor > .ck-editor,
+.rich-card-editor-desktop #richCardEditor > .rce-host,
 .rich-card-editor-desktop #richCardEditor .rce-host > .ck-editor,
 .rich-card-editor-desktop #richCardEditor .ck-editor__main {
     display: flex;
     flex-direction: column;
     flex: 1 1 0;
     min-height: 0;
+    min-width: 0;
     overflow: hidden;
 }
 .rich-card-editor-desktop #richCardEditor .ck-editor__editable {
-    /* Positive fallback before JavaScript measures the available space.
-       The resize hook supplies an exact pixel height for the real viewport. */
-    flex: 0 0 auto;
-    height: min(360px, 45vh);
-    min-height: 160px;
+    flex: 1 1 0;
+    height: 100%;
+    min-height: 0;
     max-height: none;
     overflow-y: auto;
 }
