@@ -31,15 +31,19 @@ export function initPageFind(doc = document) {
     typeof doc.defaultView.Highlight === 'function');
 
   function clearHighlights() {
-    if (usingCssHighlights) {
-      doc.defaultView.CSS.highlights.delete(ALL_HIGHLIGHT);
-      doc.defaultView.CSS.highlights.delete(ACTIVE_HIGHLIGHT);
-      usingCssHighlights = false;
+    // Empty each Highlight before unregistering it so the renderer also
+    // invalidates the ranges belonging to the previous query.
+    // Clear both names even if a previous render only partially succeeded.
+    const registry = doc.defaultView?.CSS?.highlights;
+    for (const name of [ALL_HIGHLIGHT, ACTIVE_HIGHLIGHT]) {
+      registry?.get(name)?.clear();
+      registry?.delete(name);
     }
+    usingCssHighlights = false;
     // Legacy Android WebViews may not implement CSS Custom Highlight.
     // Remove only nodes Find created, never arbitrary page <mark> elements.
     for (const mark of marks) {
-      if (!mark.isConnected) continue;
+      if (!mark?.isConnected) continue;
       const parent = mark.parentNode;
       parent.replaceChild(doc.createTextNode(mark.textContent || ''), mark);
       parent.normalize();
@@ -151,7 +155,9 @@ export function initPageFind(doc = document) {
   function renderActive({ scroll = true } = {}) {
     if (!ranges.length) { showCount(); return; }
     if (usingCssHighlights) {
-      doc.defaultView.CSS.highlights.set(ACTIVE_HIGHLIGHT, new doc.defaultView.Highlight(ranges[index]));
+      const registry = doc.defaultView.CSS.highlights;
+      registry.get(ACTIVE_HIGHLIGHT)?.clear();
+      registry.set(ACTIVE_HIGHLIGHT, new doc.defaultView.Highlight(ranges[index]));
     } else {
       for (const [n, mark] of marks.entries()) {
         mark?.classList.toggle('cup-page-find-current', n === index);
@@ -294,6 +300,11 @@ export function initPageFind(doc = document) {
   next.addEventListener('click', () => findNext(1));
   input.addEventListener('input', () => {
     if (timer) clearTimeout(timer);
+    // Remove the previous query immediately, including while debounce waits.
+    observer?.disconnect();
+    clearHighlights();
+    showCount();
+    watchDom();
     timer = setTimeout(() => { timer = null; search(input.value); }, 140);
   });
   input.addEventListener('keydown', e => {

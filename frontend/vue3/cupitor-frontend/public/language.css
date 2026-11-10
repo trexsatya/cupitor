@@ -301,8 +301,8 @@ body:is(.practice-mode, .rec-playing) #userDataError {
 }
 /* Page Find belongs in Practice's More panel and Player's expandable
    details, not alongside the existing 'Search this word' magnifier. */
-#practiceMode .practice-settings-panel .practice-find,
-#recPlayingBanner .rec-pb-details .rec-pb-find-btn {
+#practiceMode .practice-find,
+#recPlayingBanner .rec-pb-find-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;

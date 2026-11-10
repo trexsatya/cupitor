@@ -105,6 +105,27 @@ async function run(browser, mobile, legacy) {
     await page.locator('#cupPageFindNext').click()
     assert.equal(await count.textContent(), '1 of 3', 'next wraps')
     assert.equal((await status()).focused, true, 'arrow buttons return focus to input')
+    // Reproduce a short query expanded into a phrase: previous Highlight
+    // objects must be emptied, not only removed from the registry.
+    await input.fill('i')
+    await page.waitForFunction(() => document.querySelector('#cupPageFindBar').dataset.matchCount !== '0')
+    await page.evaluate(() => {
+      window.oldFindHighlights = CSS.highlights ? [...CSS.highlights.values()] : []
+    })
+    await input.fill('vid havet')
+    await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 1')
+    assert.equal(await page.evaluate(() => window.oldFindHighlights.every(h => h.size === 0)), true,
+      'previous query ranges are emptied')
+    if (!legacy) {
+      assert.deepEqual(await page.evaluate(() => [...CSS.highlights.get('cupitor-page-find-all')].map(r => r.toString())),
+        ['vid havet'], 'only the current full phrase is highlighted')
+    }
+    await page.locator('#cupPageFindClose').click()
+    assert.equal(await page.evaluate(() => !CSS.highlights ||
+      (!CSS.highlights.has('cupitor-page-find-all') && !CSS.highlights.has('cupitor-page-find-active'))), true,
+      'close button removes both highlight registrations')
+    assert.equal(await page.locator('mark.cup-page-find-fallback').count(), 0)
+    await page.locator('#cupPageFindToggle').click()
     await input.fill('not-there')
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === 'No matches')
     assert.equal(await page.locator('#cupPageFindPrevious').isDisabled(), true)
