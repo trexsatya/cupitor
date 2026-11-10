@@ -78,7 +78,7 @@ async function checkStudyControls(browser) {
           const result = op === 'musicList' ? JSON.stringify([{ url: 'file:///calm.wav' }, { url: 'file:///rain.wav' }]) : wav
           queueMicrotask(() => window.__cupAudio({ rid, result }))
         } }
-        Object.assign(window._appSettings, { recPlayShuffle: false, recPlayGapSeconds: 30, recPlayLoop: 'off' })
+        Object.assign(window._appSettings, { playbackSpeed: 1.25, recPlayShuffle: false, recPlayGapSeconds: 30, recPlayLoop: 'off' })
         const queue = [
           { id: 'testVideo01', source: 'YouTube', searchText: 'färgsprakande', timeStart: 1, timeEnd: 3, lineIndex: 1 },
           { id: 'testVideo02', source: 'YouTube', searchText: 'hagla', timeStart: 3, timeEnd: 5, lineIndex: 2 },
