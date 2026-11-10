@@ -78,7 +78,7 @@ async function checkStudyControls(browser) {
           const result = op === 'musicList' ? JSON.stringify([{ url: 'file:///calm.wav' }, { url: 'file:///rain.wav' }]) : wav
           queueMicrotask(() => window.__cupAudio({ rid, result }))
         } }
-        Object.assign(window._appSettings, { recPlayShuffle: false, recPlayGapSeconds: 30, recPlayLoop: 'off' })
+        Object.assign(window._appSettings, { playbackSpeed: 1.25, recPlayShuffle: false, recPlayGapSeconds: 30, recPlayLoop: 'off' })
         const queue = [
           { id: 'testVideo01', source: 'YouTube', searchText: 'färgsprakande', timeStart: 1, timeEnd: 3, lineIndex: 1 },
           { id: 'testVideo02', source: 'YouTube', searchText: 'hagla', timeStart: 3, timeEnd: 5, lineIndex: 2 },
@@ -154,7 +154,7 @@ async function checkStudyControls(browser) {
       await page.waitForFunction(() => window._recPlayManualAudio && !window._recPlayManualAudio.paused && window._recPlayManualAudio.playbackRate === 0.75)
       await page.waitForFunction(() => document.querySelector('#recMusicHost audio').src.endsWith('calm.wav') && !document.querySelector('#recMusicHost audio').paused)
       await next(); await playerAt(3)
-      await page.waitForFunction(() => window._recPlayManualAudio && !window._recPlayManualAudio.paused && window._recPlayManualAudio.playbackRate === 1)
+      await page.waitForFunction(() => window._recPlayManualAudio && !window._recPlayManualAudio.paused && window._recPlayManualAudio.playbackRate === window._appSettings.playbackSpeed)
       await checkDivider(page, 'player', mobile)
       const playerBoundary = (await page.locator('#studyMediaDivider').boundingBox()).y
       if (!await practice.isVisible()) await page.getByRole('button', { name: 'Show details', exact: true }).click()

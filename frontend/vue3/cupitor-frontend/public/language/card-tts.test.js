@@ -48,3 +48,62 @@ test('speech resolves on completion and can be interrupted on navigation', async
   await expect(stalled.promise).resolves.toBe(true);
   expect(started).toBe('cancelled');
 });
+
+test('replaces symbols literally and preserves HTML line breaks for timed silence', async () => {
+  jest.useFakeTimers();
+  const spoken = [];
+  class Utterance { constructor(text) { this.text = text; } }
+  const task = speakTts('<p>A -&gt; B</p><p>C → D</p>', {
+    synth: { speak: u => spoken.push(u), cancel() {} }, Utterance,
+    replacements: [{ from: '->', to: 'could be' }, { from: '→', to: 'means' }], newlinePauseMs: 900,
+  });
+  expect(spoken[0].text).toBe('A could be B');
+  spoken[0].onend();
+  jest.advanceTimersByTime(899);
+  expect(spoken).toHaveLength(1);
+  jest.advanceTimersByTime(1);
+  expect(spoken[1].text).toBe('C means D');
+  spoken[1].onend();
+  await task.promise;
+  jest.useRealTimers();
+});
+
+test('restoring after a long pause restarts only the unfinished line, even without engine resume', async () => {
+  jest.useFakeTimers();
+  const spoken = [];
+  class Utterance { constructor(text) { this.text = text; } }
+  const synth = { speak: u => spoken.push(u), cancel: jest.fn() };
+  const task = speakTts('First\nSecond', { synth, Utterance, newlinePauseMs: 500 });
+  spoken[0].onend();
+  jest.advanceTimersByTime(500);
+  expect(spoken[1].text).toBe('Second');
+  task.pause();
+  jest.advanceTimersByTime(200000);
+  expect(spoken).toHaveLength(2);
+  task.resume();
+  expect(spoken.map(u => u.text)).toEqual(['First', 'Second', 'Second']);
+  spoken[2].onend();
+  await task.promise;
+  jest.useRealTimers();
+});
+
+test('a paused newline gap resumes its remaining silence and cancellation stops it', async () => {
+  jest.useFakeTimers();
+  const spoken = [];
+  class Utterance { constructor(text) { this.text = text; } }
+  const task = speakTts('First\nSecond', {
+    synth: { speak: u => spoken.push(u), cancel() {} }, Utterance, newlinePauseMs: 1000,
+  });
+  spoken[0].onend();
+  jest.advanceTimersByTime(400);
+  task.pause();
+  jest.advanceTimersByTime(5000);
+  task.resume();
+  jest.advanceTimersByTime(599);
+  expect(spoken).toHaveLength(1);
+  task.cancel();
+  jest.advanceTimersByTime(2000);
+  expect(spoken).toHaveLength(1);
+  await task.promise;
+  jest.useRealTimers();
+});

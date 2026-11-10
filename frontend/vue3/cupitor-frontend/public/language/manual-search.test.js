@@ -115,3 +115,17 @@ describe('renderManualResultsHtml', () => {
     expect(html).not.toContain('<i>')
   })
 })
+
+test('manual hits retain their original item number when earlier cards do not match', () => {
+  const hits = findManualCards(recordings, 'breakfast');
+  expect(hits[0].itemNumber).toBe(2);
+  expect(renderManualResultsHtml(hits, 'breakfast')).toContain('Svenska · #2');
+});
+
+test('item numbers follow the complete playlist order across manual and video cards', () => {
+  const recordings = { Mixed: { items: {
+    Manual: { Card: [card('manual', 'find me', '', { playlistOrder: 4 })] },
+    video: { word: [{ id: 'video', playlistOrder: 1 }] },
+  } } };
+  expect(findManualCards(recordings, 'find')[0].itemNumber).toBe(2);
+});

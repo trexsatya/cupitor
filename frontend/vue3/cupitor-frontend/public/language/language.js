@@ -2556,6 +2556,9 @@ window._appSettings = {
   // a word has no match from a non-blocked channel.
   blockedChannels: [],
   searchChannels: [],
+  playbackSpeed: null,
+  ttsReplacements: [{ from: "->", to: "could be" }, { from: "→", to: "could be" }],
+  ttsNewlinePauseMs: 700,
   practicePlaybackRate: 1,
   practiceSpeedOptions: [1, 0.75, 0.5],
   // Seconds the recording-playback waits between items.
@@ -2965,6 +2968,9 @@ function loadAppSettings() {
   $('#recPlayGapSeconds').val(_interItemGapSeconds())
   $('#recPlayYouTubeClipSeconds').val(clipFallbackSeconds(window._appSettings.recPlayYouTubeClipSeconds))
   $('#recManualPlaybackMode').val(_manualPlaybackPreference())
+  $('#playbackSpeed').val(_preferredRecordingAudioRate())
+  $('#ttsReplacements').val((window._appSettings.ttsReplacements || []).map(r => `${r.from}=${r.to}`).join('\n'))
+  $('#ttsNewlinePauseMs').val(window._appSettings.ttsNewlinePauseMs ?? 700)
   $('#recPlayTtsFallback').prop('checked', !!window._appSettings.recPlayTtsFallback)
   // Blank input = "no override", so an unset source→target gap must render
   // empty rather than as a 0 the user never chose.
@@ -4079,6 +4085,35 @@ $('document').ready(e => {
     window._appSettings.recPlayYouTubeClipSeconds = value
     $(e.target).val(value)
     saveAppSettings()
+  })
+  $('#playbackSpeed').on('change', function () {
+    const rate = Number(this.value)
+    if (!Number.isFinite(rate) || rate < 0.1 || rate > 4) { this.value = _preferredRecordingAudioRate(); return }
+    window._appSettings.playbackSpeed = rate
+    window._appSettings.recAudioPlaybackRate = rate
+    window._appSettings.practicePlaybackRate = rate
+    window._practicePlaybackRate = rate
+    _restoreRecordingReplaySpeed()
+    for (const audio of [window._recPlayManualAudio, document.querySelector('#practiceAudio audio')]) {
+      if (audio) _applyRecordingAudioRate(audio, rate)
+    }
+    try { window.ytPlayer?.setPlaybackRate(_recordingVideoRate()) } catch (_) {}
+    saveAppSettings()
+    _updatePracticeSpeedBtn()
+  })
+  $('#ttsReplacements').on('change', function () {
+    window._appSettings.ttsReplacements = this.value.split(/\r?\n/).flatMap(line => {
+      const at = line.indexOf('=')
+      return at > 0 ? [{ from: line.slice(0, at), to: line.slice(at + 1) }] : []
+    })
+    saveAppSettings()
+  })
+  $('#ttsNewlinePauseMs').on('change', function () {
+    const ms = Number(this.value)
+    if (Number.isFinite(ms) && ms >= 0 && ms <= 10000) {
+      window._appSettings.ttsNewlinePauseMs = ms
+      saveAppSettings()
+    }
   })
   $('#recManualPlaybackMode').on('change', e => _setManualPlaybackPreference($(e.target).val()))
   $('#recPlayTtsFallback').on('change', function () {
@@ -12161,7 +12196,7 @@ $(document).on('change', '#manualSearchIncludeCb', e => {
   saveAppSettings()
   _ensureManualSearchBar()
 })
-// A card opens on its own in Practice — just that card, not its playlist.
+// Result previews are separate from an existing or minimized Practice session.
 $(document).on('click', '#manualResults .manual-hit', e => {
   const $hit = $(e.currentTarget)
   const name = $hit.attr('data-playlist')
@@ -12170,9 +12205,19 @@ $(document).on('click', '#manualResults .manual-hit', e => {
   const bucket = rec && rec.items && rec.items[MANUAL_ST] && rec.items[MANUAL_ST][MANUAL_W]
   const idx = Array.isArray(bucket) ? bucket.findIndex(x => x && String(x.id) === id) : -1
   if (idx < 0) { _renderManualSearchResults(); return }  // gone since it was listed
-  openPracticeMode({
-    queue: [{ ...bucket[idx], _recName: name, _st: MANUAL_ST, _w: MANUAL_W, _idx: idx }],
-    single: true,
+  const item = bucket[idx]
+  const itemNumber = orderedRecordingEntries(rec.items).findIndex(entry => entry.item === item) + 1
+  const $preview = $('<div class="manual-result-preview"></div>')
+  for (const [key, label] of [['source', 'Source'], ['target', 'Target']]) {
+    $('<h3></h3>').text(label).appendTo($preview)
+    const content = _cardHtml(item[key] || '')
+    $('<div class="card-html"></div>').html(content.html).appendTo($preview)
+  }
+  $preview.appendTo('body').dialog({
+    title: `${name} · #${itemNumber}`, modal: true,
+    width: Math.min(850, window.innerWidth - 24),
+    maxHeight: window.innerHeight - 60,
+    close() { $(this).dialog('destroy').remove() },
   })
 })
 // Fold the block. Sticky across searches, like the book results.
@@ -15531,7 +15576,7 @@ async function _playPlaylistLinkedVideo(it, queue, index) {
       isForeground: _playerLifecycle.isForeground, preparePlayer: player => attempt.preparePlayer(player) }))
     if (!attempt.active()) return
     if (window._recPlayPaused) { try { window.ytPlayer?.pauseVideo() } catch (_) {} }
-    if (window._recReplaySpeed) { try { window.ytPlayer?.setPlaybackRate(0.75) } catch (_) {} }
+    try { window.ytPlayer?.setPlaybackRate(window._recReplaySpeed ? 0.75 : _recordingVideoRate()) } catch (_) {}
     attempt.releaseMute()
     if (!window._recPlayPaused) window.ytPlayer?.playVideo()
     await attempt.wait(_waitYTUntilEnd(clip.timeStart, clip.timeEnd,
@@ -20144,8 +20189,17 @@ function _recPaExpectPause(a) {
 
 const _recAudioAppliedRates = new WeakMap()
 function _preferredRecordingAudioRate() {
-  const rate = Number(window._appSettings.recAudioPlaybackRate)
+  const rate = Number(window._appSettings.playbackSpeed ?? window._appSettings.recAudioPlaybackRate)
   return Number.isFinite(rate) && rate > 0 ? rate : 1
+}
+function _recordingVideoRate() {
+  let available = []
+  try { available = window.ytPlayer?.getAvailablePlaybackRates() || [] } catch (_) {}
+  return supportedPracticeSpeed(_preferredRecordingAudioRate(), available)
+}
+function _cardSpeechOptions() {
+  return { replacements: window._appSettings.ttsReplacements,
+    newlinePauseMs: window._appSettings.ttsNewlinePauseMs ?? 700 }
 }
 function _applyRecordingAudioRate(audio, rate = _preferredRecordingAudioRate()) {
   try { audio.defaultPlaybackRate = rate; audio.playbackRate = rate }
@@ -20158,6 +20212,8 @@ function _rememberRecordingAudioRate(audio) {
     const rate = audio.playbackRate
     if (rate === _recAudioAppliedRates.get(audio) || !Number.isFinite(rate) || rate <= 0) return
     window._appSettings.recAudioPlaybackRate = rate
+    window._appSettings.playbackSpeed = rate
+    $('#playbackSpeed').val(rate)
     // A manual speed choice takes precedence over a temporary Replay slowdown.
     _restoreRecordingReplaySpeed()
     _applyRecordingAudioRate(audio, rate)
@@ -20347,6 +20403,7 @@ function _practiceAudioEl() {
     // a face button, so it silences the other sources too.
     const el = $wrap.find('.rec-pa-el')[0]
     el.addEventListener('play', () => {
+      _applyRecordingAudioRate(el, Number(window._practicePlaybackRate) || _preferredRecordingAudioRate())
       _silenceOtherAudio('practice')
       try { window.ytPlayer?.pauseVideo() } catch (_) {}
       try { spotifyPlayer.media?.pause() } catch (_) {}
@@ -20477,13 +20534,15 @@ async function _playSilentCardTtsAndWait(face, itemToken) {
   const lang = face.key === 'target' ? 'en-US' : speechLocale(_ttsLangCode(), 'en-US')
   let utterance = null
   _setRecPlayPhase('clip')
-  const task = speakTts(face.text, {
+  let task
+  task = speakTts(face.text, {
+    ..._cardSpeechOptions(),
     synth: window.speechSynthesis, Utterance: window.SpeechSynthesisUtterance,
     lang, rate: _preferredRecordingAudioRate(), isCurrent: current,
     onBegin(u) {
       utterance = u
       window._recTTS = { kind: 'speech', utterance: u,
-        cancel: () => { try { window.speechSynthesis.cancel() } catch (_) {} } }
+        cancel: () => task?.cancel(), pause: () => task?.pause(), resume: () => task?.resume() }
     },
     onFinish() {
       if (window._recTTS?.utterance === utterance) window._recTTS = null
@@ -21141,8 +21200,8 @@ async function playRecording(opts) {
       // item, including subsequent replays, until the selected item changes.
       if (slowedThisRound || window._recReplaySpeed) {
         try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(0.75) } catch (_) {}
-      } else if (restoredRate != null) {
-        try { window.ytPlayer?.setPlaybackRate(restoredRate) } catch (_) {}
+      } else {
+        try { window.ytPlayer?.setPlaybackRate(_recordingVideoRate()) } catch (_) {}
       }
       attempt.releaseMute()
       try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
@@ -21179,7 +21238,7 @@ async function playRecording(opts) {
     }
     unplayableSkips = 0
     if (slowedThisRound && !window._recReplaySpeed) {
-      try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
+      try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(_recordingVideoRate()) } catch (_) {}
       window._recPlaySlowdown = false
     }
     // Clip is done — arm the gap-guard so a slow-loaded clip that finally
@@ -21292,7 +21351,7 @@ async function playRecording(opts) {
   $('#recPlayingQueueBtn').remove()
   $('#recPlayingRestorePill').remove()
   $('#recPlayNavToast').remove()
-  try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
+  try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(_recordingVideoRate()) } catch (_) {}
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
 }
 
@@ -21442,7 +21501,7 @@ function _applyRecPlayPause(paused, controlYt = true) {
     }
     try {
       if (t && t.kind === 'audio' && t.audio) t.audio.pause()
-      else if (t && t.kind === 'speech') window.speechSynthesis && window.speechSynthesis.pause()
+      else if (t && t.kind === 'speech') { if (t.pause) t.pause(); else window.speechSynthesis?.pause() }
     } catch (_) {}
   } else {
     $('body').removeClass('rec-paused')
@@ -21462,7 +21521,7 @@ function _applyRecPlayPause(paused, controlYt = true) {
     }
     try {
       if (t && t.kind === 'audio' && t.audio) t.audio.play().catch(() => {})
-      else if (t && t.kind === 'speech') window.speechSynthesis && window.speechSynthesis.resume()
+      else if (t && t.kind === 'speech') { if (t.resume) t.resume(); else window.speechSynthesis?.resume() }
     } catch (_) {}
   }
   if (controlYt) window._recPlayPauseCmdAt = Date.now()
@@ -21783,7 +21842,8 @@ function stopPlayingRecording() {
 
 // ─── Practice (flashcard) mode ───────────────────────────────────────────
 // Practice never auto-speaks on reveal: Play reads the face currently on
-// screen, and pressing Play again stops it. A card change or minimize cancels.
+// screen, and pressing Play again stops it. A card change cancels speech;
+// minimizing pauses it until restore.
 let _practiceTts = null
 let _practiceTtsFaceKey = null
 function _stopPracticeTts() {
@@ -21804,16 +21864,16 @@ function _togglePracticeTts(it) {
     _stopPracticeTts()
     if (sameFace) return
   }
-  const text = cardTtsText(it[key])
+  const text = it[key]
   if (!text) return
   const idx = window._practiceIdx
-  const token = window._practiceClipToken
   const task = speakTts(text, {
+    ..._cardSpeechOptions(),
     synth: window.speechSynthesis, Utterance: window.SpeechSynthesisUtterance,
     lang: key === 'target' ? 'en-US' : speechLocale(_ttsLangCode(), 'en-US'),
-    rate: _practiceVideoRate(),
-    isCurrent: () => window._practiceActive && !window._practiceMinimized &&
-      window._practiceIdx === idx && window._practiceClipToken === token &&
+    rate: Number(window._practicePlaybackRate) || _preferredPracticeSpeed(),
+    isCurrent: () => window._practiceActive &&
+      window._practiceIdx === idx &&
       window._practiceCards?.[idx] === it,
   })
   _practiceTts = task
@@ -21835,8 +21895,8 @@ const _practiceVideoCues = createPracticeVideoCues({
   waitUntil
 })
 let _practiceRenderToken = 0
-function _newPracticeVideoRequest({ mute = false, keepSpotify = false } = {}) {
-  _stopPracticeTts()
+function _newPracticeVideoRequest({ mute = false, keepSpotify = false, keepTts = false } = {}) {
+  if (!keepTts) _stopPracticeTts()
   if (!keepSpotify) spotifyPlayer.stop()
   window._manualCueToken = (window._manualCueToken || 0) + 1
   if (!window.ytPlayerReady) window._ytReadyAutoplaySuppressed = true
@@ -22196,7 +22256,7 @@ function closePracticeMode() {
   $('#practiceMode').remove()
   // Restore normal playback rate — a practice slowdown shouldn't bleed into
   // regular search-result / recording playback after the session ends.
-  try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
+  try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(_recordingVideoRate()) } catch (_) {}
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
   _practiceVideoCues.releaseMute()
   $('#toggleMediaContainer').click() 
@@ -22227,8 +22287,8 @@ function practiceNav(dir) {
 function _practiceSpeeds() { return practiceSpeeds(window._appSettings.practiceSpeedOptions) }
 function _preferredPracticeSpeed() {
   const options = _practiceSpeeds()
-  const preferred = Number(window._appSettings.practicePlaybackRate)
-  return options.includes(preferred) ? preferred : options[0]
+  const preferred = Number(window._appSettings.playbackSpeed ?? window._appSettings.practicePlaybackRate)
+  return Number.isFinite(preferred) && preferred >= 0.1 && preferred <= 4 ? preferred : options[0]
 }
 function _practiceVideoRate() {
   const requested = Number(window._practicePlaybackRate) || _preferredPracticeSpeed()
@@ -22246,6 +22306,8 @@ function _savePracticeSpeeds() {
   window._appSettings.practiceSpeedOptions = options
   if (!options.includes(window._practicePlaybackRate)) window._practicePlaybackRate = options[0]
   window._appSettings.practicePlaybackRate = window._practicePlaybackRate
+  window._appSettings.playbackSpeed = window._practicePlaybackRate
+  $('#playbackSpeed').val(window._practicePlaybackRate)
   saveAppSettings()
   $p.find('.practice-speeds-input').val(options.join(', '))
   $p.find('.practice-speeds-status').text('Saved')
@@ -22254,6 +22316,8 @@ function _savePracticeSpeeds() {
 function cyclePracticePlaybackRate() {
   window._practicePlaybackRate = nextPracticeSpeed(window._practicePlaybackRate, _practiceSpeeds())
   window._appSettings.practicePlaybackRate = window._practicePlaybackRate
+  window._appSettings.playbackSpeed = window._practicePlaybackRate
+  $('#playbackSpeed').val(window._practicePlaybackRate)
   saveAppSettings()
   _applyPracticeSpeed()
 }
@@ -22306,7 +22370,7 @@ function _searchCurrentPracticeWord() {
 }
 
 function minimizePracticeMode() {
-  if (typeof _stopPracticeTts === 'function') _stopPracticeTts()
+  if (_practiceTts) _practiceTts.pause()
   // Hiding an <audio> does not silence it, and minimising hides the panel by
   // dropping the body class — the same trap closing the view has to avoid.
   try { _stopPracticeAudio() } catch (_) {}
@@ -22334,7 +22398,7 @@ function minimizePracticeMode() {
     if (_pracRec.phase === 'recording') _pracRecStop()
     _renderPracticeRecBar()
   }
-  _newPracticeVideoRequest({ keepSpotify: spotify })
+  _newPracticeVideoRequest({ keepSpotify: spotify, keepTts: true })
   _practiceVideoCues.releaseMute()
   _updatePracticeRestoreCount()
   $('#toggleMediaContainer').click()  
@@ -22353,6 +22417,7 @@ function restorePracticeMode() {
   _coverOpenDialogsForStudy()
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
+  if (_practiceTts) { _practiceTts.resume(); return }
   if (spotifyClips(it).length) { spotifyPlayer.show({ focus: false }); return }
   // A manual card's linked YouTube video must be re-cued at its own
   // timestamp when Practice is restored. _cueManualCardVideo uses the
@@ -23552,6 +23617,7 @@ async function _playPracticeManualVideo(it) {
     })
     if (!ownsRequest()) return
     if (!isCurrent()) throw new Error('The linked video did not reach its timestamp')
+    try { window.ytPlayer?.setPlaybackRate(_practiceVideoRate()) } catch (_) {}
     _practiceVideoCues.beginPlayback(request)
     window._practicePlaybackCard = it
     _watchPracticeClipEnd(video.timeEnd, clipToken)

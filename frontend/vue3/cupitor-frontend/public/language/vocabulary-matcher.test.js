@@ -219,3 +219,11 @@ test('existing related compound participles still work', () => {
     expect.objectContaining({ category: 'Illuminate', kind: 'compound', constituent: 'belysta' }),
   ]))
 })
+
+test('matches inflected leading words in complete phrases, preserving particles and order', () => {
+  const m = createVocabularyMatcher({ Phrases: ['fantisera ihop', 'samla ihop', 'fantisera om', 'ihop fantisera'] });
+  expect(m.search('fantiserat ihop').map(row => row.line)).toEqual(['fantisera ihop']);
+  expect(m.search('samlade ihop').map(row => row.line)).toEqual(['samla ihop']);
+  expect(m.search('fantiserat hop')).toEqual([]);
+  expect(m.matchLine('fantisera ihop', 'fantiserade ihop')?.kind).toBe('family');
+});

@@ -9,6 +9,7 @@
 import { escapeHtml } from './html-utils.js'
 import { relaxSpaces } from './search-text.js'
 import { cardPlainText } from './card-html.js'
+import { orderedRecordingEntries } from './recordings-order.js'
 
 // Where addManualEntry files cards: items['Manual']['Card'].
 const MANUAL_ST = 'Manual'
@@ -37,11 +38,12 @@ export function findManualCards(recordings, search, { limit = 200 } = {}) {
     if (!rec || rec.virtual || rec.external) continue
     const bucket = rec.items && rec.items[MANUAL_ST] && rec.items[MANUAL_ST][MANUAL_W]
     if (!Array.isArray(bucket)) continue
+    const numbers = new Map(orderedRecordingEntries(rec.items).map((entry, i) => [entry.item, i + 1]))
     for (const item of bucket) {
       if (!item) continue
       // The words, so a search for "span" does not find every card in colour.
       if (re.test(cardPlainText(item.source)) || re.test(cardPlainText(item.target))) {
-        out.push({ playlist: name, item })
+        out.push({ playlist: name, item, itemNumber: numbers.get(item) })
         if (out.length >= limit) return out
       }
     }
@@ -104,13 +106,13 @@ export function renderManualResultsHtml(hits, search, { collapsed = false, owner
   if (!hits || !hits.length) {
     return '<div class="manual-results-empty">No manual cards match.</div>'
   }
-  const rows = hits.map(({ playlist, item }) => {
+  const rows = hits.map(({ playlist, item, itemNumber }) => {
     const snippet = matchSnippetHtml(cardPlainText(item.source), search) ||
       matchSnippetHtml(cardPlainText(item.target), search) || ''
     const label = ownerLabel(playlist)
     const shown = label ? `${label} · ${playlist}` : playlist
-    return `<button type="button" class="manual-hit" data-playlist="${escapeHtml(playlist)}" data-id="${escapeHtml(item.id)}" title="Practice this card">` +
-      `<span class="manual-hit-playlist">${escapeHtml(shown)}</span> ${snippet}</button>`
+    return `<button type="button" class="manual-hit" data-playlist="${escapeHtml(playlist)}" data-id="${escapeHtml(item.id)}" title="Open this card">` +
+      `<span class="manual-hit-playlist">${escapeHtml(shown)}${itemNumber ? ` · #${itemNumber}` : ''}</span> ${snippet}</button>`
   })
   const n = hits.length
   return `<div class="lib-wrap manual-wrap${collapsed ? ' lib-collapsed' : ''}">
