@@ -117,6 +117,19 @@ export function createVocabularyMatcher(vocabulary, {
         return { kind: 'exact', matched: term }
       }
     }
+    // Inflect the leading word of a phrase while keeping its particles and
+    // remaining words literal: a partial tail must not become a new phrase.
+    for (const term of queryTerms.filter(t => /\s/.test(t))) {
+      const wanted = wordsOf(term)
+      for (const phrase of row.phrases) {
+        const words = wordsOf(phrase)
+        if (wanted.length > 1 && words.some((_, i) =>
+          wanted.every((word, j) => j === 0
+            ? words[i] && forms.related(words[i], word) : words[i + j] === word))) {
+          return { kind: 'family', matched: phrase }
+        }
+      }
+    }
     const singles = queryTerms.filter(t => t.length >= 3 && !/\s/.test(t) && !VOCAB_OVERLAP_STOP_WORDS.has(t))
     for (const term of singles) if (row.words.includes(term)) return { kind: 'token', matched: term }
     for (const term of singles) {

@@ -18,7 +18,7 @@ function fixture(options = {}) {
   let time = 1000, permissionChecks = 0
   const recordings = (options.recordings || []).slice()
   const context = {
-    _pracRec:state, Promise, Date:{now:()=>time}, Math, clearInterval(){},
+    _pracRec:state, _practiceTts:null, Promise, Date:{now:()=>time}, Math, clearInterval(){},
     window:{_practiceActive:true}, $:()=>({addClass(){},removeClass(){},click(){}}),
     hideMediaRelatedContainer(){}, spotifyClips:()=>[], _newPracticeVideoRequest(){},
     _practiceVideoCues:{releaseMute(){}}, _updatePracticeRestoreCount(){},
