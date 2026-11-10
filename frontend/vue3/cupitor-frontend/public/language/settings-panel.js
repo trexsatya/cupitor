@@ -1,7 +1,37 @@
+// Older WebView documents can outlive a module update. Build missing inputs
+// before the application binds handlers, instead of silently omitting them.
+export function ensurePlaybackControls(panel, settings = {}) {
+  if (!panel) return
+  const container = panel.firstElementChild || panel
+  const fields = [
+    ['playbackSpeed', 'Speed', 'number', settings.playbackSpeed ?? settings.recAudioPlaybackRate ?? 1, { min: '0.1', max: '4', step: '0.05' }],
+    ['ttsReplacements', 'TTS replacements', 'textarea',
+      (settings.ttsReplacements ?? [{ from: '->', to: 'could be' }, { from: '→', to: 'could be' }])
+        .map(rule => `${rule.from}=${rule.to}`).join('\n'), { rows: '3' }],
+    ['ttsNewlinePauseMs', 'TTS newline pause (ms)', 'number', settings.ttsNewlinePauseMs ?? 700,
+      { min: '0', max: '10000', step: '100' }],
+  ]
+  for (const [id, title, type, value, attributes] of fields) {
+    if (panel.querySelector('#' + id)) continue
+    const label = document.createElement('label')
+    label.className = 'lang-panel-label'
+    label.textContent = title + ' '
+    const input = document.createElement(type === 'textarea' ? 'textarea' : 'input')
+    input.id = id
+    if (type !== 'textarea') input.type = type
+    input.setAttribute('aria-label', title)
+    for (const [name, content] of Object.entries(attributes)) input.setAttribute(name, content)
+    input.value = value
+    label.append(input)
+    container.append(label)
+  }
+}
+
 // Rehome the existing controls, retaining IDs, listeners and bridge visibility.
 // The same DOM is reused every time Settings opens.
 export function organizeSettingsPanel(panel) {
   if (!panel || panel.dataset.organized) return
+  ensurePlaybackControls(panel, window._appSettings || {})
   panel.dataset.organized = '1'
   const original = panel.firstElementChild
   const shell = document.createElement('div')
@@ -125,4 +155,12 @@ export function organizeSettingsPanel(panel) {
   button.addEventListener('click', () => window.jQuery(panel).dialog('close'))
   done.append(button); panel.append(done)
   choose(sections.keys().next().value)
+}
+
+// Imported before language.js installs its ready handlers. This also makes the
+// existing settings-loading and change handlers work with an older HTML page.
+if (typeof document !== 'undefined') {
+  const ensure = () => ensurePlaybackControls(document.getElementById('settingsPanel'), window._appSettings || {})
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ensure, { once: true })
+  else ensure()
 }
