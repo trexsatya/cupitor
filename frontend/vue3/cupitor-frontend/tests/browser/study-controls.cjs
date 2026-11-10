@@ -154,7 +154,7 @@ async function checkStudyControls(browser) {
       await page.waitForFunction(() => window._recPlayManualAudio && !window._recPlayManualAudio.paused && window._recPlayManualAudio.playbackRate === 0.75)
       await page.waitForFunction(() => document.querySelector('#recMusicHost audio').src.endsWith('calm.wav') && !document.querySelector('#recMusicHost audio').paused)
       await next(); await playerAt(3)
-      await page.waitForFunction(() => window._recPlayManualAudio && !window._recPlayManualAudio.paused && window._recPlayManualAudio.playbackRate === 1)
+      await page.waitForFunction(() => window._recPlayManualAudio && !window._recPlayManualAudio.paused && window._recPlayManualAudio.playbackRate === window._appSettings.playbackSpeed)
       await checkDivider(page, 'player', mobile)
       const playerBoundary = (await page.locator('#studyMediaDivider').boundingBox()).y
       if (!await practice.isVisible()) await page.getByRole('button', { name: 'Show details', exact: true }).click()
