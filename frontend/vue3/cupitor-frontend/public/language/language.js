@@ -8973,7 +8973,7 @@ function _translationPanelDirection() {
 // those paths set, and typed searches clear it.
 function _translationPanelWord() {
   const raw = (window.unprocessedSearchText == null)
-    ? String($('#searchText').val() || '')
+    ? String(window._requestedSearchText ?? $('#searchText').val() ?? '')
     : String(window.unprocessedSearchText)
   // A vocabulary line is a pair, not a word to look up, and which half is the
   // one being searched is not knowable from the string.
@@ -8991,7 +8991,11 @@ function _translationPanelWord() {
   if (word.length < 3) return ''
   // Whatever is left of a hint once the brackets go ("se [^ ]*") is not a word
   // to look up either, and the same rule that decides that says so.
-  return _isLookupText(word) ? word : ''
+  // Translation accepts complete phrases and sentences. The three-word
+  // dictionary-candidate limit above belongs only to subtitle regrouping.
+  // Reject regex syntax while allowing ordinary sentence punctuation.
+  return word.length <= 1000 && /[\p{L}\p{M}]/u.test(word) &&
+    /^[\p{L}\p{M}\p{N}\s'’"“”„\-–—.,!?;:…]+$/u.test(word) ? word : ''
 }
 
 // The panel belongs to the word on screen and to the direction it was looked up
@@ -9581,6 +9585,9 @@ async function fetchSRTs(searchText, requestToken) {
     // The dictionary panel describes the results being replaced, so it goes
     // with them rather than staying up, clickable, until the host answers.
     _hideStaleTranslationPanel()
+    // Start translation before subtitle lookup or vocabulary rendering. Empty
+    // results and slow subtitle searches must still translate the raw query.
+    _renderTranslationPanel(myToken).catch(e => console.warn('translation panel failed', e))
     // Rebuild the enabled source blocks for this query.
     _ensureLibrarySearchBar()
 
