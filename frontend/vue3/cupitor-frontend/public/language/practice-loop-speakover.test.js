@@ -100,7 +100,15 @@ describe('continuous Practice Speak Over loop', () => {
     expect(h.audioPlays).toHaveLength(1)
     expect(h.calls.some(c=>c[0]==='pause')).toBe(false)
     h.setPosition(15.98); h.tick()
-    expect(h.audios[0].paused).toBe(true)
+    expect(h.audios[0].paused).toBe(false) // long take continues while source rewinds
+    h.audios[0].listeners.ended()
+    h.setPosition(10.2); h.tick()
+    h.setPosition(10.3); h.tick()
+    h.setPosition(11.9); h.tick()
+    h.setPosition(12.1); h.tick()
+    await flush()
+    expect(h.audioPlays).toHaveLength(1) // not restarted within the same pass
+    h.setPosition(15.98); h.tick()
     h.setPosition(10.2); h.tick()
     h.setPosition(10.3); h.tick()
     h.setPosition(11.9); h.tick()
