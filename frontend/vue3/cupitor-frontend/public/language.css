@@ -5965,3 +5965,32 @@ body:is(.rec-playing, .practice-mode) #youtubeResumePlayer {
         justify-content: center;
     }
 }
+
+#practiceGoals { margin-block: .75rem; }
+.practice-goal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  margin-block: .5rem .85rem;
+}
+.practice-goal-card {
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: .75rem;
+  padding: 1rem;
+  margin-bottom: .75rem;
+  overflow-wrap: anywhere;
+}
+.practice-goal-card h3, .practice-goal-form h3 { font-size: 1.15rem; margin: 0 0 .5rem; }
+.practice-goal-category { display: inline-block; background: #e5efff; color: #123e75; border-radius: 1rem; padding: .15rem .65rem; }
+.practice-goal-card p { margin-block: .5rem; white-space: pre-wrap; }
+.practice-goal-card progress { display: block; width: min(100%, 18rem); accent-color: #0969da; }
+.practice-goal-card details { margin-top: .75rem; }
+.practice-goal-form > label { display: grid; gap: .3rem; margin-bottom: .75rem; }
+.practice-goal-form > .practice-reminder-toggle { display: flex; align-items: center; }
+.practice-goal-form > button { margin: .35rem .4rem .35rem 0; }
+.practice-reminder-slot { border: 1px solid currentColor; border-radius: .5rem; padding: .65rem; margin-bottom: .75rem; }
+.practice-reminder-slot legend { width: auto; font-size: 1rem; margin-bottom: 0; }
+.practice-reminder-days { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .5rem; }
+.practice-reminder-days label { display: flex; align-items: center; gap: .25rem; }
+.practice-goal-status:empty { display: none; }
