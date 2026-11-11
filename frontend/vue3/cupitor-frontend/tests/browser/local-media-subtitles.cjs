@@ -50,6 +50,8 @@ async function verify(browser, width, video = false) {
   try {
     await page.goto('http://127.0.0.1:3000/language.html', {waitUntil:'networkidle'})
     await page.waitForFunction(() => typeof window.loadLocalFiles === 'function')
+    await page.locator('#toggleMediaPanelBtn').click()
+    await page.getByText('Local file', { exact: true }).click()
     await page.locator('#localFiles').setInputFiles([
       video ? {name:'lesson.MP4',mimeType:'video/mp4',buffer:fs.readFileSync(path.join(__dirname,'fixtures/local-media.mp4'))}
         : {name:'lesson.WAV', mimeType:'audio/wav', buffer:wav()},
@@ -57,6 +59,7 @@ async function verify(browser, width, video = false) {
     ])
     await page.getByRole('button', {name:'Use subtitle & play',exact:true}).click()
     await page.locator('#localCaptionPanel .cup-sub-cue').first().waitFor()
+    assert.equal(await page.locator('#mediaControlPanel').isVisible(), false)
     assert.equal(await page.evaluate(() => window.__localInterruptedStarts), 1)
     assert.equal(await page.locator(mediaSelector).evaluate(media => media.paused), true)
     assert.equal(await page.locator('#localCaptionPanel .cup-sub-cue').count(), 3)
@@ -110,9 +113,8 @@ async function verify(browser, width, video = false) {
     for (const r of geometry) assert(r.left >= -1 && r.right <= width + 1, JSON.stringify(r))
     await page.locator('#localClosePlayer').click()
     assert.equal(await page.locator('#localCaptionPanel').isVisible(), false)
-    await page.locator('#mediaControlPanel').evaluate(el => {el.style.display = 'block'})
-    await page.locator('#localMediaContainer').evaluate(el => {el.style.display = 'block'})
-    await page.locator('#localResumePlayer').click()
+    assert.equal(await page.locator('#mediaControlPanel').isVisible(), false)
+    await page.getByRole('button', {name:'Back to player'}).click()
     assert.equal(await page.locator('#localCaptionPanel').isVisible(), true)
 
     if (width === 390) {

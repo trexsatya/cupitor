@@ -98,13 +98,14 @@ describe('native filterData handoff', () => {
       addEventListener(name, fn) { this.listeners[name] = fn },
       dispatch(name, detail) { this.listeners[name]({ detail }) }
     }
-    return { $, win, fields, calls }
+    return { $, win, fields, calls, minimizeMainMedia: jest.fn() }
   }
 
   function attachRealHandler(ui) {
     const code = bodyBetween(source, 'function _applyIncomingLookup(rawText) {',
       "window.addEventListener('capturedSubtitle',")
-    return new Function('window', '$', code + ';return _flushPendingLookup')(ui.win, ui.$)
+    return new Function('window', '$', '_minimizeMainMedia', code + ';return _flushPendingLookup')(
+      ui.win, ui.$, ui.minimizeMainMedia)
   }
 
   test('native lookup clears the stale dropdown and searches the input term', () => {
@@ -112,6 +113,7 @@ describe('native filterData handoff', () => {
     attachRealHandler(ui)
     ui.win.__cupitorSearchReady = true
     ui.win.dispatch('filterData', { text: 'gäll' })
+    expect(ui.minimizeMainMedia).toHaveBeenCalledTimes(1)
     expect(ui.fields['#searchText'].value).toBe('gäll')
     expect(ui.fields['#searchedWords'].value).toBe('')
     expect(ui.win.unprocessedSearchText).toBeNull()

@@ -549,6 +549,7 @@ function _applyIncomingLookup(rawText) {
   // sessions and their positions behind their restore pills.
   if (window._playingRecording && !window._recPlayMinimized) window.minimizePlayingRecording()
   if (window._practiceActive && !window._practiceMinimized) window.minimizePracticeMode()
+  _minimizeMainMedia()
   $('#saveRevisionBtn').show()
   window.unprocessedSearchText = null
   window.preSelectedSearchedWord = null
@@ -736,12 +737,22 @@ window.addEventListener('cupitorMediaKey', () => _ytReturnGuard.cancel(), true)
 async function playSelectedMedia() {
   const sel = window.mediaSelected || {}
   if (!sel.link) { playMedia(); return }
+  const $status = $('#mediaPlaybackStatus').empty()
+  const playback = playNewMedia(sel.link, sel.source || 'link', null, true)
+  const loadSeq = _mainMediaLoadSeq
   try {
-    await playNewMedia(sel.link, sel.source || 'link', null, true)
+    await playback
   } catch (e) {
     console.warn('playSelectedMedia: playNewMedia failed', e)
-    playMedia()
+    if (loadSeq === _mainMediaLoadSeq && sel === window.mediaSelected) {
+      _minimizeMainMedia()
+      $('#mediaControlPanel').show()
+      $status.text('Could not open the player. Tap Play to retry.')
+      showResultContainer()
+    }
+    return
   }
+  if (loadSeq !== _mainMediaLoadSeq || sel !== window.mediaSelected) return
   try { await loadStarredLines(sel.link, 'youtube') } catch (_) {}
 }
 window.playSelectedMedia = playSelectedMedia
@@ -3986,6 +3997,7 @@ $('document').ready(e => {
   $('#togglePlayerControlsBtn').click(showMediaRelatedContainer)
 
   $('#mp3Choice').change(async e => {
+    $('#mediaPlaybackStatus').empty()
     const link = $('#mp3Choice').val();
     if (link) {
       //window.location.hash = link
@@ -5652,7 +5664,7 @@ function _localMediaElement(file) {
 function _getLocalCaptionPanel() {
   if (!_localCaptionPanel) _localCaptionPanel = createMediaCaptionPanel({
     onOpenSubtitles: () => $('#localSubtitleFiles').trigger('click'),
-    onSplitChange: on => { if (!on) { _localMediaLayout(false); _minimizeYoutubeMedia() } },
+    onSplitChange: on => { if (!on) _minimizeMainMedia() },
     onClearCues: () => {
       if (document.body.classList.contains('youtube-media-mode')) { clearSubtitles(); return }
       if (!_localMediaSelection) return
@@ -5663,11 +5675,7 @@ function _getLocalCaptionPanel() {
       _renderLocalSubtitleStatus()
     },
     onWord: word => {
-      const youtube = document.body.classList.contains('youtube-media-mode')
-      const media = youtube ? _youtubeCaptionMedia : _localMediaElement()
-      media.pause()
-      _localMediaLayout(false)
-      _minimizeYoutubeMedia()
+      _minimizeMainMedia()
       $('#searchText').val(word).trigger('change')
     },
     onCapture: payload => {
@@ -5691,9 +5699,16 @@ function _getLocalCaptionPanel() {
 
 const _youtubeCaptionMedia = createYoutubeMediaAdapter(() => window.ytPlayer, () => { window.youtubePlayInterval = null })
 
+function _updateMediaReturnButton() {
+  const classes = document.body.classList
+  $('#returnToMediaPlayer').toggle(!!window.mediaBeingPlayed &&
+    !classes.contains('youtube-media-mode') && !classes.contains('local-media-mode'))
+}
+
 function _youtubeMediaLayout(on) {
   document.body.classList.toggle('youtube-media-mode', on)
   if (on) {
+    $('#mediaControlPanel').stop(true, true).hide()
     _youtubeCaptionMedia.start()
     _getLocalCaptionPanel().open(_youtubeCaptionMedia, true)
   } else {
@@ -5701,26 +5716,43 @@ function _youtubeMediaLayout(on) {
     if (!document.body.classList.contains('local-media-mode')) _localCaptionPanel?.close()
   }
   $('#youtubeMediaHeader').toggle(on)
-  $('#youtubeResumePlayer').toggle(!on && window.mediaBeingPlayed?.source === 'link')
+  _updateMediaReturnButton()
 }
 
-function _minimizeYoutubeMedia() {
-  if (!document.body.classList.contains('youtube-media-mode')) return
-  _youtubeCaptionMedia.pause()
-  _youtubeMediaLayout(false)
-  hideMediaContainer()
+function _minimizeMainMedia() {
+  const classes = document.body.classList
+  if (classes.contains('youtube-media-mode')) {
+    _youtubeCaptionMedia.pause()
+    _youtubeMediaLayout(false)
+    hideMediaContainer()
+  } else if (classes.contains('local-media-mode')) {
+    _localMediaElement()?.pause()
+    _localMediaLayout(false)
+  } else return
   showResultContainer()
 }
-$(document).on('click', '#youtubeClosePlayer', _minimizeYoutubeMedia)
-$(document).on('click', '#youtubeResumePlayer', () => { showMediaContainer(); _youtubeMediaLayout(true) })
+$(document).on('click', '#youtubeClosePlayer, #localClosePlayer', _minimizeMainMedia)
+$(document).on('click', '#returnToMediaPlayer', () => {
+  const source = window.mediaBeingPlayed?.source
+  if (!source) return
+  hideResultContainer()
+  if (source === 'link') {
+    showMediaContainer()
+    _youtubeMediaLayout(true)
+  } else if (source === 'local') {
+    _localMediaLayout(true)
+  }
+})
 
 function _localMediaLayout(local) {
   document.body.classList.toggle('local-media-mode', local)
-  if (local) _getLocalCaptionPanel().open(_localMediaElement())
-  else if (_localCaptionPanel) _localCaptionPanel.close()
+  if (local) {
+    $('#mediaControlPanel').stop(true, true).hide()
+    _getLocalCaptionPanel().open(_localMediaElement())
+  } else if (_localCaptionPanel) _localCaptionPanel.close()
   $('#localMedia').toggle(local)
   $('#localMediaHeader').toggle(local)
-  $('#localResumePlayer').toggle(!local && window.mediaBeingPlayed?.source === 'local')
+  _updateMediaReturnButton()
 }
 
 function _renderLocalSubtitleStatus() {
@@ -5807,11 +5839,6 @@ async function loadLocalFiles() {
   await _chooseLocalSubtitles(files, mediaFile)
 }
 
-$(document).on('click', '#localClosePlayer', () => {
-  _localMediaElement().pause()
-  _localMediaLayout(false)
-})
-$(document).on('click', '#localResumePlayer', () => _localMediaLayout(true))
 $(document).on('change', '#localSubtitleFiles', async function () {
   const files = Array.from(this.files || [])
   this.value = ''
@@ -5946,26 +5973,19 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   clearSubtitles()
   stopMedia(source)
   _youtubeMediaLayout(false)
-  _localMediaLayout(source === 'local')
+  _localMediaLayout(false)
   if (source === 'local') window.syncSubtitle = true
 
   //Load subtitle
 
   async function _playMedia() {
     if (source === 'link') {
-      showMediaContainer()
-      $('#localMedia').hide()
-      showMediaRelatedContainer()
       window.youtubePlayInterval = null
-      await loadYoutubeVideo(link, {isCurrent})
+      await loadYoutubeVideo(link, {isCurrent, mainMedia: true})
       if (!isCurrent()) return
-      window.playingYoutubeVideo = true;
-      window.syncSubtitle = true
-      _youtubeMediaLayout(true)
       if (!autoPlay) _suppressYoutubeAutoplay()
     } else if (source === 'local') {
       hideMediaContainer()
-      $('#localMedia').show()
       $('#localVideoContainer').toggle(/\.mp4$/i.test(mediaFile.name))
       window.playingYoutubeVideo = false;
       if (/\.(mp3|wav)$/i.test(mediaFile.name)) {
@@ -5974,25 +5994,23 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
         window.playingAudio = true;
         window.playingVideo = false;
         hidePlayer(window.videoPlayer)
-        showAudioPlayer()
       } else if (/\.mp4$/i.test(mediaFile.name)) {
         videoPlayer.setSrc(URL.createObjectURL(mediaFile))
         window.playingAudio = false;
         window.playingVideo = true;
         if (autoPlay) playLocalMedia(videoPlayer)
         hidePlayer(window.audioPlayer)
-        showVideoPlayer()
       }
+      window.mediaBeingPlayed = {link, source}
+      _localMediaLayout(true)
+      if (window.playingAudio) showAudioPlayer()
+      else if (window.playingVideo) showVideoPlayer()
       // The existing local <audio>/<video> is the source of truth for the
       // recording timestamp, pause/resume and playback-crossing watcher.
       if (_haveSpeakOverRecorder() && mediaFile) {
         _localSpeakOver.attach(mediaFile, _localMediaElement(mediaFile))
       }
-      _getLocalCaptionPanel().open(_localMediaElement(mediaFile))
     }
-    window.mediaBeingPlayed = {link, source}
-    $('#localResumePlayer, #youtubeResumePlayer').hide()
-    //$('#subControls').hide()
   }
 
   hideResultContainer();
@@ -9699,21 +9717,28 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 // 3. This function creates an <iframe> (and YouTube player)
 //    after the API code downloads.
 
-async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds, respectInterval = true, now = () => Date.now(), beforeLoad } = {}) {
+async function loadYoutubeVideo(videoId, {
+  isCurrent = () => true, startSeconds, respectInterval = true, now = () => Date.now(), beforeLoad,
+  mainMedia = !window._playingRecording && !window._practiceActive,
+} = {}) {
   const readyDeadline = now() + VIDEO_RECOVERY_MS
   const ready = () => { try { return !!(window.ytPlayerReady && window.ytPlayer?.getIframe?.()) } catch (_) { return false } }
-  await waitUntil(() => !isCurrent() || ready() || now() >= readyDeadline)
+  await waitUntil(() => {
+    if (!isCurrent() || now() >= readyDeadline) return true
+    window.ensureYoutubePlayer?.()
+    return ready()
+  })
   if (!isCurrent()) return
   if (!ready()) throw new Error('YouTube player did not become ready within 20 seconds')
   showMediaContainer()
-  if (!window._playingRecording && !window._practiceActive) {
+  if (mainMedia && !document.body.classList.contains('rec-playing') && !document.body.classList.contains('practice-mode')) {
     _localMediaLayout(false)
     window.playingYoutubeVideo = true
     window.playingAudio = window.playingVideo = false
     window.syncSubtitle = true
     window.mediaBeingPlayed = {link:videoId, source:'link'}
     _youtubeMediaLayout(true)
-    $('#youtubeResumePlayer').hide()
+    hideMediaRelatedContainer()
     $('#youtubeMediaName').text(window.srts?.find(it => it.link === videoId)?.name || videoId)
     const pair = window.allSubtitles[videoId]
     _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
@@ -9723,10 +9748,6 @@ async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds,
       }
     }).catch(e => console.warn('subtitles unavailable for', videoId, e?.message))
   }
-  // Play / practice modes drive everything through their own floating overlay,
-  // so the side player panel (speed controls, starred lines, etc.) just gets in
-  // the way — keep it hidden while either mode is active.
-  if (!window._playingRecording && !window._practiceActive && !document.body.classList.contains('youtube-media-mode')) showMediaRelatedContainer()
   return new Promise((resolve, reject) => {
     // Finish the way a reload used to.
     //
