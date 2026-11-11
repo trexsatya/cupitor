@@ -102,12 +102,25 @@ export function mergePracticeLog(remote, local) {
   if (!remote) return local
   if (!local)  return remote
   const out = {
+    goals: { ...remote.goals },
+    reminders: (remote.reminders?.updatedAt || 0) > (local.reminders?.updatedAt || 0)
+      ? remote.reminders : local.reminders,
     customItems: [],
     weeks: {},
     historyRetainWeeks: Math.max(
       parseInt(remote.historyRetainWeeks, 10) || PRACTICE_LOG_DEFAULT_RETAIN,
       parseInt(local.historyRetainWeeks,  10) || PRACTICE_LOG_DEFAULT_RETAIN
     )
+  }
+  for (const [id, goal] of Object.entries(local.goals || {})) {
+    const other = out.goals[id]
+    if (!other) {
+      out.goals[id] = goal
+      continue
+    }
+    const latest = (other.updatedAt || 0) > (goal.updatedAt || 0) ? other : goal
+    const updates = new Map([...other.updates, ...goal.updates].map(update => [update.id, update]))
+    out.goals[id] = { ...latest, updates: [...updates.values()].sort((a, b) => a.date.localeCompare(b.date)) }
   }
   const seen = new Set()
   ;[remote.customItems, local.customItems].forEach(list => {
@@ -130,5 +143,7 @@ export function mergePracticeLog(remote, local) {
     })
     out.weeks[wk] = merged
   })
+  if (!Object.keys(out.goals).length && !remote.goals && !local.goals) delete out.goals
+  if (!out.reminders) delete out.reminders
   return out
 }

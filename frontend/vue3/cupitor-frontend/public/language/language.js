@@ -21,6 +21,7 @@ import { createBundleLoader, createSubtitleBundleAdapter } from './subtitle-bund
 import { loadSubtitlePacks } from './subtitle-pack-loading.js';
 import { SUBTITLE_BATCH_DOCUMENTS, SUBTITLE_BATCH_BYTES } from './subtitle-batches.js'
 import { recordingsHaveChanges } from './recordings-sync-state.js';
+import { mountPracticeGoals } from './practice-goals.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
@@ -3200,7 +3201,9 @@ async function _fetchPracticeLogRemote() {
 // user has unsaved edits since the last successful push.
 window._practiceLog = null
 window._practiceLogPending = false
-window._practiceLogActiveTab = 'current'
+window._practiceLogActiveTab = 'goals'
+let _practiceGoalsView
+let _practiceGoalTarget
 
 function _practiceLogActiveWeekLabel() {
   if (window._practiceLogActiveTab === 'next') return _nextWeekLabel()
@@ -3280,7 +3283,24 @@ function _setPracticeLogTab(tab) {
   window._practiceLogActiveTab = tab
   $('#practiceLogDialog .practice-log-tab').removeClass('active')
   $(`#practiceLogDialog .practice-log-tab[data-tab="${tab}"]`).addClass('active')
-  if (tab === 'history') {
+  _practiceGoalsView?.dispose()
+  _practiceGoalsView = null
+  $('#practiceGoals').prop('hidden', tab !== 'goals')
+  $('#practiceLogWeekLabel').toggle(tab !== 'goals' && tab !== 'history')
+  if (tab === 'goals') {
+    $('#practiceLogPlanView, #practiceLogHistoryView').hide()
+    _practiceGoalsView = mountPracticeGoals({
+      $, root: $('#practiceGoals')[0], data: () => window._practiceLog,
+      language: getLangFromUrl().fullName,
+      target: _practiceGoalTarget,
+      save() {
+        window._practiceLogPending = true
+        _savePracticeLogLocal(window._practiceLog)
+        _refreshPracticeLogPendingHint()
+      },
+    })
+    _practiceGoalTarget = null
+  } else if (tab === 'history') {
     $('#practiceLogPlanView').hide()
     $('#practiceLogHistoryView').show()
     _renderPracticeLogHistory()
@@ -3291,7 +3311,7 @@ function _setPracticeLogTab(tab) {
   }
 }
 
-async function openPracticeLogDialog() {
+async function openPracticeLogDialog(forceGoals = false) {
   // Mark first-open before any await — if the network fetch fails the user
   // still gets the front-page banner removed because they made the choice to
   // open it. Same flag is checked at boot in _initPracticeLogFrontBanner.
@@ -3317,8 +3337,8 @@ async function openPracticeLogDialog() {
   const dialogMaxH = Math.max(240, _vh - 80)
   if (!$dlg.hasClass('ui-dialog-content')) {
     $dlg.dialog({
-      title: 'Practice Log / Schedule',
-      width: Math.min(720, $(window).width() - 40),
+      title: 'Practice Log',
+      width: Math.min(840, $(window).width() - 24),
       maxHeight: dialogMaxH,
       modal: false,
       autoOpen: false,
@@ -3349,22 +3369,30 @@ async function openPracticeLogDialog() {
     $('#practiceLogCloseBtn').on('click', function () { $dlg.dialog('close') })
     $('#practiceLogSaveBtn').on('click', _commitPracticeLogToGithub)
   }
-  if ($dlg.dialog('isOpen')) { $dlg.dialog('close'); return }
+  if ($dlg.dialog('isOpen')) {
+    if (forceGoals === true) _setPracticeLogTab('goals')
+    else $dlg.dialog('close')
+    return
+  }
   // Refresh maxHeight in case the viewport changed since dialog construction.
   $dlg.dialog('option', 'maxHeight', dialogMaxH)
   $dlg.dialog('open')
 
-  _setPracticeLogTab(window._practiceLogActiveTab || 'current')
+  _setPracticeLogTab(forceGoals === true ? 'goals' : window._practiceLogActiveTab)
   _refreshPracticeLogPendingHint()
 
   // Background-fetch latest remote and merge in. Skips silently if offline.
   const $status = $('#practiceLogStatus').text('fetching remote…')
   const remote = await _fetchPracticeLogRemote()
   if (remote) {
+    if (window._practiceLog !== local) return
     const merged = _mergePracticeLog(remote, local)
-    window._practiceLog = merged
-    _savePracticeLogLocal(merged)
-    if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
+    Object.assign(local, merged)
+    _savePracticeLogLocal(local)
+    if (window._practiceLogActiveTab === 'goals') {
+      _practiceGoalsView?.refresh()
+      if (local.reminders) _practiceGoalsView?.sync().catch(() => {})
+    } else if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
     else _renderPracticeLogPlan()
     $status.text('synced ' + new Date().toLocaleTimeString())
   } else {
@@ -3372,6 +3400,14 @@ async function openPracticeLogDialog() {
   }
 }
 window.openPracticeLogDialog = openPracticeLogDialog
+function _openPracticeReminder(detail) {
+  if (detail?.language !== getLangFromUrl().fullName) return
+  window.__cupitorPracticeReminderOpened = null
+  _practiceGoalTarget = detail.goal
+  openPracticeLogDialog(true)
+}
+window.addEventListener('cupitorPracticeReminderOpened', event => _openPracticeReminder(event.detail))
+$(function () { _openPracticeReminder(window.__cupitorPracticeReminderOpened) })
 
 function _practiceLogAddItem() {
   const $inp = $('#practiceLogNewItemName')
@@ -3401,7 +3437,7 @@ async function _commitPracticeLogToGithub() {
     await _userData.flush()
     await commitWithMerge({
       filePath,
-      commitMessage: 'practice-log: update weekly plan/notes',
+      commitMessage: 'practice-log: update goals and weekly notes',
       merge: (remoteText) => {
         let remote = null
         // Unreadable text on the server is not "no log yet": writing over it would lose it.
@@ -3417,7 +3453,8 @@ async function _commitPracticeLogToGithub() {
     await _userData.flush()
     window._practiceLogPending = false
     _refreshPracticeLogPendingHint()
-    if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
+    if (window._practiceLogActiveTab === 'goals') _practiceGoalsView?.refresh()
+    else if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
     else _renderPracticeLogPlan()
     $status.text('saved ' + new Date().toLocaleTimeString())
   } catch (e) {
