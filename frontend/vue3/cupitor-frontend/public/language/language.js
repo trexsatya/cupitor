@@ -8,6 +8,7 @@ import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js'
 import { retainCaptionEnds } from './caption-capture.js';
 import { openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
 import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.js';
+import { browserRecordingAvailable, createBrowserSpeakOverRecorder } from './browser-speakover.js';
 import { createMediaCaptionPanel } from './media-caption-panel.js';
 import { createYoutubeMediaAdapter } from './youtube-media-adapter.js';
 import { playLocalMedia } from './local-playback.js';
@@ -5978,7 +5979,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
       }
       // The existing local <audio>/<video> is the source of truth for the
       // recording timestamp, pause/resume and playback-crossing watcher.
-      if (_haveAudioBridge() && mediaFile) {
+      if (_haveSpeakOverRecorder() && mediaFile) {
         _localSpeakOver.attach(mediaFile, _localMediaElement(mediaFile))
       }
       _getLocalCaptionPanel().open(_localMediaElement(mediaFile))
@@ -15321,6 +15322,30 @@ const _AUDIO_PENDING = Object.create(null)
 let _audioReqSeq = 1
 function _nextAudioRid() { return 'a' + (_audioReqSeq++) + '_' + Date.now().toString(36) }
 function _haveAudioBridge() { return !!(window.AudioBridge && typeof window.AudioBridge.postMessage === 'function') }
+const _browserSpeakOver = createBrowserSpeakOverRecorder(window)
+function _haveSpeakOverRecorder() { return _haveAudioBridge() || browserRecordingAvailable(window) }
+function _isSpeakOverAudioUrl(url) { return typeof url === 'string' && (/^webrec:\/\//.test(url) || _isAudioMediaUrl(url)) }
+function _speakOverAudioRpc(op, payload) {
+  if (_haveAudioBridge()) return _audioRpc(op, payload)
+  switch (op) {
+    case 'recordStart': return _browserSpeakOver.start(payload?.id)
+    case 'recordStop': return _browserSpeakOver.stop()
+    case 'recordCancel': return _browserSpeakOver.cancel()
+    case 'load': return _browserSpeakOver.load(payload?.url)
+    case 'delete': return _browserSpeakOver.remove(payload?.url)
+    default: return Promise.reject(new Error('Browser recorder does not support ' + op))
+  }
+}
+async function _loadSpeakOverAudio(url) {
+  if (typeof url === 'string' && url.startsWith('webrec://')) return _browserSpeakOver.load(url)
+  return loadManualAudioData(url)
+}
+function _deleteSpeakOverAudio(url) {
+  if (typeof url === 'string' && url.startsWith('webrec://')) {
+    return _browserSpeakOver.remove(url).catch(e => console.warn('[speakover] delete failed', e))
+  }
+  return deleteManualAudio(url)
+}
 
 // Dart calls this with {op, rid, result?, error?}. Resolves the matching
 // Promise we registered when we sent the request.
@@ -15370,11 +15395,11 @@ async function deleteManualAudio(url) {
 // A media File itself is never persisted (Android/browser must re-grant it).
 const _localSpeakOver = createLocalSpeakOver({
   permission: () => ensureMicPermissionViaBridge(),
-  startRecording: id => _audioRpc('recordStart', { id }),
-  stopRecording: () => _audioRpc('recordStop', {}),
-  cancelRecording: () => _audioRpc('recordCancel', {}),
-  loadAudio: url => loadManualAudioData(url),
-  deleteAudio: url => deleteManualAudio(url),
+  startRecording: id => _speakOverAudioRpc('recordStart', { id }),
+  stopRecording: () => _speakOverAudioRpc('recordStop', {}),
+  cancelRecording: () => _speakOverAudioRpc('recordCancel', {}),
+  loadAudio: url => _loadSpeakOverAudio(url),
+  deleteAudio: url => _deleteSpeakOverAudio(url),
   readSaved: identity => {
     const value = _userData.getItem(_scopedKey(
       'cupitor:localSpeakOver:' + getLangFromUrl().fullName + ':' + identity))
@@ -15391,7 +15416,7 @@ const _localSpeakOver = createLocalSpeakOver({
 function _renderLocalSpeakOver(st) {
   const $bar = $('#localSpeakOverBar')
   if (!$bar.length) return
-  if (!st || !_haveAudioBridge()) { $bar.hide().empty(); return }
+  if (!st || !_haveSpeakOverRecorder()) { $bar.hide().empty(); return }
   $bar.empty()
   $('<div class="local-sprec-heading">Speak Over · ' + 
     '<span class="local-sprec-note">local media</span></div>').appendTo($bar)
@@ -22022,6 +22047,13 @@ function openPracticeMode(opts) {
           <input type="checkbox" class="practice-speakover-toggle">
           <span>Show speakover</span>
         </label>
+        <label class="practice-settings-row">
+          <span class="practice-settings-lbl">Speakover mode</span>
+          <select class="practice-speakover-mode" aria-label="Speakover mode">
+            <option value="takes">Timestamped takes</option>
+            <option value="loop">Loop clip + latest take</option>
+          </select>
+        </label>
         <div class="practice-settings-row practice-speeds-row">
           <label><span class="practice-settings-lbl">Speed cycle</span>
             <input type="text" class="practice-speeds-input" aria-label="Speed cycle" placeholder="1, 0.75, 0.5">
@@ -22085,6 +22117,15 @@ function openPracticeMode(opts) {
     </div>`).appendTo('body')
 
     $p.on('click', '.prec-toggle', _pracRecToggle)
+    $p.on('change', '.practice-speakover-mode', function () {
+      const requested = this.value === 'loop'
+      if (!_pracRec || _pracRec.phase !== 'idle') {
+        this.value = _pracRec?.loop ? 'loop' : 'takes'
+        return
+      }
+      if (requested !== _pracRec.loop) _pracRecLoopToggle()
+    })
+    $p.on('click', '.prec-loop-replay', () => { if (_pracRec?.loop && _pracRec.loopTake) _pracRecLoopSeek(_pracRec) })
     $p.on('click', '.prec-keep', _pracRecKeep)
     $p.on('click', '.prec-drop', _pracRecDiscard)
     $p.on('click', '.prec-take', _pracRecGoToTake)
@@ -22104,6 +22145,9 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-shuffle', _togglePracticeShuffle)
     $p.on('click', '.practice-settings', _togglePracticeSettingsPanel)
     $p.on('change', '.practice-speakover-toggle', function () {
+      // Hiding Speak Over must also stop the active looping source/take.
+      // Otherwise a hidden mode keeps playing even though its controls vanish.
+      if (!this.checked && _pracRec?.loop && _pracRec.phase === 'idle') _pracRecLoopToggle()
       window._appSettings.practiceSpeakOver = this.checked
       saveAppSettings()
       if (_pracRec) { _pracRec.token++; _pracRec.awaiting = null; _pracRec.watchPos = null }
@@ -22402,7 +22446,17 @@ function minimizePracticeMode() {
     _pracRec.token++
     if (_pracRec.audio) { try { _pracRec.audio.pause() } catch (_) {} _pracRec.audio = null }
     if (_pracRec.phase === 'playback') _pracRec.phase = 'idle'
-    if (_pracRec.phase === 'recording') _pracRecStop()
+    if (_pracRec.phase === 'recording') {
+      if (_pracRec.loop) _pracRecLoopStop()
+      else _pracRecStop()
+    }
+    // A minimized view must not keep looping or talking behind the main page.
+    _pracRec.loop = false
+    _pracRecLoopClearAudio(_pracRec)
+    if (_pracRec.loopTake) _deleteSpeakOverAudio(_pracRec.loopTake.url)
+    _pracRec.loopTake = null
+    if (_pracRec.loopSeekTimer) clearTimeout(_pracRec.loopSeekTimer)
+    _pracRec.loopSeeking = false
     _renderPracticeRecBar()
   }
   _newPracticeVideoRequest({ keepSpotify: spotify, keepTts: true })
@@ -22803,6 +22857,10 @@ async function playPracticeClip() {
   const idx = window._practiceIdx
   const it = window._practiceCards && window._practiceCards[idx]
   if (!it) return
+  if (_pracRec?.loop && _pracRec.key === _pracRecKey(it)) {
+    _pracRecLoopSeek(_pracRec)
+    return
+  }
   // The visible Play button uses this entry point. Dispatch before creating
   // a YouTube request, which intentionally stops/hides the Spotify session.
   if (spotifyClips(it).length) return _togglePracticePlayback()
@@ -22905,7 +22963,7 @@ function _pracRecKey(it) {
 // A card can carry takes when there is a clip to speak over and a host that
 // can hold the bytes. A manual card already has its own two recordings.
 function _pracRecEligible(it) {
-  return !!(it && _haveAudioBridge() &&
+  return !!(it && _haveSpeakOverRecorder() &&
     (spotifyClips(it).length || (!it.manual && typeof it.timeStart === 'number')))
 }
 
@@ -22916,7 +22974,7 @@ function _practiceSpeakOverShown() { return window._appSettings.practiceSpeakOve
 function _pracRecSavedTakes(it) {
   const list = (it && Array.isArray(it.practiceTakes)) ? it.practiceTakes : []
   return list
-    .filter(t => t && _isAudioMediaUrl(t.url) && isFinite(Number(t.t1)))
+    .filter(t => t && _isSpeakOverAudioUrl(t.url) && isFinite(Number(t.t1)))
     .map(t => ({ t1: Number(t.t1), url: t.url, ms: Number(t.ms) || 0 }))
 }
 
@@ -22949,6 +23007,8 @@ function _pracRecBegin(it) {
     token: 0,
     timer: null,
     audio: null,
+    loop: false, loopTake: null, loopAudio: null, loopToken: 0,
+    loopPlayed: false, loopSeeking: false, loopSeekTimer: null,
   }
   // Armed for the whole card, not just after a recording.
   _pracRecWatch()
@@ -22963,14 +23023,17 @@ function _pracRecEnd(discard) {
   st.token++
   if (st.timer) { clearInterval(st.timer); st.timer = null }
   if (st.audio) { try { st.audio.pause() } catch (_) {} st.audio = null }
+  _pracRecLoopClearAudio(st)
+  if (st.loopSeekTimer) clearTimeout(st.loopSeekTimer)
+  if (st.loopTake) _deleteSpeakOverAudio(st.loopTake.url)
   // A recording left open holds the microphone and writes into a file nobody
   // is going to ask for.
   // Not awaited — the session is already gone. The catch is on the promise
   // because the rejection arrives long after this frame has returned.
   if (st.phase === 'recording' || st.phase === 'starting') {
-    try { Promise.resolve(_audioRpc('recordCancel', {})).catch(() => {}) } catch (_) {}
+    try { Promise.resolve(_speakOverAudioRpc('recordCancel', {})).catch(() => {}) } catch (_) {}
   }
-  if (discard) st.takes.forEach(t => { if (!st.kept.has(t.url)) deleteManualAudio(t.url) })
+  if (discard) st.takes.forEach(t => { if (!st.kept.has(t.url)) _deleteSpeakOverAudio(t.url) })
 }
 
 // Stop the clip's own end-watcher: while the loop is driving the playhead,
@@ -23010,20 +23073,29 @@ function _renderPracticeRecBar(note) {
     .prop('checked', _practiceSpeakOverShown())
     .prop('disabled', !!st && st.phase !== 'idle')
     .attr('title', st && st.phase !== 'idle' ? 'Finish recording or replay before hiding speakover' : '')
+  $('#practiceMode .practice-speakover-mode')
+    .val(st?.loop ? 'loop' : 'takes')
+    .prop('disabled', !st || st.phase !== 'idle' || !_practiceSpeakOverShown())
   if (!st || !_practiceSpeakOverShown()) { $bar.hide().empty(); _setPracRecBarHeight(0); return }
   const n = st.takes.length
-  const unkept = st.takes.filter(t => !st.kept.has(t.url)).length
+  const unkept = st.loop ? 0 : st.takes.filter(t => !st.kept.has(t.url)).length
   const rec = st.phase === 'recording'
   const starting = st.phase === 'starting'
   // Mid-loop the video is being driven for the user; a second Rec on top of
   // that would pin a moment they did not choose.
-  const busy = st.phase === 'playback'
+  const busy = st.phase === 'playback' || st.phase === 'stopping'
   // Short enough for the column beside the button. What the longer wording
   // used to explain, the button now says by being round, red and in the
   // middle — and its tooltip still spells it out.
-  const status = note ? note
+  const status = st.loop
+    ? (note || (starting ? 'Starting microphone…'
+      : rec ? 'Recording while clip loops…'
+      : st.phase === 'stopping' ? 'Finishing take…'
+      : st.loopTake ? 'Latest take repeats over the clip' : 'Clip looping · chime in whenever you like'))
+    : note ? note
     : starting ? 'starting microphone…'
     : rec ? 'recording…'
+    : st.phase === 'stopping' ? 'Saving take…'
     : st.phase === 'playback' ? 'your take'
     : n ? n + (n === 1 ? ' take · ' : ' takes · ') + Math.round(_takesDuration(st.takes)) + 's'
     : 'Speak over this clip'
@@ -23034,7 +23106,7 @@ function _renderPracticeRecBar(note) {
   $bar.empty().append(
     $('<div class="prec-row"></div>').append(
       $('<span class="prec-status"></span>').text(status),
-      $('<span class="prec-side"></span>').append(
+      $('<span class="prec-side"></span>').toggle(!st.loop).append(
         $('<button type="button" class="prec-btn prec-keep"></button>')
           .text(unkept ? '✔ Keep ' + unkept : '✔ Keep')
           .prop('disabled', !unkept || rec || starting || busy)
@@ -23047,15 +23119,22 @@ function _renderPracticeRecBar(note) {
         .text(starting ? '✕' : rec ? '⏸' : '●')
         .toggleClass('on', rec)
         .prop('disabled', busy)
-        .attr('aria-label', starting ? 'Cancel recording start' : rec ? 'Pause' : 'Rec')
-        .attr('title', starting ? 'Cancel microphone startup' : rec ? 'Stop and hear it back in place' : 'Record over the clip from here')
+        .attr('aria-label', starting ? 'Cancel recording start' : rec ? 'Stop recording' : 'Rec')
+        .attr('title', starting ? 'Cancel microphone startup'
+          : rec ? (st.loop ? 'Stop and hear latest take over looping clip' : 'Stop and hear it back in place')
+          : (st.loop ? 'Record while clip continues looping' : 'Record over the clip from here'))
     )
   )
   // One small button per take, numbered the way they sit in the clip, to hear
   // any of them back without having to play up to its mark. Their own row so
   // they get the whole width rather than squeezing the column beside the Rec
   // button, and a row that is only there when there is something on it.
-  if (n) {
+  if (st.loop && st.loopTake) {
+    $bar.append($('<button type="button" class="prec-btn prec-loop-replay"></button>')
+      .text('↻ Listen to latest take again')
+      .prop('disabled', st.phase !== 'idle'))
+  }
+  if (n && !st.loop) {
     const $takes = $('<span class="prec-takes"></span>')
     st.takes.forEach((tk, i) => {
       $takes.append(
@@ -23161,7 +23240,7 @@ function _pracRecDeleteTake(t1) {
     // A take the card already points at cannot be deleted until Keep has
     // rewritten the list; one that was only ever scratch can go now.
     if (st.kept.has(res.removed.url)) { st.orphans.push(res.removed.url); st.kept.delete(res.removed.url) }
-    else deleteManualAudio(res.removed.url)
+    else _deleteSpeakOverAudio(res.removed.url)
   }
   // Nothing is waiting for a mark that no longer exists.
   if (st.awaiting != null && Math.abs(Number(st.awaiting) - t1) <= TAKE_SAME_SPOT_S) st.awaiting = null
@@ -23185,6 +23264,12 @@ function _pracRecGoToTake(e) {
 function _pracRecToggle() {
   const st = _pracRec
   if (!st || !_practiceSpeakOverShown()) return
+  if (st.loop) {
+    if (st.phase === 'starting') { _pracRecCancelStart(st); return }
+    if (st.phase === 'recording') { _pracRecLoopStop(); return }
+    if (st.phase === 'idle') _pracRecLoopStart()
+    return
+  }
   if (st.phase === 'starting') { _pracRecCancelStart(st); return }
   if (st.phase === 'recording') { _pracRecStop(); return }
   if (st.phase !== 'idle') return
@@ -23195,13 +23280,13 @@ function _pracRecCancelStart(st) {
   if (_pracRec !== st || st.phase !== 'starting') return
   st.token++
   st.phase = 'idle'; st.t1 = null; st.url = null
-  Promise.resolve(_audioRpc('recordCancel', {})).catch(() => {})
+  Promise.resolve(_speakOverAudioRpc('recordCancel', {})).catch(() => {})
   _renderPracticeRecBar('recording cancelled')
 }
 
 function _pracRecStartError(error) {
   const message = String(error?.message || error || '')
-  if (/permission|denied/i.test(message)) return 'Microphone permission needed. Enable it in Android app permissions.'
+  if (/permission|denied/i.test(message)) return 'Microphone permission needed. Allow microphone access for this site or app.'
   if (/busy/i.test(message)) return 'Microphone is busy. Stop other recording and try again.'
   if (/cancel/i.test(message)) return 'recording cancelled'
   return 'Microphone could not start. Try recording again.'
@@ -23226,13 +23311,13 @@ async function _pracRecStart() {
   if (perm === 'denied') {
     st.phase = 'idle'; st.t1 = null
     _renderPracticeRecBar('Microphone permission needed.')
-    alert('Microphone permission was denied. Enable it in Settings → Apps → Cupitor → Permissions.')
+    alert('Microphone permission was denied. Allow microphone access in your browser or app settings.')
     return
   }
   const id = 'prec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   let url
   try {
-    url = await _audioRpc('recordStart', { id })
+    url = await _speakOverAudioRpc('recordStart', { id })
     if (!url) throw new Error('start-failed')
   } catch (e) {
     if (current()) {
@@ -23245,7 +23330,7 @@ async function _pracRecStart() {
   if (!current()) {
     // End/cancel already sent recordCancel. Never send a late global Stop:
     // the user may now be recording a different card.
-    if (url) deleteManualAudio(url)
+    if (url) _deleteSpeakOverAudio(url)
     return
   }
   st.phase = 'recording'
@@ -23257,12 +23342,17 @@ async function _pracRecStart() {
 async function _pracRecStop() {
   const st = _pracRec
   if (!st || st.phase !== 'recording') return
+  const token = ++st.token
   const t1 = st.t1
   const ms = Date.now() - st.startedMs
+  // Browser storage may take a moment. Claim the Stop action before awaiting
+  // it so two rapid taps do not race over the same recorder and its bytes.
+  st.phase = 'stopping'
+  _renderPracticeRecBar()
   let url = null
-  try { url = await _audioRpc('recordStop', {}) }
+  try { url = await _speakOverAudioRpc('recordStop', {}) }
   catch (e) { console.warn('[practiceRec] recordStop failed', e) }
-  if (_pracRec !== st) { if (url) deleteManualAudio(url); return }
+  if (_pracRec !== st || token !== st.token) { if (url) _deleteSpeakOverAudio(url); return }
   st.phase = 'idle'
   st.t1 = null
   st.url = null
@@ -23274,10 +23364,170 @@ async function _pracRecStop() {
     // A take the card already points at cannot be deleted until Keep has
     // rewritten the list; one that was only ever scratch can go now.
     if (st.kept.has(res.replaced.url)) { st.orphans.push(res.replaced.url); st.kept.delete(res.replaced.url) }
-    else deleteManualAudio(res.replaced.url)
+    else _deleteSpeakOverAudio(res.replaced.url)
   }
   _renderPracticeRecBar()
   _pracRecReplay(t1)
+}
+
+// Continuous loop mode is intentionally separate from the timestamped-takes
+// workflow. The source continues playing while the mic is open; only the
+// latest scratch recording is audible over the source on subsequent loops.
+// Nothing is saved to the playlist until the user explicitly chooses the
+// normal Keep workflow.
+function _pracRecLoopClearAudio(st) {
+  st.loopToken = (st.loopToken || 0) + 1
+  if (st.loopAudio) {
+    try { st.loopAudio.pause() } catch (_) {}
+    st.loopAudio = null
+  }
+}
+
+function _pracRecLoopSeek(st, { preserveAudio = false } = {}) {
+  if (_pracRec !== st || !st.loop || window._practiceMinimized || !window._practiceActive) return
+  _pracRecTakeOverPlayhead()
+  // A take can be longer than a single loop. Keep that recording audible
+  // across source rewinds instead of cutting it short at the clip boundary.
+  const speaking = preserveAudio && st.loopAudio && !st.loopAudio.paused && !st.loopAudio.ended
+  if (!speaking) _pracRecLoopClearAudio(st)
+  if (st.loopSeekTimer) clearTimeout(st.loopSeekTimer)
+  st.loopSeeking = true
+  st.loopPlayed = !!speaking
+  st.watchPos = null
+  const start = Number(st.clipStart) || 0
+  if (spotifyClips(st.item).length) {
+    try {
+      if (!spotifyPlayer.seekPractice(st.item, start)) {
+        st.loopSeeking = false
+        _renderPracticeRecBar('Cannot loop this Spotify clip')
+        return
+      }
+    } catch (_) { st.loopSeeking = false; return }
+  } else {
+    try { window.ytPlayer?.seekTo(start, true) } catch (_) {}
+  }
+  st.loopSeekTimer = setTimeout(() => { st.loopSeeking = false; st.loopSeekTimer = null }, 1000)
+  _pracRecPlayVideo()
+}
+
+function _pracRecLoopToggle() {
+  const st = _pracRec
+  if (!st || st.phase !== 'idle' || !_practiceSpeakOverShown()) return
+  if (st.loop) {
+    st.loop = false
+    _pracRecLoopClearAudio(st)
+    if (st.loopSeekTimer) clearTimeout(st.loopSeekTimer)
+    st.loopSeeking = false
+    if (st.loopTake) _deleteSpeakOverAudio(st.loopTake.url)
+    st.loopTake = null
+    st.watchPos = null
+    _pracRecPauseVideo()
+    _renderPracticeRecBar()
+    return
+  }
+  st.loop = true
+  st.awaiting = null
+  _renderPracticeRecBar('Looping the clip · record whenever you like')
+  _pracRecRefreshClip(st).then(() => {
+    if (_pracRec !== st || !st.loop) return
+    if (!Number.isFinite(Number(st.clipStop)) ||
+        Number(st.clipStop) <= Number(st.clipStart)) {
+      st.clipStop = Number(st.clipStart) + 5
+    }
+    _pracRecLoopSeek(st)
+  }).catch(error => _renderPracticeRecBar(String(error?.message || error)))
+}
+
+async function _pracRecLoopStart() {
+  const st = _pracRec
+  if (!st || !st.loop || st.phase !== 'idle') return false
+  // The microphone must capture the user's new voice, not the previous
+  // take still sounding over the clip.
+  _pracRecLoopClearAudio(st)
+  const token = ++st.token
+  st.phase = 'starting'
+  _renderPracticeRecBar()
+  const current = () => _pracRec === st && st.token === token &&
+    st.loop && st.phase === 'starting'
+  try {
+    const permission = await ensureMicPermissionViaBridge()
+    if (!current()) return false
+    if (permission === 'denied') throw new Error('Microphone permission denied')
+    const id = 'precloop_' + Date.now().toString(36) + '_' + token
+    const url = await _speakOverAudioRpc('recordStart', { id })
+    if (!current()) {
+      if (url) _deleteSpeakOverAudio(url)
+      return false
+    }
+    if (!url) throw new Error('Microphone did not start')
+    // The start mark is sampled AFTER permission is granted and the recorder
+    // begins. Recording started while the clip is at t=20 must not be replayed
+    // at the time the user first clicked while granting permissions.
+    const now = _pracRecNow()
+    st.t1 = Number.isFinite(now) && now >= st.clipStart && now < st.clipStop
+      ? now : st.clipStart
+    st.url = url
+    st.startedMs = Date.now()
+    st.phase = 'recording'
+    _renderPracticeRecBar()
+    return true
+  } catch (error) {
+    if (current()) {
+      st.phase = 'idle'
+      st.t1 = null
+      _renderPracticeRecBar(_pracRecStartError(error))
+    }
+    return false
+  }
+}
+
+async function _pracRecLoopStop() {
+  const st = _pracRec
+  if (!st || !st.loop || st.phase !== 'recording') return false
+  const token = ++st.token
+  const t1 = st.t1
+  const ms = Date.now() - st.startedMs
+  st.phase = 'stopping'
+  _renderPracticeRecBar()
+  let url = null
+  try { url = await _speakOverAudioRpc('recordStop', {}) }
+  catch (error) { console.warn('[practiceRec] loop stop failed', error) }
+  if (_pracRec !== st || token !== st.token || !st.loop || window._practiceMinimized) {
+    if (url) _deleteSpeakOverAudio(url)
+    if (_pracRec === st) { st.phase = 'idle'; st.t1 = null; st.url = null; _renderPracticeRecBar() }
+    return false
+  }
+  st.phase = 'idle'
+  st.t1 = null
+  st.url = null
+  if (!url) { _renderPracticeRecBar('Nothing recorded; try a longer take'); return false }
+  const previous = st.loopTake
+  st.loopTake = { url, t1, ms }
+  if (previous && previous.url !== url) _deleteSpeakOverAudio(previous.url)
+  // Hear the last take in context, with the source still sounding underneath.
+  // Future loops repeat that one take, never the earlier recordings.
+  _pracRecLoopSeek(st)
+  _renderPracticeRecBar('Latest take · playing over the clip')
+  return true
+}
+
+async function _pracRecLoopPlayTake(st, take) {
+  _pracRecLoopClearAudio(st)
+  const token = st.loopToken
+  let data = null
+  try { data = await _loadSpeakOverAudio(take.url) } catch (_) {}
+  if (!data || _pracRec !== st || !st.loop || token !== st.loopToken ||
+      st.phase !== 'idle' || st.loopTake !== take) return
+  const audio = new Audio(data)
+  st.loopAudio = audio
+  audio.addEventListener('ended', () => { if (st.loopAudio === audio) st.loopAudio = null }, {once:true})
+  audio.addEventListener('error', () => { if (st.loopAudio === audio) st.loopAudio = null }, {once:true})
+  try {
+    const p = audio.play()
+    if (p?.catch) p.catch(() => {
+      if (st.loopAudio === audio) { st.loopAudio = null; _renderPracticeRecBar('Tap Replay to allow audio') }
+    })
+  } catch (_) { st.loopAudio = null }
 }
 
 // Watch the playhead for the whole time the card is on screen, and play a
@@ -23301,6 +23551,29 @@ function _pracRecWatch() {
     // Tracked even while the video is held, so resuming compares against
     // where it actually is rather than against where it was long ago.
     st.watchPos = ct
+    if (st.loop) {
+      // Let the source run while recording. Seek at the clip's actual end;
+      // do not let the normal stop-watcher or saved timestamped takes fire.
+      if (st.loopSeeking) {
+        if (ct >= st.clipStart - 0.05 && ct < Math.min(st.clipStart + 0.5, st.clipStop - 0.15)) {
+          st.loopSeeking = false
+          if (st.loopSeekTimer) { clearTimeout(st.loopSeekTimer); st.loopSeekTimer = null }
+          st.watchPos = st.clipStart - 0.001
+        }
+        return
+      }
+      if (st.clipStop != null && ct >= st.clipStop - 0.07) {
+        _pracRecLoopSeek(st, { preserveAudio: true })
+        return
+      }
+      const tk = st.loopTake
+      if (tk && st.phase === 'idle' && !st.loopPlayed && prev != null &&
+          prev < tk.t1 && ct >= tk.t1 && ct - prev < 1.5) {
+        st.loopPlayed = true
+        _pracRecLoopPlayTake(st, tk)
+      }
+      return
+    }
     // Recording holds the video still, and a take playing has already paused
     // it. Neither is playback crossing a mark.
     if (st.phase === 'starting' || st.phase === 'recording' || st.phase === 'playback') return
@@ -23368,7 +23641,7 @@ async function _pracRecPlayTake(st, tk, token) {
   _renderPracticeRecBar()
   // The file lives outside the page's origin; the bridge hands back the bytes.
   let dataUrl = null
-  try { dataUrl = await loadManualAudioData(tk.url) } catch (_) {}
+  try { dataUrl = await _loadSpeakOverAudio(tk.url) } catch (_) {}
   if (_pracRec !== st || token !== st.token) return
   // Whatever happens to the playback, the video carries on from the mark —
   // a take that will not sound must not strand the loop.
@@ -23417,7 +23690,7 @@ function _pracRecKeep() {
   _saveRecording()
   st.kept = new Set(takes.map(t => t.url))
   // Now that the card no longer points at them, the displaced files can go.
-  st.orphans.splice(0).forEach(u => deleteManualAudio(u))
+  st.orphans.splice(0).forEach(u => _deleteSpeakOverAudio(u))
   _renderPracticeRecBar('kept on this card')
 }
 
@@ -23430,7 +23703,7 @@ function _pracRecDiscard() {
   if (!confirm('Throw away ' + loose.length + ' take' + (loose.length === 1 ? '' : 's') +
                ' that ' + (loose.length === 1 ? 'was' : 'were') + " never kept?")) return
   st.takes = st.takes.filter(t => st.kept.has(t.url))
-  loose.forEach(t => deleteManualAudio(t.url))
+  loose.forEach(t => _deleteSpeakOverAudio(t.url))
   _renderPracticeRecBar('discarded')
 }
 

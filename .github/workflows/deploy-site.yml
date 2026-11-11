@@ -134,6 +134,7 @@ jobs:
           node tests/browser/language-dialogs.cjs
           node tests/browser/local-file-picker.cjs
           node tests/browser/local-speakover.cjs
+          node tests/browser/web-speakover.cjs
           node tests/browser/local-media-subtitles.cjs
           node tests/browser/youtube-media-subtitles.cjs
           node tests/browser/youtube-return.cjs
@@ -216,6 +217,7 @@ jobs:
           node tests/browser/study-chrome.cjs
           node tests/browser/local-file-picker.cjs
           node tests/browser/local-speakover.cjs
+          node tests/browser/web-speakover.cjs
           node tests/browser/local-media-subtitles.cjs
           node tests/browser/youtube-media-subtitles.cjs
           node tests/browser/youtube-return.cjs

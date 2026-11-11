@@ -25,6 +25,7 @@ function fixture(options = {}) {
     console:{warn(){}}, alert:message=>alerts.push(message),
     _practiceSpeakOverShown:()=>true, _pracRecNow:()=>10,
     _pracRecTakeOverPlayhead(){}, _pracRecPauseVideo(){},
+    _pracRecLoopClearAudio(){}, _pracRecLoopStop(){},
     _renderPracticeRecBar:note=>notes.push({phase:context._pracRec?.phase,note}),
     ensureMicPermissionViaBridge:()=>{ permissionChecks++; return options.permission || Promise.resolve('granted') },
     _audioRpc:(op, payload)=>{
@@ -33,6 +34,8 @@ function fixture(options = {}) {
     },
     deleteManualAudio:url=>deleted.push(url),
   }
+  context._speakOverAudioRpc = (...args) => context._audioRpc(...args)
+  context._deleteSpeakOverAudio = url => context.deleteManualAudio(url)
   vm.createContext(context); vm.runInContext(endCode + '\n' + startCode + '\n' + minimizeCode, context)
   return {context,state,requests,notes,deleted,alerts,setTime:value=>{time=value},checks:()=>permissionChecks}
 }

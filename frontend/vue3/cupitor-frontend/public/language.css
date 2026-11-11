@@ -2842,6 +2842,26 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     font-size: 13px;
     cursor: pointer;
 }
+/* Keep the recorder bar one row tall. The loop/normal switch belongs
+   in Practice settings, where it cannot shrink the card's reading area. */
+#practiceMode .practice-settings-panel .practice-speakover-mode {
+    flex: 1;
+    min-width: 0;
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font: inherit;
+}
+#practiceMode .practice-speakover-mode option { color: #111; background: #fff; }
+#practiceMode .prec-btn.prec-loop-replay {
+    display: block;
+    width: 100%;
+    margin-top: 5px;
+    color: #bbebff;
+}
+
 #practiceMode .prec-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
 #practiceMode .prec-btn:disabled { opacity: 0.4; cursor: default; }
 /* The one control the thumb goes for without looking: a round button in the
