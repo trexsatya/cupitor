@@ -94,7 +94,8 @@ describe('continuous Practice Speak Over loop', () => {
 
     h.setPosition(10.2); h.tick()   // completed seek back to clip start
     h.setPosition(10.3); h.tick()
-    h.setPosition(12.2); h.tick()  // crossed latest recording mark at 12
+    h.setPosition(11.9); h.tick()
+    h.setPosition(12.1); h.tick()  // crossed latest recording mark at 12
     await flush()
     expect(h.audioPlays).toHaveLength(1)
     expect(h.calls.some(c=>c[0]==='pause')).toBe(false)
@@ -102,7 +103,8 @@ describe('continuous Practice Speak Over loop', () => {
     expect(h.audios[0].paused).toBe(true)
     h.setPosition(10.2); h.tick()
     h.setPosition(10.3); h.tick()
-    h.setPosition(12.2); h.tick()
+    h.setPosition(11.9); h.tick()
+    h.setPosition(12.1); h.tick()
     await flush()
     expect(h.audioPlays).toHaveLength(2)
     expect(st.loopTake.url).toBe('webrec://take_2')
@@ -112,9 +114,10 @@ describe('continuous Practice Speak Over loop', () => {
     const h=fixture(), {context:ctx,state:st}=h
     ctx._pracRecLoopToggle(); await flush()
     expect(await ctx._pracRecLoopStart()).toBe(true)
+    const pendingStop = ctx._pracRecLoopStop()
     st.loop=false
     ctx.window._practiceMinimized=true
-    expect(await ctx._pracRecLoopStop()).toBe(false)
+    expect(await pendingStop).toBe(false)
     expect(st.loopTake).toBeNull()
     expect(h.deleted).toContain('webrec://take_1')
   })
