@@ -2842,6 +2842,48 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     font-size: 13px;
     cursor: pointer;
 }
+/* Two distinct Speak Over workflows: timestamped takes, and a continuously
+   looping clip with just the latest recording mixed over its audio. */
+#practiceMode .prec-mode-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+    min-width: 0;
+}
+#practiceMode .prec-mode-label {
+    font-size: 11px;
+    color: #bbb;
+    flex: 0 0 auto;
+}
+#practiceMode .prec-btn.prec-mode {
+    min-height: 26px;
+    padding: 3px 10px;
+    font-size: 12px;
+    white-space: normal;
+    text-align: left;
+}
+#practiceMode .prec-btn.prec-mode[aria-pressed="true"] {
+    color: #d6f3ff;
+    background: #224d69;
+    border-color: #61a9ce;
+}
+#practiceMode .prec-btn.prec-loop-replay {
+    display: block;
+    width: 100%;
+    margin-top: 5px;
+    color: #bbebff;
+}
+@media (max-width: 430px) {
+    #practiceMode .prec-mode-label { display: none; }
+    #practiceMode .prec-btn.prec-mode { width: 100%; text-align: center; }
+    #practiceMode .prec-row > .prec-status {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        font-size: 11px;
+        line-height: 1.3;
+    }
+}
 #practiceMode .prec-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
 #practiceMode .prec-btn:disabled { opacity: 0.4; cursor: default; }
 /* The one control the thumb goes for without looking: a round button in the
