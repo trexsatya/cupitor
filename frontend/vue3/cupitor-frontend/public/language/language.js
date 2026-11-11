@@ -23095,6 +23095,7 @@ function _renderPracticeRecBar(note) {
     : note ? note
     : starting ? 'starting microphone…'
     : rec ? 'recording…'
+    : st.phase === 'stopping' ? 'Saving take…'
     : st.phase === 'playback' ? 'your take'
     : n ? n + (n === 1 ? ' take · ' : ' takes · ') + Math.round(_takesDuration(st.takes)) + 's'
     : 'Speak over this clip'
@@ -23341,12 +23342,17 @@ async function _pracRecStart() {
 async function _pracRecStop() {
   const st = _pracRec
   if (!st || st.phase !== 'recording') return
+  const token = ++st.token
   const t1 = st.t1
   const ms = Date.now() - st.startedMs
+  // Browser storage may take a moment. Claim the Stop action before awaiting
+  // it so two rapid taps do not race over the same recorder and its bytes.
+  st.phase = 'stopping'
+  _renderPracticeRecBar()
   let url = null
   try { url = await _speakOverAudioRpc('recordStop', {}) }
   catch (e) { console.warn('[practiceRec] recordStop failed', e) }
-  if (_pracRec !== st) { if (url) _deleteSpeakOverAudio(url); return }
+  if (_pracRec !== st || token !== st.token) { if (url) _deleteSpeakOverAudio(url); return }
   st.phase = 'idle'
   st.t1 = null
   st.url = null
