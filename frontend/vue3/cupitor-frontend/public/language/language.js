@@ -22110,6 +22110,8 @@ function openPracticeMode(opts) {
     </div>`).appendTo('body')
 
     $p.on('click', '.prec-toggle', _pracRecToggle)
+    $p.on('click', '.prec-mode', _pracRecLoopToggle)
+    $p.on('click', '.prec-loop-replay', () => { if (_pracRec?.loop && _pracRec.loopTake) _pracRecLoopSeek(_pracRec) })
     $p.on('click', '.prec-keep', _pracRecKeep)
     $p.on('click', '.prec-drop', _pracRecDiscard)
     $p.on('click', '.prec-take', _pracRecGoToTake)
@@ -22974,6 +22976,8 @@ function _pracRecBegin(it) {
     token: 0,
     timer: null,
     audio: null,
+    loop: false, loopTake: null, loopAudio: null, loopToken: 0,
+    loopPlayed: false, loopSeeking: false, loopSeekTimer: null,
   }
   // Armed for the whole card, not just after a recording.
   _pracRecWatch()
@@ -22988,6 +22992,9 @@ function _pracRecEnd(discard) {
   st.token++
   if (st.timer) { clearInterval(st.timer); st.timer = null }
   if (st.audio) { try { st.audio.pause() } catch (_) {} st.audio = null }
+  _pracRecLoopClearAudio(st)
+  if (st.loopSeekTimer) clearTimeout(st.loopSeekTimer)
+  if (st.loopTake) _deleteSpeakOverAudio(st.loopTake.url)
   // A recording left open holds the microphone and writes into a file nobody
   // is going to ask for.
   // Not awaited — the session is already gone. The catch is on the promise
@@ -23210,6 +23217,12 @@ function _pracRecGoToTake(e) {
 function _pracRecToggle() {
   const st = _pracRec
   if (!st || !_practiceSpeakOverShown()) return
+  if (st.loop) {
+    if (st.phase === 'starting') { _pracRecCancelStart(st); return }
+    if (st.phase === 'recording') { _pracRecLoopStop(); return }
+    if (st.phase === 'idle') _pracRecLoopStart()
+    return
+  }
   if (st.phase === 'starting') { _pracRecCancelStart(st); return }
   if (st.phase === 'recording') { _pracRecStop(); return }
   if (st.phase !== 'idle') return
