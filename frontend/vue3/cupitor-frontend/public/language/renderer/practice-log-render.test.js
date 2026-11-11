@@ -48,7 +48,7 @@ describe("renderPracticeLogPlan — structure", () => {
     const mount = makeMount();
     const label = document.createElement("h3");
     renderPracticeLogPlan(planVM(), mount, {}, label);
-    expect(label.textContent).toBe("Week 2026-W24");
+    expect(label.textContent).toBe("Week 2026-W24 · 8 Jun – 14 Jun");
   });
   test("each row has the item name + status select + notes textarea", () => {
     const mount = makeMount();

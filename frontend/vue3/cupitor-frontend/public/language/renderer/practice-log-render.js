@@ -7,13 +7,13 @@
 //   onNotesChange(itemName, newNotes)
 //   onRemoveItem(itemName)
 
-import { PRACTICE_LOG_STATUSES } from '../practice-log.js'
+import { PRACTICE_LOG_STATUSES, practiceWeekTitle } from '../practice-log.js'
 
 // Render the active week's Plan list. `weekLabelEl` (optional) lets the
 // caller pass a separate node where "Week 2026-W24" is placed; pass null
 // to skip the label update.
 export function renderPracticeLogPlan(vm, mountEl, callbacks = {}, weekLabelEl = null) {
-  if (weekLabelEl) weekLabelEl.textContent = `Week ${vm.weekLabel}`
+  if (weekLabelEl) weekLabelEl.textContent = practiceWeekTitle(vm.weekLabel)
   if (!mountEl) return
   while (mountEl.firstChild) mountEl.removeChild(mountEl.firstChild)
 
@@ -39,6 +39,7 @@ export function renderPracticeLogPlan(vm, mountEl, callbacks = {}, weekLabelEl =
     select.addEventListener('change', () => {
       if (callbacks.onStatusChange) callbacks.onStatusChange(item.name, select.value)
     })
+    select.setAttribute('aria-label', item.name + ' status')
     row.appendChild(select)
 
     const notes = document.createElement('textarea')
@@ -48,6 +49,16 @@ export function renderPracticeLogPlan(vm, mountEl, callbacks = {}, weekLabelEl =
     notes.addEventListener('input', () => {
       if (callbacks.onNotesChange) callbacks.onNotesChange(item.name, notes.value)
     })
+    notes.setAttribute('aria-label', item.name + ' progress notes')
+    if (callbacks.onGoalChange) {
+      const goal = document.createElement('input')
+      goal.className = 'practice-log-item-goal'
+      goal.placeholder = 'Set a goal for this week'
+      goal.setAttribute('aria-label', item.name + ' weekly goal')
+      goal.value = item.goal || ''
+      goal.addEventListener('change', () => callbacks.onGoalChange(item.name, goal.value))
+      row.appendChild(goal)
+    }
     row.appendChild(notes)
 
     if (!item.isDefault) {
@@ -90,7 +101,7 @@ export function renderPracticeLogHistory(vm, mountEl) {
 
     const hdr = document.createElement('div')
     hdr.className = 'practice-log-history-week-header'
-    hdr.textContent = `Week ${week.label}`
+    hdr.textContent = practiceWeekTitle(week.label)
     w.appendChild(hdr)
 
     if (week.empty) {
@@ -113,6 +124,11 @@ export function renderPracticeLogHistory(vm, mountEl) {
         name.textContent = ' · ' + it.name
         row.appendChild(name)
 
+        if (it.goal) {
+          const goal = document.createElement('div')
+          goal.textContent = it.goal
+          row.appendChild(goal)
+        }
         if (it.notes) {
           const toggle = document.createElement('button')
           toggle.type = 'button'

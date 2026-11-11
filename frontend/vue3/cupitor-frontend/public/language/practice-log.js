@@ -102,6 +102,7 @@ export function mergePracticeLog(remote, local) {
   if (!remote) return local
   if (!local)  return remote
   const out = {
+    lastWeeklyUpdate: [remote.lastWeeklyUpdate, local.lastWeeklyUpdate].filter(Boolean).sort().at(-1),
     goals: { ...remote.goals },
     reminders: (remote.reminders?.updatedAt || 0) > (local.reminders?.updatedAt || 0)
       ? remote.reminders : local.reminders,
@@ -140,10 +141,23 @@ export function mergePracticeLog(remote, local) {
       merged[it] = lvHas ? { status: lv.status || 'not_started', notes: lv.notes || '' }
                   : rvHas ? { status: rv.status || 'not_started', notes: rv.notes || '' }
                           : { status: 'not_started', notes: '' }
+      if (Object.hasOwn(lv, 'goal') || Object.hasOwn(rv, 'goal')) merged[it].goal = lv.goal ?? rv.goal
     })
     out.weeks[wk] = merged
   })
   if (!Object.keys(out.goals).length && !remote.goals && !local.goals) delete out.goals
+  if (!out.lastWeeklyUpdate) delete out.lastWeeklyUpdate
   if (!out.reminders) delete out.reminders
   return out
+}
+
+export function practiceWeekTitle(label) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(label)
+  if (!match) return `Week ${label}`
+  const monday = new Date(Date.UTC(Number(match[1]), 0, 4))
+  monday.setUTCDate(4 - ((monday.getUTCDay() + 6) % 7) + (Number(match[2]) - 1) * 7)
+  const sunday = new Date(monday)
+  sunday.setUTCDate(sunday.getUTCDate() + 6)
+  const format = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+  return `Week ${label} · ${format.format(monday)} – ${format.format(sunday)}`
 }
