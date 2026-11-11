@@ -116,8 +116,15 @@ jobs:
           node --test public/language/subtitle-bundles.test.mjs public/language/subtitle-pack-loading.test.mjs tools/language/subtitle-bundles.test.mjs tools/language/srt-import.test.mjs tools/language/bundle-repair.test.mjs
           npx jest tools/language --runInBand --silent
 
-      - name: Install Chromium for dialog tests
-        run: npx playwright install --with-deps chromium
+      - name: Configure runner Chrome for browser tests
+        run: |
+          chrome_path="$(command -v google-chrome)"
+          "$chrome_path" --version
+          {
+            echo "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$chrome_path"
+            echo "CHROMIUM_PATH=$chrome_path"
+            echo "CUPITOR_CHROME_PATH=$chrome_path"
+          } >> "$GITHUB_ENV"
 
       - name: Test search, scrolling and dialogs on desktop and mobile
         env:
