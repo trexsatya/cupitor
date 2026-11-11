@@ -22840,6 +22840,10 @@ async function playPracticeClip() {
   const idx = window._practiceIdx
   const it = window._practiceCards && window._practiceCards[idx]
   if (!it) return
+  if (_pracRec?.loop && _pracRec.key === _pracRecKey(it)) {
+    _pracRecLoopSeek(_pracRec)
+    return
+  }
   // The visible Play button uses this entry point. Dispatch before creating
   // a YouTube request, which intentionally stops/hides the Spotify session.
   if (spotifyClips(it).length) return _togglePracticePlayback()
@@ -23419,6 +23423,9 @@ function _pracRecLoopToggle() {
 async function _pracRecLoopStart() {
   const st = _pracRec
   if (!st || !st.loop || st.phase !== 'idle') return false
+  // The microphone must capture the user's new voice, not the previous
+  // take still sounding over the clip.
+  _pracRecLoopClearAudio(st)
   const token = ++st.token
   st.phase = 'starting'
   _renderPracticeRecBar()
