@@ -23054,16 +23054,21 @@ function _renderPracticeRecBar(note) {
     .attr('title', st && st.phase !== 'idle' ? 'Finish recording or replay before hiding speakover' : '')
   if (!st || !_practiceSpeakOverShown()) { $bar.hide().empty(); _setPracRecBarHeight(0); return }
   const n = st.takes.length
-  const unkept = st.takes.filter(t => !st.kept.has(t.url)).length
+  const unkept = st.loop ? 0 : st.takes.filter(t => !st.kept.has(t.url)).length
   const rec = st.phase === 'recording'
   const starting = st.phase === 'starting'
   // Mid-loop the video is being driven for the user; a second Rec on top of
   // that would pin a moment they did not choose.
-  const busy = st.phase === 'playback'
+  const busy = st.phase === 'playback' || st.phase === 'stopping'
   // Short enough for the column beside the button. What the longer wording
   // used to explain, the button now says by being round, red and in the
   // middle — and its tooltip still spells it out.
-  const status = note ? note
+  const status = st.loop
+    ? (note || (starting ? 'Starting microphone…'
+      : rec ? 'Recording while clip loops…'
+      : st.phase === 'stopping' ? 'Finishing take…'
+      : st.loopTake ? 'Latest take repeats over the clip' : 'Clip looping · chime in whenever you like'))
+    : note ? note
     : starting ? 'starting microphone…'
     : rec ? 'recording…'
     : st.phase === 'playback' ? 'your take'
@@ -23073,10 +23078,21 @@ function _renderPracticeRecBar(note) {
   // nothing beside it can push it off centre — a column that refuses to shrink
   // to its share leaves the button wherever the leftovers put it, and which
   // engine does that is not worth finding out one device at a time.
-  $bar.empty().append(
+  $bar.empty()
+  $bar.append(
+    $('<div class="prec-mode-row"></div>').append(
+      $('<span class="prec-mode-label"></span>').text('Speakover mode'),
+      $('<button type="button" class="prec-btn prec-mode"></button>')
+        .text(st.loop ? '◉ Loop clip + latest take' : '↻ Loop clip + latest take')
+        .attr('aria-pressed', st.loop ? 'true' : 'false')
+        .prop('disabled', st.phase !== 'idle')
+        .attr('title', 'Loop the clip continuously, record whenever you like, and overlay only your newest take')
+    )
+  )
+  $bar.append(
     $('<div class="prec-row"></div>').append(
       $('<span class="prec-status"></span>').text(status),
-      $('<span class="prec-side"></span>').append(
+      $('<span class="prec-side"></span>').toggle(!st.loop).append(
         $('<button type="button" class="prec-btn prec-keep"></button>')
           .text(unkept ? '✔ Keep ' + unkept : '✔ Keep')
           .prop('disabled', !unkept || rec || starting || busy)
@@ -23089,15 +23105,22 @@ function _renderPracticeRecBar(note) {
         .text(starting ? '✕' : rec ? '⏸' : '●')
         .toggleClass('on', rec)
         .prop('disabled', busy)
-        .attr('aria-label', starting ? 'Cancel recording start' : rec ? 'Pause' : 'Rec')
-        .attr('title', starting ? 'Cancel microphone startup' : rec ? 'Stop and hear it back in place' : 'Record over the clip from here')
+        .attr('aria-label', starting ? 'Cancel recording start' : rec ? 'Stop recording' : 'Rec')
+        .attr('title', starting ? 'Cancel microphone startup'
+          : rec ? (st.loop ? 'Stop and hear latest take over looping clip' : 'Stop and hear it back in place')
+          : (st.loop ? 'Record while clip continues looping' : 'Record over the clip from here'))
     )
   )
   // One small button per take, numbered the way they sit in the clip, to hear
   // any of them back without having to play up to its mark. Their own row so
   // they get the whole width rather than squeezing the column beside the Rec
   // button, and a row that is only there when there is something on it.
-  if (n) {
+  if (st.loop && st.loopTake) {
+    $bar.append($('<button type="button" class="prec-btn prec-loop-replay"></button>')
+      .text('↻ Listen to latest take again')
+      .prop('disabled', st.phase !== 'idle'))
+  }
+  if (n && !st.loop) {
     const $takes = $('<span class="prec-takes"></span>')
     st.takes.forEach((tk, i) => {
       $takes.append(
