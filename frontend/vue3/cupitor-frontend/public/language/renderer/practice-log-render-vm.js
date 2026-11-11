@@ -28,6 +28,7 @@ export function buildPracticeLogPlanVM(customItems, weekRecord, weekLabel) {
       name,
       status: rec.status || 'not_started',
       notes: rec.notes || '',
+      ...(rec.goal ? { goal: rec.goal } : {}),
       isDefault: PRACTICE_LOG_DEFAULT_ITEMS.indexOf(name) !== -1,
     }
   })
@@ -60,6 +61,7 @@ export function buildPracticeLogHistoryVM(data) {
         name,
         status: rec.status || 'not_started',
         notes: (rec.notes || '').trim(),
+        ...(rec.goal ? { goal: rec.goal } : {}),
         statusLabel: info.label,
         statusCls: info.cls,
       }

@@ -5950,26 +5950,22 @@ body.dialog-above-practice .ui-dialog {
     }
 }
 
-#practiceGoals { margin-block: .75rem; }
-.practice-goal-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .5rem;
-  margin-block: .5rem .85rem;
+#practiceReminderSettings { margin-block: .75rem; }
+#practiceLogDialog .practice-log-item {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    padding: .85rem;
+    border: 1px solid #8995a34d;
+    border-radius: .65rem;
 }
-.practice-goal-card {
-  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-  border-radius: .75rem;
-  padding: 1rem;
-  margin-bottom: .75rem;
-  overflow-wrap: anywhere;
+#practiceLogDialog .practice-log-item-goal,
+#practiceLogDialog .practice-log-item-notes {
+    grid-column: 1 / -1;
+    min-width: 0;
 }
-.practice-goal-card h3, .practice-goal-form h3 { font-size: 1.15rem; margin: 0 0 .5rem; }
-.practice-goal-category { display: inline-block; background: #e5efff; color: #123e75; border-radius: 1rem; padding: .15rem .65rem; }
-.practice-goal-card p { margin-block: .5rem; white-space: pre-wrap; }
-.practice-goal-card progress { display: block; width: min(100%, 18rem); accent-color: #0969da; }
-.practice-goal-card details { margin-top: .75rem; }
+#practiceLogDialog .practice-log-item-remove {
+    grid-column: 3;
+    grid-row: 1;
+}
 .practice-goal-form > label { display: grid; gap: .3rem; margin-bottom: .75rem; }
 .practice-goal-form > .practice-reminder-toggle { display: flex; align-items: center; }
 .practice-goal-form > button { margin: .35rem .4rem .35rem 0; }

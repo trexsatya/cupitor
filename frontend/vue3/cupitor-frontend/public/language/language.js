@@ -21,7 +21,7 @@ import { createBundleLoader, createSubtitleBundleAdapter } from './subtitle-bund
 import { loadSubtitlePacks } from './subtitle-pack-loading.js';
 import { SUBTITLE_BATCH_DOCUMENTS, SUBTITLE_BATCH_BYTES } from './subtitle-batches.js'
 import { recordingsHaveChanges } from './recordings-sync-state.js';
-import { mountPracticeGoals } from './practice-goals.js';
+import { mountPracticeReminders, practiceDate } from './practice-reminders.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
@@ -3212,9 +3212,8 @@ async function _fetchPracticeLogRemote() {
 // user has unsaved edits since the last successful push.
 window._practiceLog = null
 window._practiceLogPending = false
-window._practiceLogActiveTab = 'goals'
-let _practiceGoalsView
-let _practiceGoalTarget
+window._practiceLogActiveTab = 'current'
+let _practiceReminders
 
 function _practiceLogActiveWeekLabel() {
   if (window._practiceLogActiveTab === 'next') return _nextWeekLabel()
@@ -3254,6 +3253,15 @@ function _renderPracticeLogPlan() {
   const week = _ensurePracticeLogWeek(data, weekLabel)
   const vm = buildPracticeLogPlanVM(data.customItems, week, weekLabel)
   const markDirty = () => {
+    if (weekLabel === _currentWeekLabel()) {
+      data.lastWeeklyUpdate = practiceDate()
+      if (data.reminders?.enabled && window.CallBridge) {
+        const reminders = mountPracticeReminders({
+          $, data: () => data, language: getLangFromUrl().fullName,
+        })
+        reminders.sync().catch(() => $('#practiceLogStatus').text('Could not sync reminders')).finally(reminders.dispose)
+      }
+    }
     window._practiceLogPending = true
     _savePracticeLogLocal(data)
     _refreshPracticeLogPendingHint()
@@ -3261,6 +3269,10 @@ function _renderPracticeLogPlan() {
   renderPracticeLogPlan(vm, $('#practiceLogItems')[0], {
     onStatusChange: (name, value) => {
       week[name] = { ...week[name], status: value }
+      markDirty()
+    },
+    onGoalChange: (name, goal) => {
+      week[name] = { ...week[name], goal }
       markDirty()
     },
     onNotesChange: (name, notes) => {
@@ -3294,24 +3306,9 @@ function _setPracticeLogTab(tab) {
   window._practiceLogActiveTab = tab
   $('#practiceLogDialog .practice-log-tab').removeClass('active')
   $(`#practiceLogDialog .practice-log-tab[data-tab="${tab}"]`).addClass('active')
-  _practiceGoalsView?.dispose()
-  _practiceGoalsView = null
-  $('#practiceGoals').prop('hidden', tab !== 'goals')
-  $('#practiceLogWeekLabel').toggle(tab !== 'goals' && tab !== 'history')
-  if (tab === 'goals') {
-    $('#practiceLogPlanView, #practiceLogHistoryView').hide()
-    _practiceGoalsView = mountPracticeGoals({
-      $, root: $('#practiceGoals')[0], data: () => window._practiceLog,
-      language: getLangFromUrl().fullName,
-      target: _practiceGoalTarget,
-      save() {
-        window._practiceLogPending = true
-        _savePracticeLogLocal(window._practiceLog)
-        _refreshPracticeLogPendingHint()
-      },
-    })
-    _practiceGoalTarget = null
-  } else if (tab === 'history') {
+  $('#practiceReminderSettings').prop('hidden', true)
+  $('#practiceLogWeekLabel').toggle(tab !== 'history')
+  if (tab === 'history') {
     $('#practiceLogPlanView').hide()
     $('#practiceLogHistoryView').show()
     _renderPracticeLogHistory()
@@ -3322,7 +3319,7 @@ function _setPracticeLogTab(tab) {
   }
 }
 
-async function openPracticeLogDialog(forceGoals = false) {
+async function openPracticeLogDialog(forceCurrent = false) {
   // Mark first-open before any await — if the network fetch fails the user
   // still gets the front-page banner removed because they made the choice to
   // open it. Same flag is checked at boot in _initPracticeLogFrontBanner.
@@ -3361,6 +3358,22 @@ async function openPracticeLogDialog(forceGoals = false) {
       position: { my: 'center top', at: 'center top+30', of: window }
     })
     $dlg.on('click', '.practice-log-tab', function () { _setPracticeLogTab($(this).data('tab')) })
+    $('#practiceLogReminders').on('click', () => {
+      $('#practiceLogPlanView, #practiceLogHistoryView, #practiceLogWeekLabel').hide()
+      $('#practiceReminderSettings').prop('hidden', false)
+      _practiceReminders?.dispose()
+      _practiceReminders = mountPracticeReminders({
+        $, root: $('#practiceReminderSettings')[0], data: () => window._practiceLog,
+        language: getLangFromUrl().fullName,
+        close: () => _setPracticeLogTab(window._practiceLogActiveTab),
+        save() {
+          window._practiceLogPending = true
+          _savePracticeLogLocal(window._practiceLog)
+          _refreshPracticeLogPendingHint()
+        },
+      })
+      _practiceReminders.open()
+    })
     $('#practiceLogAddItemBtn').on('click', _practiceLogAddItem)
     $('#practiceLogNewItemName').on('keydown', function (e) {
       if (e.key === 'Enter') { e.preventDefault(); _practiceLogAddItem() }
@@ -3381,7 +3394,7 @@ async function openPracticeLogDialog(forceGoals = false) {
     $('#practiceLogSaveBtn').on('click', _commitPracticeLogToGithub)
   }
   if ($dlg.dialog('isOpen')) {
-    if (forceGoals === true) _setPracticeLogTab('goals')
+    if (forceCurrent === true) _setPracticeLogTab('current')
     else $dlg.dialog('close')
     return
   }
@@ -3389,7 +3402,7 @@ async function openPracticeLogDialog(forceGoals = false) {
   $dlg.dialog('option', 'maxHeight', dialogMaxH)
   $dlg.dialog('open')
 
-  _setPracticeLogTab(forceGoals === true ? 'goals' : window._practiceLogActiveTab)
+  _setPracticeLogTab(forceCurrent === true ? 'current' : window._practiceLogActiveTab)
   _refreshPracticeLogPendingHint()
 
   // Background-fetch latest remote and merge in. Skips silently if offline.
@@ -3400,10 +3413,7 @@ async function openPracticeLogDialog(forceGoals = false) {
     const merged = _mergePracticeLog(remote, local)
     Object.assign(local, merged)
     _savePracticeLogLocal(local)
-    if (window._practiceLogActiveTab === 'goals') {
-      _practiceGoalsView?.refresh()
-      if (local.reminders) _practiceGoalsView?.sync().catch(() => {})
-    } else if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
+    if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
     else _renderPracticeLogPlan()
     $status.text('synced ' + new Date().toLocaleTimeString())
   } else {
@@ -3414,7 +3424,6 @@ window.openPracticeLogDialog = openPracticeLogDialog
 function _openPracticeReminder(detail) {
   if (detail?.language !== getLangFromUrl().fullName) return
   window.__cupitorPracticeReminderOpened = null
-  _practiceGoalTarget = detail.goal
   openPracticeLogDialog(true)
 }
 window.addEventListener('cupitorPracticeReminderOpened', event => _openPracticeReminder(event.detail))
@@ -3464,8 +3473,7 @@ async function _commitPracticeLogToGithub() {
     await _userData.flush()
     window._practiceLogPending = false
     _refreshPracticeLogPendingHint()
-    if (window._practiceLogActiveTab === 'goals') _practiceGoalsView?.refresh()
-    else if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
+    if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
     else _renderPracticeLogPlan()
     $status.text('saved ' + new Date().toLocaleTimeString())
   } catch (e) {
