@@ -22993,9 +22993,9 @@ function _pracRecEnd(discard) {
   // Not awaited — the session is already gone. The catch is on the promise
   // because the rejection arrives long after this frame has returned.
   if (st.phase === 'recording' || st.phase === 'starting') {
-    try { Promise.resolve(_audioRpc('recordCancel', {})).catch(() => {}) } catch (_) {}
+    try { Promise.resolve(_speakOverAudioRpc('recordCancel', {})).catch(() => {}) } catch (_) {}
   }
-  if (discard) st.takes.forEach(t => { if (!st.kept.has(t.url)) deleteManualAudio(t.url) })
+  if (discard) st.takes.forEach(t => { if (!st.kept.has(t.url)) _deleteSpeakOverAudio(t.url) })
 }
 
 // Stop the clip's own end-watcher: while the loop is driving the playhead,
@@ -23186,7 +23186,7 @@ function _pracRecDeleteTake(t1) {
     // A take the card already points at cannot be deleted until Keep has
     // rewritten the list; one that was only ever scratch can go now.
     if (st.kept.has(res.removed.url)) { st.orphans.push(res.removed.url); st.kept.delete(res.removed.url) }
-    else deleteManualAudio(res.removed.url)
+    else _deleteSpeakOverAudio(res.removed.url)
   }
   // Nothing is waiting for a mark that no longer exists.
   if (st.awaiting != null && Math.abs(Number(st.awaiting) - t1) <= TAKE_SAME_SPOT_S) st.awaiting = null
@@ -23220,13 +23220,13 @@ function _pracRecCancelStart(st) {
   if (_pracRec !== st || st.phase !== 'starting') return
   st.token++
   st.phase = 'idle'; st.t1 = null; st.url = null
-  Promise.resolve(_audioRpc('recordCancel', {})).catch(() => {})
+  Promise.resolve(_speakOverAudioRpc('recordCancel', {})).catch(() => {})
   _renderPracticeRecBar('recording cancelled')
 }
 
 function _pracRecStartError(error) {
   const message = String(error?.message || error || '')
-  if (/permission|denied/i.test(message)) return 'Microphone permission needed. Enable it in Android app permissions.'
+  if (/permission|denied/i.test(message)) return 'Microphone permission needed. Allow microphone access for this site or app.'
   if (/busy/i.test(message)) return 'Microphone is busy. Stop other recording and try again.'
   if (/cancel/i.test(message)) return 'recording cancelled'
   return 'Microphone could not start. Try recording again.'
@@ -23251,13 +23251,13 @@ async function _pracRecStart() {
   if (perm === 'denied') {
     st.phase = 'idle'; st.t1 = null
     _renderPracticeRecBar('Microphone permission needed.')
-    alert('Microphone permission was denied. Enable it in Settings → Apps → Cupitor → Permissions.')
+    alert('Microphone permission was denied. Allow microphone access in your browser or app settings.')
     return
   }
   const id = 'prec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   let url
   try {
-    url = await _audioRpc('recordStart', { id })
+    url = await _speakOverAudioRpc('recordStart', { id })
     if (!url) throw new Error('start-failed')
   } catch (e) {
     if (current()) {
@@ -23270,7 +23270,7 @@ async function _pracRecStart() {
   if (!current()) {
     // End/cancel already sent recordCancel. Never send a late global Stop:
     // the user may now be recording a different card.
-    if (url) deleteManualAudio(url)
+    if (url) _deleteSpeakOverAudio(url)
     return
   }
   st.phase = 'recording'
@@ -23285,9 +23285,9 @@ async function _pracRecStop() {
   const t1 = st.t1
   const ms = Date.now() - st.startedMs
   let url = null
-  try { url = await _audioRpc('recordStop', {}) }
+  try { url = await _speakOverAudioRpc('recordStop', {}) }
   catch (e) { console.warn('[practiceRec] recordStop failed', e) }
-  if (_pracRec !== st) { if (url) deleteManualAudio(url); return }
+  if (_pracRec !== st) { if (url) _deleteSpeakOverAudio(url); return }
   st.phase = 'idle'
   st.t1 = null
   st.url = null
@@ -23299,7 +23299,7 @@ async function _pracRecStop() {
     // A take the card already points at cannot be deleted until Keep has
     // rewritten the list; one that was only ever scratch can go now.
     if (st.kept.has(res.replaced.url)) { st.orphans.push(res.replaced.url); st.kept.delete(res.replaced.url) }
-    else deleteManualAudio(res.replaced.url)
+    else _deleteSpeakOverAudio(res.replaced.url)
   }
   _renderPracticeRecBar()
   _pracRecReplay(t1)
@@ -23393,7 +23393,7 @@ async function _pracRecPlayTake(st, tk, token) {
   _renderPracticeRecBar()
   // The file lives outside the page's origin; the bridge hands back the bytes.
   let dataUrl = null
-  try { dataUrl = await loadManualAudioData(tk.url) } catch (_) {}
+  try { dataUrl = await _loadSpeakOverAudio(tk.url) } catch (_) {}
   if (_pracRec !== st || token !== st.token) return
   // Whatever happens to the playback, the video carries on from the mark —
   // a take that will not sound must not strand the loop.
@@ -23442,7 +23442,7 @@ function _pracRecKeep() {
   _saveRecording()
   st.kept = new Set(takes.map(t => t.url))
   // Now that the card no longer points at them, the displaced files can go.
-  st.orphans.splice(0).forEach(u => deleteManualAudio(u))
+  st.orphans.splice(0).forEach(u => _deleteSpeakOverAudio(u))
   _renderPracticeRecBar('kept on this card')
 }
 
@@ -23455,7 +23455,7 @@ function _pracRecDiscard() {
   if (!confirm('Throw away ' + loose.length + ' take' + (loose.length === 1 ? '' : 's') +
                ' that ' + (loose.length === 1 ? 'was' : 'were') + " never kept?")) return
   st.takes = st.takes.filter(t => st.kept.has(t.url))
-  loose.forEach(t => deleteManualAudio(t.url))
+  loose.forEach(t => _deleteSpeakOverAudio(t.url))
   _renderPracticeRecBar('discarded')
 }
 
