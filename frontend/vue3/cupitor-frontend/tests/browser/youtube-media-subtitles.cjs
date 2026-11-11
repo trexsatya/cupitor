@@ -5,6 +5,7 @@ const {serveFixtures} = require('./language-dialogs.cjs')
 async function verify(browser, width) {
   const page = await browser.newPage({viewport:{width,height:820},isMobile:width<1000,hasTouch:width<1000})
   page.setDefaultTimeout(8000)
+  page.setDefaultNavigationTimeout(30000)
   const errors=[]
   page.on('pageerror',e=>errors.push(e.message))
   page.on('dialog',d=>{errors.push(d.message());d.dismiss()})
@@ -41,6 +42,7 @@ async function verify(browser, width) {
     assert.equal(await page.locator('iframe#youtubePlayer').count(), 0, 'Search does not eagerly create the player')
     await page.locator('#toggleMediaPanelBtn').click()
     await page.locator('#select2-mp3Choice-container').click()
+    await page.locator('#select2-mp3Choice-results .select2-results__group').click()
     await page.getByRole('option', { name: /testVideo01/ }).click()
     await page.getByRole('button', { name: '▶ Play', exact: true }).click()
     const panel=page.locator('#youtubeCaptionPanel')
@@ -109,6 +111,7 @@ async function verify(browser, width) {
     await back.waitFor()
     await page.waitForFunction(() => window._lastWordToItemsMap?.väljarkår?.length)
     assert.equal(await page.locator('#searchText').inputValue(), 'väljarkår')
+    assert.equal(await page.locator('#resultContainer').isVisible(), true)
     assert.equal(await panel.isVisible(), false)
     assert.equal(await page.locator('iframe#youtubePlayer').isVisible(), false)
     assert.equal(await page.locator('#mediaControlPanel').isVisible(), false)
