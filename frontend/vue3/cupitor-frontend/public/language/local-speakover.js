@@ -66,7 +66,7 @@ export function createLocalSpeakOver({
     try {
       const records = readSaved(identity);
       if (Array.isArray(records)) saved = records.filter(t =>
-        t && /^file:\/\//.test(t.url || '') && Number.isFinite(Number(t.t1)) &&
+        t && /^(file|webrec):\/\//.test(t.url || '') && Number.isFinite(Number(t.t1)) &&
         Number(t.t1) >= 0).map(t => ({url:t.url, t1:Number(t.t1), ms:Number(t.ms)||0}));
     } catch (_) {}
     const st = {
