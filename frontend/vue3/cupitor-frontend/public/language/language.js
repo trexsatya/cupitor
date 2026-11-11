@@ -8,6 +8,7 @@ import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js'
 import { retainCaptionEnds } from './caption-capture.js';
 import { openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
 import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.js';
+import { browserRecordingAvailable, createBrowserSpeakOverRecorder } from './browser-speakover.js';
 import { createMediaCaptionPanel } from './media-caption-panel.js';
 import { createYoutubeMediaAdapter } from './youtube-media-adapter.js';
 import { playLocalMedia } from './local-playback.js';
@@ -5978,7 +5979,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
       }
       // The existing local <audio>/<video> is the source of truth for the
       // recording timestamp, pause/resume and playback-crossing watcher.
-      if (_haveAudioBridge() && mediaFile) {
+      if (_haveSpeakOverRecorder() && mediaFile) {
         _localSpeakOver.attach(mediaFile, _localMediaElement(mediaFile))
       }
       _getLocalCaptionPanel().open(_localMediaElement(mediaFile))
@@ -15321,6 +15322,30 @@ const _AUDIO_PENDING = Object.create(null)
 let _audioReqSeq = 1
 function _nextAudioRid() { return 'a' + (_audioReqSeq++) + '_' + Date.now().toString(36) }
 function _haveAudioBridge() { return !!(window.AudioBridge && typeof window.AudioBridge.postMessage === 'function') }
+const _browserSpeakOver = createBrowserSpeakOverRecorder(window)
+function _haveSpeakOverRecorder() { return _haveAudioBridge() || browserRecordingAvailable(window) }
+function _isSpeakOverAudioUrl(url) { return typeof url === 'string' && (/^webrec:\/\//.test(url) || _isAudioMediaUrl(url)) }
+function _speakOverAudioRpc(op, payload) {
+  if (_haveAudioBridge()) return _audioRpc(op, payload)
+  switch (op) {
+    case 'recordStart': return _browserSpeakOver.start(payload?.id)
+    case 'recordStop': return _browserSpeakOver.stop()
+    case 'recordCancel': return _browserSpeakOver.cancel()
+    case 'load': return _browserSpeakOver.load(payload?.url)
+    case 'delete': return _browserSpeakOver.remove(payload?.url)
+    default: return Promise.reject(new Error('Browser recorder does not support ' + op))
+  }
+}
+async function _loadSpeakOverAudio(url) {
+  if (typeof url === 'string' && url.startsWith('webrec://')) return _browserSpeakOver.load(url)
+  return loadManualAudioData(url)
+}
+function _deleteSpeakOverAudio(url) {
+  if (typeof url === 'string' && url.startsWith('webrec://')) {
+    return _browserSpeakOver.remove(url).catch(e => console.warn('[speakover] delete failed', e))
+  }
+  return deleteManualAudio(url)
+}
 
 // Dart calls this with {op, rid, result?, error?}. Resolves the matching
 // Promise we registered when we sent the request.
@@ -15370,11 +15395,11 @@ async function deleteManualAudio(url) {
 // A media File itself is never persisted (Android/browser must re-grant it).
 const _localSpeakOver = createLocalSpeakOver({
   permission: () => ensureMicPermissionViaBridge(),
-  startRecording: id => _audioRpc('recordStart', { id }),
-  stopRecording: () => _audioRpc('recordStop', {}),
-  cancelRecording: () => _audioRpc('recordCancel', {}),
-  loadAudio: url => loadManualAudioData(url),
-  deleteAudio: url => deleteManualAudio(url),
+  startRecording: id => _speakOverAudioRpc('recordStart', { id }),
+  stopRecording: () => _speakOverAudioRpc('recordStop', {}),
+  cancelRecording: () => _speakOverAudioRpc('recordCancel', {}),
+  loadAudio: url => _loadSpeakOverAudio(url),
+  deleteAudio: url => _deleteSpeakOverAudio(url),
   readSaved: identity => {
     const value = _userData.getItem(_scopedKey(
       'cupitor:localSpeakOver:' + getLangFromUrl().fullName + ':' + identity))
@@ -15391,7 +15416,7 @@ const _localSpeakOver = createLocalSpeakOver({
 function _renderLocalSpeakOver(st) {
   const $bar = $('#localSpeakOverBar')
   if (!$bar.length) return
-  if (!st || !_haveAudioBridge()) { $bar.hide().empty(); return }
+  if (!st || !_haveSpeakOverRecorder()) { $bar.hide().empty(); return }
   $bar.empty()
   $('<div class="local-sprec-heading">Speak Over · ' + 
     '<span class="local-sprec-note">local media</span></div>').appendTo($bar)
@@ -22905,7 +22930,7 @@ function _pracRecKey(it) {
 // A card can carry takes when there is a clip to speak over and a host that
 // can hold the bytes. A manual card already has its own two recordings.
 function _pracRecEligible(it) {
-  return !!(it && _haveAudioBridge() &&
+  return !!(it && _haveSpeakOverRecorder() &&
     (spotifyClips(it).length || (!it.manual && typeof it.timeStart === 'number')))
 }
 
@@ -22916,7 +22941,7 @@ function _practiceSpeakOverShown() { return window._appSettings.practiceSpeakOve
 function _pracRecSavedTakes(it) {
   const list = (it && Array.isArray(it.practiceTakes)) ? it.practiceTakes : []
   return list
-    .filter(t => t && _isAudioMediaUrl(t.url) && isFinite(Number(t.t1)))
+    .filter(t => t && _isSpeakOverAudioUrl(t.url) && isFinite(Number(t.t1)))
     .map(t => ({ t1: Number(t.t1), url: t.url, ms: Number(t.ms) || 0 }))
 }
 
