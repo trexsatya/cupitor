@@ -22429,7 +22429,17 @@ function minimizePracticeMode() {
     _pracRec.token++
     if (_pracRec.audio) { try { _pracRec.audio.pause() } catch (_) {} _pracRec.audio = null }
     if (_pracRec.phase === 'playback') _pracRec.phase = 'idle'
-    if (_pracRec.phase === 'recording') _pracRecStop()
+    if (_pracRec.phase === 'recording') {
+      if (_pracRec.loop) _pracRecLoopStop()
+      else _pracRecStop()
+    }
+    // A minimized view must not keep looping or talking behind the main page.
+    _pracRec.loop = false
+    _pracRecLoopClearAudio(_pracRec)
+    if (_pracRec.loopTake) _deleteSpeakOverAudio(_pracRec.loopTake.url)
+    _pracRec.loopTake = null
+    if (_pracRec.loopSeekTimer) clearTimeout(_pracRec.loopSeekTimer)
+    _pracRec.loopSeeking = false
     _renderPracticeRecBar()
   }
   _newPracticeVideoRequest({ keepSpotify: spotify, keepTts: true })
@@ -23492,6 +23502,29 @@ function _pracRecWatch() {
     // Tracked even while the video is held, so resuming compares against
     // where it actually is rather than against where it was long ago.
     st.watchPos = ct
+    if (st.loop) {
+      // Let the source run while recording. Seek at the clip's actual end;
+      // do not let the normal stop-watcher or saved timestamped takes fire.
+      if (st.loopSeeking) {
+        if (ct >= st.clipStart - 0.05 && ct < Math.min(st.clipStart + 0.5, st.clipStop - 0.15)) {
+          st.loopSeeking = false
+          if (st.loopSeekTimer) { clearTimeout(st.loopSeekTimer); st.loopSeekTimer = null }
+          st.watchPos = st.clipStart - 0.001
+        }
+        return
+      }
+      if (st.clipStop != null && ct >= st.clipStop - 0.07) {
+        _pracRecLoopSeek(st)
+        return
+      }
+      const tk = st.loopTake
+      if (tk && st.phase === 'idle' && !st.loopPlayed && prev != null &&
+          prev < tk.t1 && ct >= tk.t1 && ct - prev < 1.5) {
+        st.loopPlayed = true
+        _pracRecLoopPlayTake(st, tk)
+      }
+      return
+    }
     // Recording holds the video still, and a take playing has already paused
     // it. Neither is playback crossing a mark.
     if (st.phase === 'starting' || st.phase === 'recording' || st.phase === 'playback') return
