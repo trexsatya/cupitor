@@ -23467,8 +23467,9 @@ async function _pracRecLoopStop() {
   let url = null
   try { url = await _speakOverAudioRpc('recordStop', {}) }
   catch (error) { console.warn('[practiceRec] loop stop failed', error) }
-  if (_pracRec !== st || token !== st.token) {
+  if (_pracRec !== st || token !== st.token || !st.loop || window._practiceMinimized) {
     if (url) _deleteSpeakOverAudio(url)
+    if (_pracRec === st) { st.phase = 'idle'; st.t1 = null; st.url = null; _renderPracticeRecBar() }
     return false
   }
   st.phase = 'idle'
