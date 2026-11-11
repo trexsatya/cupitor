@@ -22047,6 +22047,13 @@ function openPracticeMode(opts) {
           <input type="checkbox" class="practice-speakover-toggle">
           <span>Show speakover</span>
         </label>
+        <label class="practice-settings-row">
+          <span class="practice-settings-lbl">Speakover mode</span>
+          <select class="practice-speakover-mode" aria-label="Speakover mode">
+            <option value="takes">Timestamped takes</option>
+            <option value="loop">Loop clip + latest take</option>
+          </select>
+        </label>
         <div class="practice-settings-row practice-speeds-row">
           <label><span class="practice-settings-lbl">Speed cycle</span>
             <input type="text" class="practice-speeds-input" aria-label="Speed cycle" placeholder="1, 0.75, 0.5">
@@ -22110,7 +22117,14 @@ function openPracticeMode(opts) {
     </div>`).appendTo('body')
 
     $p.on('click', '.prec-toggle', _pracRecToggle)
-    $p.on('click', '.prec-mode', _pracRecLoopToggle)
+    $p.on('change', '.practice-speakover-mode', function () {
+      const requested = this.value === 'loop'
+      if (!_pracRec || _pracRec.phase !== 'idle') {
+        this.value = _pracRec?.loop ? 'loop' : 'takes'
+        return
+      }
+      if (requested !== _pracRec.loop) _pracRecLoopToggle()
+    })
     $p.on('click', '.prec-loop-replay', () => { if (_pracRec?.loop && _pracRec.loopTake) _pracRecLoopSeek(_pracRec) })
     $p.on('click', '.prec-keep', _pracRecKeep)
     $p.on('click', '.prec-drop', _pracRecDiscard)
@@ -23056,6 +23070,9 @@ function _renderPracticeRecBar(note) {
     .prop('checked', _practiceSpeakOverShown())
     .prop('disabled', !!st && st.phase !== 'idle')
     .attr('title', st && st.phase !== 'idle' ? 'Finish recording or replay before hiding speakover' : '')
+  $('#practiceMode .practice-speakover-mode')
+    .val(st?.loop ? 'loop' : 'takes')
+    .prop('disabled', !st || st.phase !== 'idle' || !_practiceSpeakOverShown())
   if (!st || !_practiceSpeakOverShown()) { $bar.hide().empty(); _setPracRecBarHeight(0); return }
   const n = st.takes.length
   const unkept = st.loop ? 0 : st.takes.filter(t => !st.kept.has(t.url)).length
@@ -23082,18 +23099,7 @@ function _renderPracticeRecBar(note) {
   // nothing beside it can push it off centre — a column that refuses to shrink
   // to its share leaves the button wherever the leftovers put it, and which
   // engine does that is not worth finding out one device at a time.
-  $bar.empty()
-  $bar.append(
-    $('<div class="prec-mode-row"></div>').append(
-      $('<span class="prec-mode-label"></span>').text('Speakover mode'),
-      $('<button type="button" class="prec-btn prec-mode"></button>')
-        .text(st.loop ? '◉ Loop clip + latest take' : '↻ Loop clip + latest take')
-        .attr('aria-pressed', st.loop ? 'true' : 'false')
-        .prop('disabled', st.phase !== 'idle')
-        .attr('title', 'Loop the clip continuously, record whenever you like, and overlay only your newest take')
-    )
-  )
-  $bar.append(
+  $bar.empty().append(
     $('<div class="prec-row"></div>').append(
       $('<span class="prec-status"></span>').text(status),
       $('<span class="prec-side"></span>').toggle(!st.loop).append(
