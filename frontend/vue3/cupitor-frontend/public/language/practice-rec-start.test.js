@@ -127,3 +127,16 @@ test('minimizing Practice cancels microphone startup before a late bridge respon
   assert.deepEqual(f.deleted,['file:///abandoned.ogg'])
   assert.equal(f.requests.filter(r=>r.op==='recordStop').length,0)
 })
+
+test('interrupting a live Speak Over take releases the mic and leaves Practice ready to record again', async () => {
+  const f = fixture()
+  await f.context._pracRecStart()
+  assert.equal(f.state.phase, 'recording')
+  f.context._pracRecCancelCapture(f.state)
+  f.context._pracRecCancelCapture(f.state)
+  assert.equal(f.state.phase, 'idle')
+  assert.equal(f.state.url, null)
+  assert.equal(f.requests.filter(r => r.op === 'recordCancel').length, 1)
+  await f.context._pracRecStart()
+  assert.equal(f.state.phase, 'recording')
+})
