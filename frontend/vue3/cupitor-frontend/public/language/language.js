@@ -23374,13 +23374,16 @@ function _pracRecLoopClearAudio(st) {
   }
 }
 
-function _pracRecLoopSeek(st) {
+function _pracRecLoopSeek(st, { preserveAudio = false } = {}) {
   if (_pracRec !== st || !st.loop || window._practiceMinimized || !window._practiceActive) return
   _pracRecTakeOverPlayhead()
-  _pracRecLoopClearAudio(st)
+  // A take can be longer than a single loop. Keep that recording audible
+  // across source rewinds instead of cutting it short at the clip boundary.
+  const speaking = preserveAudio && st.loopAudio && !st.loopAudio.paused && !st.loopAudio.ended
+  if (!speaking) _pracRecLoopClearAudio(st)
   if (st.loopSeekTimer) clearTimeout(st.loopSeekTimer)
   st.loopSeeking = true
-  st.loopPlayed = false
+  st.loopPlayed = !!speaking
   st.watchPos = null
   const start = Number(st.clipStart) || 0
   if (spotifyClips(st.item).length) {
@@ -23551,7 +23554,7 @@ function _pracRecWatch() {
         return
       }
       if (st.clipStop != null && ct >= st.clipStop - 0.07) {
-        _pracRecLoopSeek(st)
+        _pracRecLoopSeek(st, { preserveAudio: true })
         return
       }
       const tk = st.loopTake
