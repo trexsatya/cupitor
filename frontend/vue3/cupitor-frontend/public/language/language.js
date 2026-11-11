@@ -22145,6 +22145,9 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-shuffle', _togglePracticeShuffle)
     $p.on('click', '.practice-settings', _togglePracticeSettingsPanel)
     $p.on('change', '.practice-speakover-toggle', function () {
+      // Hiding Speak Over must also stop the active looping source/take.
+      // Otherwise a hidden mode keeps playing even though its controls vanish.
+      if (!this.checked && _pracRec?.loop && _pracRec.phase === 'idle') _pracRecLoopToggle()
       window._appSettings.practiceSpeakOver = this.checked
       saveAppSettings()
       if (_pracRec) { _pracRec.token++; _pracRec.awaiting = null; _pracRec.watchPos = null }
