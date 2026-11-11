@@ -145,7 +145,7 @@ export function createLocalSpeakOver({
 
   function cancel() {
     const st = session;
-    if (!st || st.phase !== 'starting') return false;
+    if (!st || (st.phase !== 'starting' && st.phase !== 'recording')) return false;
     generation++;
     st.phase = 'idle'; st.error = 'Recording cancelled';
     Promise.resolve(cancelRecording()).catch(() => {});

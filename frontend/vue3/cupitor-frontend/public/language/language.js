@@ -586,6 +586,7 @@ window.addEventListener('capturedSubtitle', (e) => {
 });
 
 window.addEventListener('cupitorDialog1Closed', () => {
+  _cancelSpeakOverCapture()
   // Close all dialogs — except one marked to wait for the user's return: the
   // playlist a capture was just filed in (see _keepFiledPlaylistOpen).
   $('.ui-dialog-content').each(function () {
@@ -708,12 +709,17 @@ function _hookYtForReturnGuard() {
   }) } catch (_) {}
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { _hookYtForReturnGuard(); _ytReturnGuard.onHidden() }
+  if (document.hidden) {
+    _cancelSpeakOverCapture()
+    _hookYtForReturnGuard()
+    _ytReturnGuard.onHidden()
+  }
   else { _enforceYoutubePlaybackView(); _ytReturnGuard.onVisible() }
 })
 ;['pageshow', 'focus'].forEach(event => window.addEventListener(event, () => _enforceYoutubePlaybackView()))
 window.addEventListener('cupitorAppLifecycle', event => {
   if (event.detail?.isForeground) _enforceYoutubePlaybackView()
+  else if (event.detail?.state === 'hidden' || event.detail?.state === 'paused') _cancelSpeakOverCapture()
 })
 ;['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
   document.addEventListener(ev, () => _ytReturnGuard.cancel(), true))
@@ -15326,7 +15332,9 @@ const _browserSpeakOver = createBrowserSpeakOverRecorder(window)
 function _haveSpeakOverRecorder() { return _haveAudioBridge() || browserRecordingAvailable(window) }
 function _isSpeakOverAudioUrl(url) { return typeof url === 'string' && (/^webrec:\/\//.test(url) || _isAudioMediaUrl(url)) }
 function _speakOverAudioRpc(op, payload) {
-  if (_haveAudioBridge()) return _audioRpc(op, payload)
+  if (_haveAudioBridge()) {
+    return _audioRpc(op, op === 'recordStart' ? { ...payload, speakOver: true } : payload)
+  }
   switch (op) {
     case 'recordStart': return _browserSpeakOver.start(payload?.id)
     case 'recordStop': return _browserSpeakOver.stop()
@@ -22442,7 +22450,7 @@ function minimizePracticeMode() {
   // Park a take as well as its source clip. A recording finishes as an
   // unkept take; neither its replay nor the microphone runs behind the page.
   if (_pracRec) {
-    if (_pracRec.phase === 'starting') _pracRecCancelStart(_pracRec)
+    if (_pracRec.phase === 'starting') _pracRecCancelCapture(_pracRec)
     _pracRec.token++
     if (_pracRec.audio) { try { _pracRec.audio.pause() } catch (_) {} _pracRec.audio = null }
     if (_pracRec.phase === 'playback') _pracRec.phase = 'idle'
@@ -23265,19 +23273,24 @@ function _pracRecToggle() {
   const st = _pracRec
   if (!st || !_practiceSpeakOverShown()) return
   if (st.loop) {
-    if (st.phase === 'starting') { _pracRecCancelStart(st); return }
+    if (st.phase === 'starting') { _pracRecCancelCapture(st); return }
     if (st.phase === 'recording') { _pracRecLoopStop(); return }
     if (st.phase === 'idle') _pracRecLoopStart()
     return
   }
-  if (st.phase === 'starting') { _pracRecCancelStart(st); return }
+  if (st.phase === 'starting') { _pracRecCancelCapture(st); return }
   if (st.phase === 'recording') { _pracRecStop(); return }
   if (st.phase !== 'idle') return
   _pracRecStart()
 }
 
-function _pracRecCancelStart(st) {
-  if (_pracRec !== st || st.phase !== 'starting') return
+function _cancelSpeakOverCapture() {
+  _localSpeakOver.cancel()
+  if (_pracRec) _pracRecCancelCapture(_pracRec)
+}
+
+function _pracRecCancelCapture(st) {
+  if (_pracRec !== st || (st.phase !== 'starting' && st.phase !== 'recording')) return
   st.token++
   st.phase = 'idle'; st.t1 = null; st.url = null
   Promise.resolve(_speakOverAudioRpc('recordCancel', {})).catch(() => {})
