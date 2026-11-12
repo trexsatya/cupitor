@@ -30,6 +30,11 @@ async function verify(browser, width, video = false) {
   page.on('dialog', dialog => dialog.dismiss())
   await page.addInitScript(() => {
     window.dontConfirmOnRefresh = true
+    window.__captureFiled = []
+    window.PlaylistBridge = {postMessage(raw) {
+      const message = JSON.parse(raw)
+      if (message.op === 'captureFiled') window.__captureFiled.push(message)
+    }}
     window.__localInterruptedStarts = 0
     const nativePlay = HTMLMediaElement.prototype.play
     HTMLMediaElement.prototype.play = function (...args) {
@@ -94,14 +99,23 @@ async function verify(browser, width, video = false) {
     assert.match(await page.locator('#localCaptionPanel .cup-sub-cue').last().innerText(), /Ny sista/)
     await page.getByRole('button', {name:'Cancel',exact:true}).click()
 
-    // Capture uses the shared selection controls and the existing destination
-    // dialog. It preserves the file identity and fractional cue bounds.
+    // Saving from within dialog1 keeps the local media and its transcript open.
     await page.locator('#localCaptionPanel [data-act=pick]').click()
     await page.locator('#localCaptionPanel [data-act=all]').click()
     await page.locator('#localCaptionPanel [data-act=send]').click()
     await page.locator('#captionCaptureDialog').waitFor({state:'visible'})
     assert.match(await page.locator('#captionCaptureDialog').innerText(), /Ny första/)
-    await page.locator('#captionCaptureDialog').locator('..').getByRole('button', {name:'Cancel',exact:true}).click()
+    const playlist = await page.locator('#capCapPlaylist').inputValue()
+    await page.locator('#capCapSave').click()
+    await page.locator('#captionCaptureDialog').waitFor({state:'hidden'})
+    assert.deepEqual(await page.evaluate(() => window.__captureFiled), [],
+      'local capture must not ask Flutter to close dialog1')
+    assert.match(await page.locator('#cpBuildToast').innerText(), /Added 3 lines/)
+    assert.equal(await page.locator('#recordingReviewDialog').isVisible(), false)
+    assert.equal(await page.locator('#localCaptionPanel').isVisible(), true)
+    assert.deepEqual(await page.locator(mediaSelector).evaluate(media => ({src:media.src,time:media.currentTime})), before)
+    assert.equal(await page.evaluate(name => window._recordings[name].items.Manual.Card[0].source, playlist),
+      'Ny första\nNy andra\nNy sista')
 
     // Check the panel, native transport and every toolbar button fit at 320px.
     const geometry = await page.evaluate(() => {
