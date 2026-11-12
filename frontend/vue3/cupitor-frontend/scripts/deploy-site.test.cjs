@@ -139,7 +139,7 @@ test('an incomplete runtime build or a symlink inside db aborts before touching 
   assert.equal(fs.readFileSync(path.join(root, 'outside/js/snippet.js'), 'utf8'), 'keep outside');
 });
 
-test('MP3 transcription workflow is generic, uses safe URL arguments and emits SRT', () => {
+test('MP3 transcription workflow passes the downloaded filename to the transcriber', () => {
   const workflows = path.resolve(__dirname, '../../../../.github/workflows');
   const workflowPath = path.join(workflows, 'mp3-to-srt.yml');
   assert(fs.existsSync(workflowPath), 'generic transcription workflow must exist');
@@ -153,8 +153,11 @@ test('MP3 transcription workflow is generic, uses safe URL arguments and emits S
   assert.match(yaml, /TRANSCRIPTION_LANGUAGE:/);
   assert.match(yaml, /default: auto/);
   assert.match(yaml, /python frontend\/vue3\/cupitor-frontend\/tools\/language\/download-audio\.py/);
-  assert.match(yaml, /"\$MP3_URL" output\/audio\.mp3/);
-  assert.match(yaml, /output\/audio\.mp3 -l "\$TRANSCRIPTION_LANGUAGE" -o output\/audio\.srt/);
+  assert.match(yaml, /--use-source-filename "\$MP3_URL" output\/audio\.mp3/);
+  assert.match(yaml, /printf 'audio_path=%s\\n' "\$audio_path" >> "\$GITHUB_OUTPUT"/);
+  assert.match(yaml, /AUDIO_PATH: \$\{\{ steps\.download\.outputs\.audio_path \}\}/);
+  assert.match(yaml, /"\$AUDIO_PATH" -l "\$TRANSCRIPTION_LANGUAGE"/);
+  assert.match(yaml, /test -s "\$\{AUDIO_PATH%\.\*\}\.srt"/);
   assert.match(yaml, /name: mp3-transcription/);
   assert.doesNotMatch(yaml, /sveriges.?radio|api\.sr\.se|avsnitt\/repris|episode_url/i);
 });
