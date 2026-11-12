@@ -240,11 +240,85 @@ async function checkDialogs(browser, mobile) {
   }
 }
 
+async function checkVocabInsertPositions(browser, mobile) {
+  const width = mobile ? 320 : 1280
+  const page = await browser.newPage({ viewport: { width, height: 850 }, isMobile: mobile, hasTouch: mobile })
+  const ref = '(colorful)|färgsprakande|'
+  const otherRef = '(stain)|färg|'
+  await page.route('**/*', serveFixtures)
+  await page.addInitScript(() => {
+    localStorage.setItem('cupitor:account', JSON.stringify({
+      login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null,
+    }))
+  })
+  try {
+    await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
+    await page.locator('#addToVocabBtn').waitFor({ state: 'attached' })
+    await page.waitForFunction(() => !document.querySelector('#addToVocabBtn').disabled)
+    await page.evaluate(() => window.openAddToVocabDialog())
+    const dialog = page.locator('#addToVocabularyDialog')
+    const choices = dialog.getByRole('group', { name: /Insert/ })
+    const textarea = dialog.locator('#vocabularySegmentTextarea')
+    const choose = async name => {
+      const label = choices.locator('label').filter({ hasText: name })
+      if (mobile) await label.tap()
+      else await label.click()
+      assert.equal(await choices.getByRole('checkbox', { checked: true }).count(), 1)
+      assert(await choices.getByRole('checkbox', { name }).isChecked())
+    }
+    const selectRef = line => dialog.locator('#addToVocabularyDialogSelect').evaluate((el, word) => {
+      const option = [...el.options].find(o => !o.disabled && o.value && JSON.parse(o.value).o === word)
+      $(el).val(option.value).trigger('change')
+    }, line)
+    const stage = async (text, expected) => {
+      await textarea.fill(text)
+      await dialog.locator('#addVocabAddAnotherBtn').click()
+      assert.deepEqual(await page.evaluate(() => window.vocabulary.Color), expected)
+      await page.waitForFunction(() => !document.querySelector('#addVocabAddAnotherBtn').disabled)
+    }
+    await choices.waitFor()
+    assert.equal(await choices.getByRole('checkbox').count(), 3)
+    assert(await choices.getByRole('checkbox', { name: 'Below' }).isChecked())
+    const bounds = await choices.locator('label').evaluateAll(labels => labels.map(label => {
+      const { left, right, height } = label.getBoundingClientRect()
+      return { left, right, height }
+    }))
+    assert(bounds.every(({ left, right, height }) => left >= 0 && right <= width && height >= 44))
+
+    await selectRef(ref)
+    await choose('Inline')
+    assert.equal(await textarea.inputValue(), ref)
+    await selectRef(otherRef)
+    assert.equal(await textarea.inputValue(), otherRef)
+    await choose('Above')
+    assert.equal(await textarea.inputValue(), '')
+    await textarea.fill('(shade)|nyans|')
+    await choose('Below')
+    await choose('Below')
+    assert.equal(await textarea.inputValue(), '(shade)|nyans|')
+    const shade = '(shade)|nyans|'
+    const hue = '(hue)|kulör|'
+    await stage(shade, [ref, otherRef, shade])
+    await selectRef(otherRef)
+    await choose('Above')
+    await stage(hue, [ref, hue, otherRef, shade])
+    await selectRef(otherRef)
+    await choose('Inline')
+    const edited = '(stain)|färg|fläck|'
+    await stage(edited, [ref, hue, edited, shade])
+    console.log(`${mobile ? '320px touch' : 'Desktop'}: vocabulary insert choices, inline editing and staging passed`)
+  } finally {
+    await page.close()
+  }
+}
+
 if (require.main === module) (async () => {
   const browser = await chromium.launch({ headless: true,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required'] })
   try {
+    await checkVocabInsertPositions(browser, false)
+    await checkVocabInsertPositions(browser, true)
     await checkDialogs(browser, false)
     await checkDialogs(browser, true)
     await require('./practice-controls.cjs').checkPracticeControls(browser)
@@ -259,4 +333,4 @@ if (require.main === module) (async () => {
   }
 })().catch(error => { console.error(error); process.exitCode = 1 })
 
-module.exports = { serveFixtures }
+module.exports = { serveFixtures, checkVocabInsertPositions }

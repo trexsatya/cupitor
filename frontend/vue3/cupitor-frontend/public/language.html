@@ -667,14 +667,14 @@
                 <label style="font-size:0.85em;">Reference word:</label>
                 <select id="addToVocabularyDialogSelect" style="width: 98%;"></select>
             </div>
-            <div style="margin-top: 0.5em;">
-                <label style="font-size:0.85em;">Insert: </label>
-                <select id="vocabInsertPosition" onchange="onVocabInsertPositionChange(this)">
-                    <option value="above">above selected word</option>
-                    <option value="below" selected>below selected word</option>
-                    <option value="inline">inline selected word</option>
-                </select>
-            </div>
+            <fieldset id="vocabInsertPosition">
+                <legend>Insert <span class="sr-only">(choose one)</span></legend>
+                <div class="vocab-insert-options">
+                    <label><input type="checkbox" value="above"> Above</label>
+                    <label><input type="checkbox" value="below" checked> Below</label>
+                    <label><input type="checkbox" value="inline"> Inline</label>
+                </div>
+            </fieldset>
             <div style="margin-top: 0.5em;">
                 <label style="font-size:0.85em;" title="Append the lines below to this category (creating it if it doesn't exist). When set, the reference word and Insert position are ignored.">Or new/existing category: </label>
                 <input id="vocabNewCategory" type="text" placeholder="leave empty to use selected reference" style="width: 60%;">
