@@ -13906,9 +13906,8 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '', insert
   }) : lines
   const skipped = lines.length - fresh.length
   if (!fresh.length) {
-    // Returned rather than announced here: the caller decides where this is
-    // said, and inside Cupitor it has to be said outside this page. Nothing
-    // was written, but that is not a failure — let the dialog close.
+    // Let the caller show the result and close the picker even if every
+    // selected line was already in the playlist.
     return timingUpdates
       ? `Updated clip timings for ${timingUpdates} existing item(s) in "${playlistName}".`
       : `Already captured — all ${n(lines.length)} are in "${playlistName}".`
@@ -13994,17 +13993,6 @@ let _captionDialogWords = null
 let _recordingsLoaded = false
 const _captionPreLoad = []
 
-// Tell the host a capture has been filed, so it can put its dialog away and
-// give the user back the page or book they sent it from. Sending is the whole
-// reason the webapp is on screen at that moment, so once the block has landed
-// there is nothing left here to look at.
-//
-// `message` is what the user should be told — the host says it, because a
-// toast drawn in this page would be torn down with the dialog that holds it.
-//
-// Returns true when the host has been told, so the caller knows not to say it
-// here as well. Outside Cupitor there is no host and no dialog to close, so it
-// returns false and the caller speaks for itself.
 // Open the playlist a capture (subtitle lines or a video note) was just filed
 // in, marked so that closing the study dialog leaves it open. The mark goes
 // the moment the user closes it, so every other open of the dialog behaves
@@ -14022,6 +14010,7 @@ $(document).on('dialogclose', '#recordingReviewDialog', function () {
   this.removeAttribute('data-keep-on-host-close')
 })
 
+// The host closes dialog1 and shows the confirmation on the originating page.
 function _notifyCaptureFiled(playlistName, message) {
   if (!window.PlaylistBridge ||
       typeof window.PlaylistBridge.postMessage !== 'function') return false
@@ -14043,7 +14032,7 @@ function _notifyCaptureFiled(playlistName, message) {
 // Ask where the block should go. Always asked, even when a real playlist is
 // active: a send yanks the webapp on top of the playing video, so the dialog
 // doubles as the confirmation that the send actually landed.
-function _openCaptionCaptureDialog(cap, lines) {
+function _openCaptionCaptureDialog({ cap, lines, fromHost }) {
   const active = (window._recording && window._recording.currentName) || ''
   const names = _captionDestinations()
   const w = _captionWords(cap)
@@ -14155,19 +14144,13 @@ function _openCaptionCaptureDialog(cap, lines) {
         window._appSettings.captionItemId = itemId
         saveAppSettings()
         $(this).dialog('close')
-        // Show where it went, and keep it there: the host is about to close
-        // the study dialog to hand the video back, and the playlist should
-        // still be open when the user comes back to it. Not while more blocks
-        // are queued — the next picker is about to open.
-        if (res && !_captionQueue.length) _keepFiledPlaylistOpen(name)
-        // Hand the screen back to whatever the user was doing when they sent
-        // this — but not while more blocks are queued, because the close
-        // callback is about to open the next picker and closing now would
-        // hide it. The host reports the result in that case, since anything
-        // said in this page goes down with the dialog it is drawn in.
-        if (_captionQueue.length || !_notifyCaptureFiled(name, res)) {
-          if (res) _cpBuildToast(res)
+        // Only a capture sent by the host can return to an originating page.
+        // Wait for the final picker so closing dialog1 cannot hide another one.
+        if (fromHost && !_captionQueue.length) {
+          if (res) _keepFiledPlaylistOpen(name)
+          if (_notifyCaptureFiled(name, res)) return
         }
+        if (res) _cpBuildToast(res)
       } },
       { text: 'Cancel', click: function () { $(this).dialog('close') } }
     ]
@@ -14248,7 +14231,7 @@ function _openNextCaptionCapture() {
   // but the dialog's own close callback, so a single failure would otherwise
   // swallow every capture for the rest of the session, in silence.
   try {
-    _openCaptionCaptureDialog(next.cap, next.lines)
+    _openCaptionCaptureDialog(next)
   } catch (e) {
     _captionDialogOpen = false
     console.warn('[caption] could not open capture dialog', e)
@@ -14256,7 +14239,7 @@ function _openNextCaptionCapture() {
   }
 }
 
-function _handleCaptionCapture(cap) {
+function _handleCaptionCapture(cap, fromHost = false) {
   const lines = _captionLinesFrom(cap)
   // Malformed, or an event that isn't ours — stay silent, exactly as the host
   // does with a malformed payload.
@@ -14266,8 +14249,8 @@ function _handleCaptionCapture(cap) {
   // make _saveRecording persist THAT collection over the user's real playlists
   // in localStorage — every playlist gone, silently. Hold the block instead;
   // _captionCaptureReady drains it once the real collection is in place.
-  if (!_recordingsLoaded) { _captionPreLoad.push(cap); return }
-  _captionQueue.push({ cap, lines })
+  if (!_recordingsLoaded) { _captionPreLoad.push({ cap, fromHost }); return }
+  _captionQueue.push({ cap, lines, fromHost })
   // The title renders once at open time, so a capture arriving while the
   // dialog is up must update it in place — otherwise the 'more waiting' hint
   // is missing in exactly the case it exists for. The wording belongs to the
@@ -14285,7 +14268,7 @@ window._handleCaptionCapture = _handleCaptionCapture
 // Registered at module scope, not on a page/route, because a capture can land
 // whatever the webapp is currently showing — and it fires before dialog1 is
 // visible when the host had to open dialog1 first.
-window.addEventListener('cupitorCaptionCapture', ev => _handleCaptionCapture(ev && ev.detail))
+window.addEventListener('cupitorCaptionCapture', ev => _handleCaptionCapture(ev.detail, true))
 
 // Called from the app's ready handler AFTER _loadRecording(), never at module
 // scope: until the real collection replaces the bootstrap, a destination list
@@ -14306,14 +14289,14 @@ function _captionCaptureReady() {
     const pending = window.__cupitorCaptionCapture
     if (pending) {
       window.__cupitorCaptionCapture = null   // cleared so a reload can't re-add
-      _captionPreLoad.push(pending)
+      _captionPreLoad.push({ cap: pending, fromHost: true })
     }
   } catch (e) {
     console.warn('[caption] pending capture failed', e)
   }
   // splice(0) so a handler that somehow re-enters can't replay the same block.
-  _captionPreLoad.splice(0).forEach(cap => {
-    try { _handleCaptionCapture(cap) } catch (e) {
+  _captionPreLoad.splice(0).forEach(({ cap, fromHost }) => {
+    try { _handleCaptionCapture(cap, fromHost) } catch (e) {
       console.warn('[caption] held capture failed', e)
     }
   })

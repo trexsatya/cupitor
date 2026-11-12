@@ -98,6 +98,9 @@ async function check(browser, mobile) {
     }
     await page.locator('#capCapItem').selectOption('')
     await commit()
+    assert.deepEqual(await page.evaluate(() => window.__filed.filter(m => m.op === 'captureFiled')), [
+      { op: 'captureFiled', playlist, message: `Added 2 lines to "${playlist}"` }
+    ], 'main WebView capture asks Flutter to close dialog1 after saving')
     let items = await cards()
     assert.equal(items.length, 3, 'New item keeps the original capture behavior')
     const added = items[2], untouched = items[1]
@@ -230,7 +233,9 @@ async function check(browser, mobile) {
     await click('#capCapSave')
     await page.waitForFunction(() => document.querySelector('.cap-cap-line')?.textContent === 'Nästa block.')
     assert.equal(await page.locator('#capCapItem').inputValue(), 'notes')
+    const filedBeforeLast = await page.evaluate(() => window.__filed.filter(m => m.op === 'captureFiled').length)
     await commit()
+    assert.equal(await page.evaluate(() => window.__filed.filter(m => m.op === 'captureFiled').length), filedBeforeLast + 1)
     assert.equal((await cards()).length, 2, 'both queued captures merge into the same item')
     assert.match((await cards()).find(it => it.id === 'notes').source, /En köad rad\.\nNästa block\./)
 
