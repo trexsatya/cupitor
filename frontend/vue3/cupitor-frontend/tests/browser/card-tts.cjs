@@ -93,6 +93,71 @@ async function check(browser, mobile) {
     assert.deepEqual(await read(), expected, 'Player speaks a caption captured into Target in the studied language')
     await page.evaluate(() => window.__cardTtsSession)
 
+    const quizName = 'TTS quiz'
+    const question = 'Vad heter du?'
+    const answer = 'Jag heter Anna.'
+    const quizCard = () => page.evaluate(name => window._recordings[name].items.Manual.Card[0], quizName)
+    const editor = page.locator('#manualEntryEditor')
+    const sourceLanguage = editor.getByLabel('Source language')
+    const targetLanguage = editor.getByLabel('Target language')
+    const saveEditor = async name => {
+      await editor.locator('..').getByRole('button', {name, exact:true}).click()
+      await editor.waitFor({state:'hidden'})
+    }
+    const editQuiz = () => page.evaluate(name => window._openManualEntryEditor(
+      name, window._recordings[name].items.Manual.Card[0], {showPlaylistAfterSave:false}), quizName)
+    await page.evaluate(name => {
+      window._recordings = {[name]: {items:{}}}
+      window.selectRecording(name)
+      window._openManualEntryEditor(name, null, {showPlaylistAfterSave:false})
+    }, quizName)
+    assert.equal(await sourceLanguage.inputValue(), '')
+    assert.equal(await targetLanguage.inputValue(), '')
+    await editor.locator('#meeSource').fill(question)
+    await editor.locator('#meeTarget').fill(answer)
+    await sourceLanguage.selectOption('sv-SE')
+    await targetLanguage.selectOption('sv-SE')
+    await saveEditor('Add')
+
+    const quiz = await quizCard()
+    const quizSpeech = [{text:question,lang:'sv-SE'}, {text:answer,lang:'sv-SE'}]
+    await page.evaluate(card => {
+      window.__ttsSpoken.length = 0
+      window.__cardTtsSession = window.playRecording({queue:[card],shuffle:false,loop:'off',temporary:true})
+    },quiz)
+    await page.waitForFunction(() => window.__ttsSpoken.length === 2)
+    assert.deepEqual(await read(), quizSpeech, 'Player uses the same selected language for both faces')
+    await page.evaluate(() => window.__cardTtsSession)
+    await page.evaluate(card => {
+      window.__ttsSpoken.length = 0
+      window.openPracticeMode({queue:[card],temporary:true})
+    },quiz)
+    if (mobile) await play.tap()
+    else await play.click()
+    await page.waitForFunction(() => window.__ttsSpoken.length === 1)
+    assert.deepEqual(await read(), [quizSpeech[1]], 'Practice uses the explicit language of the visible Target face')
+    await page.evaluate(() => window.closePracticeMode())
+
+    await editQuiz()
+    assert.equal(await sourceLanguage.inputValue(), 'sv-SE')
+    assert.equal(await targetLanguage.inputValue(), 'sv-SE')
+    await targetLanguage.selectOption('es-ES')
+    await editor.locator('#meeSwap').click()
+    assert.equal(await sourceLanguage.inputValue(), 'es-ES')
+    assert.equal(await targetLanguage.inputValue(), 'sv-SE')
+    await saveEditor('Save')
+    await page.evaluate(() => window.cupitorUserData.flush())
+    await page.reload({waitUntil:'networkidle'})
+    await page.evaluate(() => Promise.all([window._vocabularyReadyPromise,window._subtitlesReadyPromise]))
+    await editQuiz()
+    assert.equal(await sourceLanguage.inputValue(), 'es-ES', 'Swapped language survives reload')
+    assert.equal(await targetLanguage.inputValue(), 'sv-SE')
+    await sourceLanguage.selectOption('')
+    await saveEditor('Save')
+    const updated = await quizCard()
+    assert.equal(updated.sourceTtsLocale, undefined, 'Automatic clears an explicit locale')
+    assert.equal(updated.targetTtsLocale, 'sv-SE')
+
     await page.evaluate(card => {
       window.__ttsSpoken.length = 0
       window._appSettings.recPlayTtsFallback = false
@@ -102,7 +167,7 @@ async function check(browser, mobile) {
     await page.evaluate(() => window.closePracticeMode())
     assert.deepEqual(errors, [], 'no page errors')
     console.log((mobile ? 'Mobile' : 'Desktop')+
-      ': opt-in TTS played silent manual Player/Practice cards in source/target order')
+      ': automatic and per-face TTS languages in Player and Practice, swap, and persistence passed')
   } finally { await page.close() }
 }
 
