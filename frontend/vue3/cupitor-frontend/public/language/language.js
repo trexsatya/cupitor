@@ -13944,6 +13944,7 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '', insert
     target: faces.target,
   })
   if (!it) return false  // refused, and addManualEntry already said why
+  it.captionField = faces.textField
   // Provenance for de-dupe and timed playback. Text stays in the card's own
   // rows; aligned start/end arrays retain its captured clip boundaries. Without a url there is nothing
   // to match against later, so don't leave unusable starts behind either.
@@ -13954,8 +13955,6 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '', insert
     // How many rows each of those lines took, since a line that kept its own
     // breaks is more than one row of the card.
     it.captionRows = _captionRowCounts(fresh)
-    // Which face to read those rows back out of.
-    it.captionField = faces.textField
   }
   if (cap.title) it.captionTitle = String(cap.title)
   _saveRecording()
@@ -15607,6 +15606,10 @@ function _canSpeakSilentCard(it) {
     hasLinked: !!spotifyClips(it).length || _cardHasVideoLink(it) || media?.kind === 'audio',
     canSpeak: !!(window.speechSynthesis?.speak && typeof window.SpeechSynthesisUtterance === 'function'),
   })
+}
+
+function _cardTtsLocale(item, face) {
+  return face === _captionFieldOf(item) ? getLangFromUrl().locale || 'en-US' : 'en-US'
 }
 
 // Whether a manual card has anything the player can actually sound.
@@ -20606,20 +20609,19 @@ async function _showPracticeAudioPanel(it) {
 // Speak one face of an otherwise silent manual card. Navigation, Stop and
 // headset Pause share the existing _recTTS state, so no old card keeps
 // speaking over the next one.
-async function _playSilentCardTtsAndWait(face, itemToken) {
+async function _playSilentCardTtsAndWait(item, face, itemToken) {
   if (!face?.tts) return
   const current = () => window._playingRecording && !window._practiceActive &&
     window._recPlayItemToken === itemToken && !window._recNavRequest &&
     !Number.isInteger(window._recNavGotoIndex)
   if (!current()) return
-  const lang = face.key === 'target' ? 'en-US' : speechLocale(_ttsLangCode(), 'en-US')
   let utterance = null
   _setRecPlayPhase('clip')
   let task
   task = speakTts(face.text, {
     ..._cardSpeechOptions(),
     synth: window.speechSynthesis, Utterance: window.SpeechSynthesisUtterance,
-    lang, rate: _preferredRecordingAudioRate(), isCurrent: current,
+    lang: _cardTtsLocale(item, face.key), rate: _preferredRecordingAudioRate(), isCurrent: current,
     onBegin(u) {
       utterance = u
       window._recTTS = { kind: 'speech', utterance: u,
@@ -21119,7 +21121,7 @@ async function playRecording(opts) {
           }
           // Label the player so it's obvious which face is sounding, since
           // both faces of one card play back to back with no visual break.
-          if (clips[ci].tts) await _playSilentCardTtsAndWait(clips[ci], itemToken)
+          if (clips[ci].tts) await _playSilentCardTtsAndWait(it, clips[ci], itemToken)
           else await _playManualAudioAndWait(clips[ci].url, clips.length > 1 ? clips[ci].label : '')
           // Stop / prev / next during a clip must not start the next one.
           if (!sessionPlaying() || navPending()) break
@@ -21951,7 +21953,7 @@ function _togglePracticeTts(it) {
   const task = speakTts(text, {
     ..._cardSpeechOptions(),
     synth: window.speechSynthesis, Utterance: window.SpeechSynthesisUtterance,
-    lang: key === 'target' ? 'en-US' : speechLocale(_ttsLangCode(), 'en-US'),
+    lang: _cardTtsLocale(it, key),
     rate: Number(window._practicePlaybackRate) || _preferredPracticeSpeed(),
     isCurrent: () => window._practiceActive &&
       window._practiceIdx === idx &&

@@ -46,7 +46,10 @@ async function check(browser, mobile) {
       window.__cardTtsSession = window.playRecording({queue:[card],shuffle:false,loop:'off',temporary:true})
     },card)
     await page.waitForFunction(() => window.__ttsSpoken.length === 2)
-    assert.deepEqual((await read()).map(x=>x.text), ['Hej världen','Hello world'],
+    assert.deepEqual(await read(), [
+      {text:'Hej världen',lang:'sv-SE'},
+      {text:'Hello world',lang:'en-US'},
+    ],
       'Player speaks Source then Target for the silent manual card')
     await page.evaluate(() => window.__cardTtsSession)
     await page.evaluate(card => {
@@ -59,13 +62,37 @@ async function check(browser, mobile) {
     if (mobile) await play.tap()
     else await play.click()
     await page.waitForFunction(() => window.__ttsSpoken.length === 1)
-    assert.equal((await read())[0].text, 'Hej världen', 'Practice speaks its visible front face')
+    assert.deepEqual((await read())[0], {text:'Hej världen',lang:'sv-SE'}, 'Practice speaks its visible front face')
     await page.locator('#practiceMode .practice-unflip').click({force:true})
     if (mobile) await play.tap()
     else await play.click()
     await page.waitForFunction(() => window.__ttsSpoken.length >= 2)
-    assert.equal((await read())[1].text, 'Hello world', 'Practice can speak the revealed face')
+    assert.deepEqual((await read())[1], {text:'Hello world',lang:'en-US'}, 'Practice can speak the revealed face')
     await page.evaluate(() => window.closePracticeMode())
+
+    const capture = {
+      id:'tts-captured-target',manual:true,source:'',target:'En svensk mening.',
+      captionField:'target',mediaUrl:'https://example.com/transcript',mediaKind:'link',_temporary:true,
+    }
+    const expected = [{text:capture.target,lang:'sv-SE'}]
+    await page.evaluate(card => {
+      window.__ttsSpoken.length = 0
+      window._practiceFrontIsSource = false
+      window.openPracticeMode({queue:[card],temporary:true})
+    },capture)
+    if (mobile) await play.tap()
+    else await play.click()
+    await page.waitForFunction(() => window.__ttsSpoken.length === 1)
+    assert.deepEqual(await read(), expected, 'Practice speaks a caption captured into Target in the studied language')
+    await page.evaluate(() => window.closePracticeMode())
+    await page.evaluate(card => {
+      window.__ttsSpoken.length = 0
+      window.__cardTtsSession = window.playRecording({queue:[card],shuffle:false,loop:'off',temporary:true})
+    },capture)
+    await page.waitForFunction(() => window.__ttsSpoken.length === 1)
+    assert.deepEqual(await read(), expected, 'Player speaks a caption captured into Target in the studied language')
+    await page.evaluate(() => window.__cardTtsSession)
+
     await page.evaluate(card => {
       window.__ttsSpoken.length = 0
       window._appSettings.recPlayTtsFallback = false
