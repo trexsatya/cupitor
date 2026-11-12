@@ -34,7 +34,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: mp3-to-srt-venv-ubuntu-24.04-python-3.11-v2
+          key: mp3-to-srt-venv-ubuntu-24.04-python-3.11-v3
       - name: Restore Whisper models
         uses: actions/cache@v4
         with:
@@ -44,7 +44,7 @@ jobs:
         run: |
           if [[ "${{ steps.python-cache.outputs.cache-hit }}" != "true" ]]; then
             python -m venv .venv
-            .venv/bin/python -m pip install numpy faster-whisper imageio-ffmpeg gdown==5.2.0
+            .venv/bin/python -m pip install numpy faster-whisper imageio-ffmpeg gdown==5.2.2
           fi
           ffmpeg_binary="$(.venv/bin/python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
           ln -sf "$ffmpeg_binary" .venv/bin/ffmpeg
@@ -65,19 +65,22 @@ jobs:
             exit 1
           fi
       - name: Download MP3
+        id: download
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p output
-          python frontend/vue3/cupitor-frontend/tools/language/download-audio.py \
-            "$MP3_URL" output/audio.mp3
+          audio_path="$(python frontend/vue3/cupitor-frontend/tools/language/download-audio.py \
+            --use-source-filename "$MP3_URL" output/audio.mp3)"
+          printf 'audio_path=%s\n' "$audio_path" >> "$GITHUB_OUTPUT"
       - name: Transcribe to SRT
         shell: bash
+        env:
+          AUDIO_PATH: ${{ steps.download.outputs.audio_path }}
         run: |
           set -euo pipefail
           python -u frontend/vue3/cupitor-frontend/tools/language/make-srt.py \
-            output/audio.mp3 -l "$TRANSCRIPTION_LANGUAGE" -o output/audio.srt
-          test -s output/audio.srt || { echo "::error::No subtitle content was generated."; exit 1; }
+            "$AUDIO_PATH" -l "$TRANSCRIPTION_LANGUAGE"
+          test -s "${AUDIO_PATH%.*}.srt" || { echo "::error::No subtitle content was generated."; exit 1; }
       - name: Upload audio and subtitles
         if: always()
         uses: actions/upload-artifact@v4
