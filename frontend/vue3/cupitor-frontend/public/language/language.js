@@ -1380,12 +1380,7 @@ function openAddToVocabDialog() {
   // pre-fill the textarea with the chosen reference word so the user can
   // edit in place — matches the behaviour of switching to inline manually.
   // Skipped when resuming: it would overwrite the text being typed.
-  if (!resuming) {
-    try {
-      const posSel = document.getElementById('vocabInsertPosition')
-      if (posSel && posSel.value === 'inline') onVocabInsertPositionChange(posSel)
-    } catch (_) {}
-  }
+  if (!resuming && _vocabInsertPosition() === 'inline') _syncVocabInsertText('inline')
 
   // Closing the dialog does NOT commit to GitHub — only the explicit save
   // buttons do. Staged edits remain in window.vocabulary; reopening the
@@ -1528,7 +1523,7 @@ function addToVocab(commitAndClose) {
     }
   }
 
-  const position = $("#vocabInsertPosition").val() // 'above', 'below', or 'inline'
+  const position = _vocabInsertPosition()
   const newWords = newText.split("\n").map(w => w.trim()).filter(w => w.length > 0)
 
   const invalidLine = newWords.find(w => !isProperlyBracketed(w));
@@ -1740,24 +1735,18 @@ function deleteVocabLine() {
   })
 }
 
-function onVocabInsertPositionChange(select) {
-  const $textarea = $('#vocabularySegmentTextarea')
-  if (select.value === 'inline') {
-    // Pre-populate with the reference word so the user can edit it in place
-    try {
-      const parsed = JSON.parse($('#addToVocabularyDialogSelect').val())
-      $textarea.val(parsed.o || parsed.word)
-    } catch (_) {}
-  } else {
-    // Clear only if the textarea still contains the auto-filled reference word
-    try {
-      const parsed = JSON.parse($('#addToVocabularyDialogSelect').val())
-      const refWord = parsed.o || parsed.word
-      if ($textarea.val().trim() === (refWord || '').trim()) {
-        $textarea.val('')
-      }
-    } catch (_) {}
-  }
+function _vocabInsertPosition() {
+  return $('#vocabInsertPosition input:checked').val()
+}
+
+function _syncVocabInsertText(position) {
+  try {
+    const parsed = JSON.parse($('#addToVocabularyDialogSelect').val())
+    const refWord = parsed.o || parsed.word
+    const $textarea = $('#vocabularySegmentTextarea')
+    if (position === 'inline') $textarea.val(refWord)
+    else if ($textarea.val().trim() === (refWord || '').trim()) $textarea.val('')
+  } catch (_) {}
 }
 
 // vocabularyToText lives in ./vocab-merge.js (imported at the top).
@@ -4946,15 +4935,18 @@ $(document).ready(function () {
     placeholder: 'Reference word',
     allowClear: true,
     matcher: diacriticAwareMatcher
-  }).change(e => {
+  }).change(() => {
     _refreshVocabDeleteBtn()
-    // When inline is selected, keep the textarea in sync with the chosen reference word
-    if ($('#vocabInsertPosition').val() === 'inline') {
-      try {
-        const parsed = JSON.parse($(e.target).val())
-        $('#vocabularySegmentTextarea').val(parsed.o || parsed.word)
-      } catch (_) {}
+    if (_vocabInsertPosition() === 'inline') _syncVocabInsertText('inline')
+  })
+  $('#vocabInsertPosition').on('change', 'input', function () {
+    // Each edit needs one position. Re-clicking the current choice keeps it selected.
+    if (!this.checked) {
+      this.checked = true
+      return
     }
+    $('#vocabInsertPosition input').not(this).prop('checked', false)
+    _syncVocabInsertText(this.value)
   })
   audioPlayer && hidePlayer(audioPlayer)
   videoPlayer && hidePlayer(videoPlayer)
@@ -24706,7 +24698,6 @@ window.mergeSrtWithResolution   = mergeSrtWithResolution
 window.openAddToVocabDialog = openAddToVocabDialog;
 window.addToVocab = addToVocab;
 window.deleteVocabLine = deleteVocabLine;
-window.onVocabInsertPositionChange = onVocabInsertPositionChange;
 window.searchVocabularyByPrefix = searchVocabularyByPrefix;
 window.importSearches = importSearches;
 window.importSearchesFromVocab = importSearchesFromVocab;
