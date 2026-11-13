@@ -310,7 +310,8 @@ async function checkVocabInsertPositions(browser, mobile) {
     assert(actions.every(({ top, bottom, left, right, height }) =>
       top === actions[0].top && bottom < status.y && left >= 0 && right <= width && height >= 44),
       JSON.stringify({ actions, status, width }))
-    const category = await dialog.locator('#vocabNewCategory').boundingBox()
+    const categoryPicker = dialog.locator('#vocabNewCategory + .select2-container')
+    const category = await categoryPicker.boundingBox()
     const editor = await textarea.boundingBox()
     assert.equal(category.width, editor.width)
     if (mobile && process.env.SCREENSHOT_DIR) {
@@ -324,7 +325,41 @@ async function checkVocabInsertPositions(browser, mobile) {
     await choose('Inline')
     const edited = '(stain)|färg|fläck|'
     await stage(edited, [ref, hue, edited, shade])
-    console.log(`${mobile ? '320px touch' : 'Desktop'}: vocabulary insert choices, inline editing and staging passed`)
+
+    const openCategoryPicker = async term => {
+      const select = categoryPicker.getByRole('combobox', { name: /Or add to a category/ })
+      if (mobile) await select.tap()
+      else await select.click()
+      const search = page.locator('.select2-container--open .select2-search__field')
+      await search.fill(term)
+      return search
+    }
+    await openCategoryPicker('Color')
+    await page.getByRole('option', { name: 'Color', exact: true }).click()
+    const tone = '(tone)|ton|'
+    await stage(tone, [ref, hue, edited, shade, tone])
+
+    const search = await openCategoryPicker('Travel phrases')
+    const create = page.getByRole('option', { name: 'Create “Travel phrases”', exact: true })
+    if (mobile) await create.tap()
+    else {
+      await create.waitFor()
+      await search.press('Enter')
+    }
+    assert.equal(await page.evaluate(() => Object.hasOwn(window.vocabulary, 'Travel phrases')), false)
+    const trip = '(trip)|resa|'
+    await stage(trip, [ref, hue, edited, shade, tone])
+    assert.deepEqual(await page.evaluate(() => window.vocabulary['Travel phrases']), [trip])
+    assert.equal(await dialog.locator('#vocabNewCategory').inputValue(), 'Travel phrases')
+    await openCategoryPicker('Travel phrases')
+    await page.getByRole('option', { name: 'Travel phrases', exact: true }).click()
+    await categoryPicker.locator('.select2-selection__clear').click()
+    assert.equal(await dialog.locator('#vocabNewCategory').inputValue(), '')
+    await selectRef(tone)
+    await choose('Below')
+    const tint = '(tint)|toning|'
+    await stage(tint, [ref, hue, edited, shade, tone, tint])
+    console.log(`${mobile ? '320px touch' : 'Desktop'}: vocabulary insertion, existing and new categories, and clearing the category passed`)
   } finally {
     await page.close()
   }
