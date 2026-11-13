@@ -161,6 +161,5 @@ export function vocabPendingHintText(added, deleted) {
   const parts = []
   if (a > 0) parts.push(`${a} new entr${a === 1 ? 'y' : 'ies'}`)
   if (d > 0) parts.push(`${d} deleted`)
-  const countPart = parts.length ? ` — ${parts.join(', ')}` : ''
-  return `unsaved changes pending${countPart} — Save & Close to commit`
+  return parts.length ? `Unsaved changes · ${parts.join(', ')}` : 'Unsaved changes'
 }

@@ -951,13 +951,65 @@ mark.cup-page-find-current {
     z-index: 100001 !important;
 }
 
+.vocab-dialog-window.ui-dialog {
+    border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(27, 42, 57, 0.18);
+}
+.vocab-dialog-window .ui-dialog-titlebar {
+    border: 0;
+    border-bottom: 1px solid #dce3ea;
+    background: #f3f6f9;
+    border-radius: 7px 7px 0 0;
+}
+.vocab-dialog-window .ui-dialog-titlebar-close {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-indent: 0;
+}
+.vocab-dialog-window .ui-dialog-titlebar-close .ui-icon {
+    display: none;
+}
+.vocab-dialog-window .ui-dialog-titlebar-close::before {
+    content: '×';
+    font-size: 18px;
+    line-height: 1;
+}
+.vocab-dialog-window .ui-dialog-titlebar-close:hover {
+    background: #e2e6ea;
+}
+#addToVocabularyDialog {
+    padding: 12px 14px;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+#addToVocabularyDialog .vocab-dialog-field label,
+#vocabInsertPosition legend {
+    display: block;
+    margin: 0 0 4px;
+    font-size: 0.85em;
+    font-weight: 600;
+}
+#vocabNewCategory,
+#vocabularySegmentTextarea {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 7px 9px;
+    border: 1px solid #adb5bd;
+    border-radius: 5px;
+    font: inherit;
+}
+#vocabularySegmentTextarea {
+    min-height: 4em;
+    resize: vertical;
+}
 #vocabInsertPosition {
-    margin: 0.5em 0 0;
+    margin: 10px 0;
     min-width: 0;
 }
 #vocabInsertPosition legend {
-    margin: 0;
-    font-size: 0.85em;
+    margin-bottom: 0;
 }
 .vocab-insert-options {
     display: flex;
@@ -972,6 +1024,43 @@ mark.cup-page-find-current {
     margin: 0;
     padding-inline: 0.3em;
     cursor: pointer;
+}
+.vocab-dialog-tools,
+.vocab-dialog-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 0;
+}
+.vocab-dialog-tools {
+    margin-bottom: 6px;
+}
+.vocab-dialog-tools button {
+    min-width: 40px;
+    min-height: 36px;
+    font-family: monospace;
+}
+.vocab-dialog-actions button {
+    min-height: 44px;
+    padding-inline: 6px;
+    font-size: 0.8em;
+}
+#addVocabSaveCloseBtn:not(:disabled) {
+    border-color: #1d5c9d;
+    background: #1d5c9d;
+    color: #fff;
+}
+#addVocabSaveCloseBtn:not(:disabled):hover {
+    background: #164c84;
+}
+#vocabPendingHint {
+    margin: 8px 0 0;
+    padding: 7px 9px;
+    border-radius: 5px;
+    background: #fff5dc;
+    color: #704b0c;
+    font-size: 0.8em;
+    line-height: 1.4;
 }
 
 .full-srt-open { display: inline-flex; align-items: center; gap: 6px; }

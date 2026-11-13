@@ -663,9 +663,9 @@
         </div>
 
         <div id="addToVocabularyDialog" style="display: none">
-            <div>
-                <label style="font-size:0.85em;">Reference word:</label>
-                <select id="addToVocabularyDialogSelect" style="width: 98%;"></select>
+            <div class="vocab-dialog-field">
+                <label for="addToVocabularyDialogSelect">Reference word</label>
+                <select id="addToVocabularyDialogSelect"></select>
             </div>
             <fieldset id="vocabInsertPosition">
                 <legend>Insert <span class="sr-only">(choose one)</span></legend>
@@ -675,25 +675,23 @@
                     <label><input type="checkbox" value="inline"> Inline</label>
                 </div>
             </fieldset>
-            <div style="margin-top: 0.5em;">
-                <label style="font-size:0.85em;" title="Append the lines below to this category (creating it if it doesn't exist). When set, the reference word and Insert position are ignored.">Or new/existing category: </label>
-                <input id="vocabNewCategory" type="text" placeholder="leave empty to use selected reference" style="width: 60%;">
+            <div class="vocab-dialog-field">
+                <label for="vocabNewCategory" title="Append the lines below to this category (creating it if it doesn't exist). When set, the reference word and Insert position are ignored.">Or enter a category</label>
+                <input id="vocabNewCategory" type="text" placeholder="Category name">
             </div>
-            <div style="margin-top: 0.5em;display:flex;gap:4px;flex-wrap:wrap;">
-                <button type="button" onclick="insertIntoVocabSegment('|')" style="font-family:monospace;min-width:32px;">|</button>
-                <button type="button" onclick="insertIntoVocabSegment('(', ')')" style="font-family:monospace;min-width:36px;">( )</button>
-                <button type="button" onclick="insertIntoVocabSegment('[', ']')" style="font-family:monospace;min-width:36px;">[ ]</button>
-                <button type="button" onclick="insertIntoVocabSegment('<*')" style="font-family:monospace;min-width:36px;" title="Expansion token (e.g. &lt;*jobba)">&lt;*</button>
+            <div class="vocab-dialog-tools" role="group" aria-label="Insert formatting">
+                <button class="lang-tool-btn" type="button" onclick="insertIntoVocabSegment('|')" aria-label="Insert pipe">|</button>
+                <button class="lang-tool-btn" type="button" onclick="insertIntoVocabSegment('(', ')')" aria-label="Insert parentheses">( )</button>
+                <button class="lang-tool-btn" type="button" onclick="insertIntoVocabSegment('[', ']')" aria-label="Insert brackets">[ ]</button>
+                <button class="lang-tool-btn" type="button" onclick="insertIntoVocabSegment('<*')" title="Expansion token (e.g. &lt;*jobba)" aria-label="Insert expansion token">&lt;*</button>
             </div>
-            <div style="margin-top: 0.5em;">
-                <textarea id="vocabularySegmentTextarea" rows="5" style="width: 98%; min-height: 4em; resize: vertical; font-family: inherit;" placeholder="New word(s), one per line"></textarea>
+            <textarea id="vocabularySegmentTextarea" rows="5" aria-label="Vocabulary entries" placeholder="New words, one per line"></textarea>
+            <div class="vocab-dialog-actions">
+                <button class="lang-tool-btn" type="button" id="addVocabAddAnotherBtn" onclick="addToVocab(false)" title="Apply this entry and clear the textarea so you can add another. Nothing is committed until you Save &amp; Close.">Add another</button>
+                <button class="lang-tool-btn" type="button" id="addVocabSaveCloseBtn" onclick="addToVocab(true)">Save &amp; Close</button>
+                <button class="lang-tool-btn" type="button" id="addVocabDeleteBtn" onclick="deleteVocabLine()" disabled title="Select a line to delete.">Delete line</button>
             </div>
-            <div style="margin-top: 0.5em; display: flex; gap: 6px; align-items: center;">
-                <button type="button" id="addVocabAddAnotherBtn" onclick="addToVocab(false)" title="Apply this entry and clear the textarea so you can add another. Nothing is committed until you Save &amp; Close.">Add another</button>
-                <button type="button" id="addVocabSaveCloseBtn" onclick="addToVocab(true)">Save &amp; Close</button>
-                <button type="button" id="addVocabDeleteBtn" onclick="deleteVocabLine()" disabled title="Select a line to delete.">Delete line</button>
-                <span id="vocabPendingHint" style="display:none;font-size:0.75em;color:#a06000;">unsaved changes pending — Save &amp; Close to commit</span>
-            </div>
+            <p id="vocabPendingHint" role="status" style="display:none;"></p>
         </div>
         <div id="practiceLogDialog" title="Practice Log / Schedule" style="display: none;">
             <div class="practice-log-tabs">
