@@ -1222,7 +1222,19 @@ const VOCAB_HIDDEN_CATEGORIES = new Set(['expansions', 'Expansions', '_expansion
 
 // How many loadWholeVocabulary runs are refilling the selects right now.
 let _vocabSelectRebuilds = 0
+function _refreshVocabCategories() {
+  const $picker = $('#vocabNewCategory')
+  const selected = $picker.val() || ''
+  const categories = Object.keys(window.vocabulary || {}).filter(name => name && name !== '__empty__')
+  if (selected && !categories.includes(selected)) categories.push(selected)
+  categories.sort((a, b) => a.localeCompare(b))
+  $picker.empty().append(new Option('', ''))
+  for (const name of categories) $picker.append(new Option(name, name))
+  $picker.val(selected).trigger('change.select2')
+}
+
 function loadWholeVocabulary(onDone) {
+  _refreshVocabCategories()
   $('#searchedWords').html('')
   $('#addToVocabularyDialogSelect').html('')
   // Empty leading option so select2's allowClear (X) has something to reset
@@ -1344,9 +1356,10 @@ function openAddToVocabDialog() {
   // X or Escape) must NOT carry over typed words.
   const discardSegment = () => {
     $('#vocabularySegmentTextarea').val('')
-    $('#vocabNewCategory').val('')
+    $('#vocabNewCategory').val('').trigger('change.select2')
   };
   if (!resuming) discardSegment();
+  _refreshVocabCategories()
   // Restore the pending-hint when reopening — staged-but-uncommitted
   // edits survive a dialog close (we no longer auto-commit on close).
   _refreshVocabPendingHint()
@@ -1386,6 +1399,7 @@ function openAddToVocabDialog() {
   // buttons do. Staged edits remain in window.vocabulary; reopening the
   // dialog restores the pending-hint and a later save commits them.
   const onDialogClose = () => {
+    $('#vocabNewCategory').select2('close')
     discardSegment()
     $('#vocabPendingHint').hide()
   }
@@ -1488,14 +1502,14 @@ function addToVocab(commitAndClose) {
     return
   }
 
-  // If the user filled the "new/existing category" input, append to that
+  // If the user selected a category, append to that
   // category — creating it if missing — and skip the reference-word/Insert
   // path entirely. This is the way to add a brand-new entry (e.g. seed
   // the `expansions` category for the first time).
-  const newCategoryInput = ($("#vocabNewCategory").val() || '').trim()
+  const selectedCategory = $("#vocabNewCategory").val()
   let category, refWord
-  if (newCategoryInput) {
-    category = newCategoryInput
+  if (selectedCategory) {
+    category = selectedCategory
     refWord = null
   } else {
     const selectedVal = $("#addToVocabularyDialogSelect").val()
@@ -1541,7 +1555,7 @@ function addToVocab(commitAndClose) {
   // text: their copy is dropped so the user's is the one shown and saved.
   // When that copy is the reference line itself, the new lines go where it
   // was: `refSlot` is its position among the lines that stay.
-  const wordsBefore = window.vocabulary[category] || []
+  const wordsBefore = ownLines(window.vocabulary, category)
   const refAt = refWord ? wordsBefore.indexOf(refWord) : -1
   const claimed = _dsClaimVocabularyLines(window.vocabulary, readOnlyLines,
     window._vocabularyOtherCategories || new Set(), newWords)
@@ -1554,7 +1568,7 @@ function addToVocab(commitAndClose) {
     }
   }
 
-  const categoryWords = window.vocabulary[category] || []
+  const categoryWords = ownLines(window.vocabulary, category)
   if (!refWord) {
     // No reference word — just append to the (possibly new) category.
     categoryWords.push(...newWords)
@@ -1572,7 +1586,9 @@ function addToVocab(commitAndClose) {
       categoryWords.splice(insertAt, 0, ...newWords)
     }
   }
-  window.vocabulary[category] = categoryWords
+  Object.defineProperty(window.vocabulary, category, {
+    value: categoryWords, writable: true, enumerable: true, configurable: true,
+  })
 
   // Preserve the currently-selected line across the rebuild. Both selects
   // honour window.preSelectedSearchedWord in createOptionElement.
@@ -1592,7 +1608,7 @@ function addToVocab(commitAndClose) {
   window._vocabPendingCount = (parseInt(window._vocabPendingCount, 10) || 0) + newWords.length
   // Buffer this category's post-edit snapshot to localStorage so an app
   // close/refresh before commit doesn't lose the user's work.
-  if (!window._vocabDirtyCategories) window._vocabDirtyCategories = {}
+  if (!window._vocabDirtyCategories) window._vocabDirtyCategories = Object.create(null)
   window._vocabDirtyCategories[category] = true
   _savePendingVocab()
 
@@ -1713,7 +1729,7 @@ function deleteVocabLine() {
   } else {
     window._vocabPendingCount = Math.max(0, (parseInt(window._vocabPendingCount, 10) || 0) - 1)
   }
-  if (!window._vocabDirtyCategories) window._vocabDirtyCategories = {}
+  if (!window._vocabDirtyCategories) window._vocabDirtyCategories = Object.create(null)
   window._vocabDirtyCategories[sel.category] = true
   _savePendingVocab()
   _refreshVocabPendingHint()
@@ -2074,7 +2090,7 @@ function _savePendingVocab() {
 }
 function _clearPendingVocab() {
   try { _userData.removeItem(PENDING_VOCAB_KEY) } catch (_) {}
-  window._vocabDirtyCategories = {}
+  window._vocabDirtyCategories = Object.create(null)
   window._vocabHasPendingChanges = false
   window._vocabPendingCount = 0
   window._vocabPendingDeleteCount = 0
@@ -2102,8 +2118,8 @@ function _replayPendingVocab() {
   // No own repo: nothing could be saved, so nothing is replayed (the buffer
   // is left as it is).
   if (!_dsHasSelf()) return
-  if (!window.vocabulary) window.vocabulary = {}
-  if (!window._vocabDirtyCategories) window._vocabDirtyCategories = {}
+  if (!window.vocabulary) window.vocabulary = Object.create(null)
+  if (!window._vocabDirtyCategories) window._vocabDirtyCategories = Object.create(null)
   const cats = Object.keys(buf.categories)
   // The buffer holds own lines only. One the other user also has (claimed
   // in addToVocab, not yet saved) is read-only again after a reload; claim
@@ -3957,7 +3973,7 @@ $('document').ready(e => {
   // X-clear button injected into the typeahead input of every open select2
   // dropdown. The dropdown is appended to body on open and torn down on
   // close, so we re-inject (idempotently) on each `select2:open`.
-  $(document).on('select2:open', '#searchedWords, #addToVocabularyDialogSelect, #vocabularySelect', () => {
+  $(document).on('select2:open', '#searchedWords, #addToVocabularyDialogSelect, #vocabularySelect, #vocabNewCategory', () => {
     setTimeout(() => {
       const $field = $('.select2-container--open .select2-search__field')
       if (!$field.length) return
@@ -4924,6 +4940,23 @@ $(document).ready(function () {
       escapeMarkup: m => m
     })
   }
+  const $categoryPicker = $('#vocabNewCategory').select2({
+    placeholder: 'Choose or type a category',
+    width: '100%',
+    allowClear: true,
+    tags: true,
+    matcher: diacriticAwareMatcher,
+    createTag({ term }) {
+      const name = term.trim()
+      if (!name || name === '__empty__' || /[\r\n]/.test(name)) return null
+      return { id: name, text: name, newCategory: true }
+    },
+    templateResult(category) {
+      return category.newCategory ? 'Create “' + category.text + '”' : category.text
+    },
+  })
+  $categoryPicker.next('.select2').find('[role="combobox"]')
+    .attr('aria-labelledby', (_, current) => 'vocabCategoryLabel ' + current)
   $("#addToVocabularyDialogSelect").select2({
     placeholder: 'Reference word',
     width: '100%',

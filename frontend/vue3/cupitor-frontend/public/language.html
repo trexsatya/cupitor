@@ -676,8 +676,8 @@
                 </div>
             </fieldset>
             <div class="vocab-dialog-field">
-                <label for="vocabNewCategory" title="Append the lines below to this category (creating it if it doesn't exist). When set, the reference word and Insert position are ignored.">Or enter a category</label>
-                <input id="vocabNewCategory" type="text" placeholder="Category name">
+                <label id="vocabCategoryLabel" for="vocabNewCategory" title="Append entries to this category. Leave it blank to use the reference word and insert position.">Or add to a category</label>
+                <select id="vocabNewCategory"><option value=""></option></select>
             </div>
             <div class="vocab-dialog-tools" role="group" aria-label="Insert formatting">
                 <button class="lang-tool-btn" type="button" onclick="insertIntoVocabSegment('|')" aria-label="Insert pipe">|</button>

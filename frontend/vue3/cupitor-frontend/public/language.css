@@ -990,7 +990,6 @@ mark.cup-page-find-current {
     font-size: 0.85em;
     font-weight: 600;
 }
-#vocabNewCategory,
 #vocabularySegmentTextarea {
     display: block;
     box-sizing: border-box;
@@ -999,8 +998,6 @@ mark.cup-page-find-current {
     border: 1px solid #adb5bd;
     border-radius: 5px;
     font: inherit;
-}
-#vocabularySegmentTextarea {
     min-height: 4em;
     resize: vertical;
 }
