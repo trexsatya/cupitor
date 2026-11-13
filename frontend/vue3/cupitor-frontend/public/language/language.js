@@ -2,7 +2,7 @@ import { attributeSubtitleMatches } from './subtitle-search-engine.js';
 import { createSubtitleSearchClient, observeSubtitleCorpus } from './subtitle-search-client.js';
 import { userDataReady } from './user-data.js';
 const _userData = await userDataReady();
-import { languageFromLocation, requireStudyLanguage, speechLocale } from './language-config.js';
+import { LANGUAGES, languageFromLocation, requireStudyLanguage, speechLocale } from './language-config.js';
 import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
 import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js';
 import { retainCaptionEnds } from './caption-capture.js';
@@ -13689,6 +13689,15 @@ function _openCardDestinationDialog(title, initial, onAdd, destinations) {
   placement.refresh()
 }
 
+function _applyCardTtsLocales(item, changes) {
+  for (const key of ['sourceTtsLocale', 'targetTtsLocale']) {
+    if (!Object.prototype.hasOwnProperty.call(changes, key)) continue
+    const locale = speechLocale(changes[key], '')
+    if (locale) item[key] = locale
+    else delete item[key]
+  }
+}
+
 function addManualEntry(playlistName, opts) {
   opts = opts || {}
   const rec = window._recordings && window._recordings[playlistName]
@@ -13715,6 +13724,8 @@ function addManualEntry(playlistName, opts) {
     target,
     enabled: true
   }
+  if (opts.captionField) it.captionField = _captionFieldOf(opts)
+  _applyCardTtsLocales(it, opts)
   if (media) {
     it.mediaUrl = media.url
     it.mediaKind = media.kind                // 'youtube' | 'link' | 'audio'
@@ -13776,6 +13787,7 @@ function updateManualEntry(playlistName, manualId, patch) {
       if (Object.prototype.hasOwnProperty.call(patch, 'captionField')) {
         it.captionField = patch.captionField === 'target' ? 'target' : 'source'
       }
+      _applyCardTtsLocales(it, patch)
       if (Object.prototype.hasOwnProperty.call(patch, 'musicTrackId')) {
         const m = String(patch.musicTrackId || '')
         if (m) it.musicTrackId = m
@@ -13942,6 +13954,7 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '', insert
     mediaUrl: _captionMediaLink({ url, timeParam, timeLink: cap.timeLink }, fresh),
     source: faces.source,
     target: faces.target,
+    captionField: faces.textField,
   })
   if (!it) return false  // refused, and addManualEntry already said why
   // Provenance for de-dupe and timed playback. Text stays in the card's own
@@ -13954,8 +13967,6 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '', insert
     // How many rows each of those lines took, since a line that kept its own
     // breaks is more than one row of the card.
     it.captionRows = _captionRowCounts(fresh)
-    // Which face to read those rows back out of.
-    it.captionField = faces.textField
   }
   if (cap.title) it.captionTitle = String(cap.title)
   _saveRecording()
@@ -15609,6 +15620,12 @@ function _canSpeakSilentCard(it) {
   })
 }
 
+function _cardTtsLocale(item, face) {
+  const override = speechLocale(item?.[face + 'TtsLocale'], '')
+  if (override) return override
+  return face === _captionFieldOf(item) ? getLangFromUrl().locale || 'en-US' : 'en-US'
+}
+
 // Whether a manual card has anything the player can actually sound.
 //
 // Carrying a link is not the same as having something to play. A card whose
@@ -16110,6 +16127,15 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
     return n.charAt(0).toUpperCase() + n.slice(1)
   })()
   const langName = (code) => (code === 'en' ? 'English' : _studiedName)
+  const sourceLocale = speechLocale(existing?.sourceTtsLocale, '')
+  const targetLocale = speechLocale(existing?.targetTtsLocale, '')
+  const ttsLanguages = new Map(Object.values(LANGUAGES).map(({ name, locale }) =>
+    [locale, name.charAt(0).toUpperCase() + name.slice(1)]))
+  for (const locale of [sourceLocale, targetLocale]) {
+    if (locale && !ttsLanguages.has(locale)) ttsLanguages.set(locale, locale)
+  }
+  const ttsOptions = '<option value="">Automatic</option>' + Array.from(ttsLanguages,
+    ([locale, name]) => `<option value="${_.escape(locale)}">${_.escape(name)}</option>`).join('')
   // Nothing to choose from is not a choice: the picker appears once there is at
   // least one saved track, and the music panel is where tracks are added.
   const showMusic = _musicTracks().length > 0
@@ -16148,6 +16174,19 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
       <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation… (HTML allowed)"></textarea>
       <div id="meeTargetPreview" class="mee-html-preview card-html" style="display:none;"></div>
       </div>
+    <fieldset class="mee-tts-languages">
+      <legend>Text-to-speech</legend>
+      <div class="mee-tts-fields">
+        <div>
+          <label class="mee-lbl" for="meeSourceTtsLocale">Source language</label>
+          <select id="meeSourceTtsLocale" class="mee-input">${ttsOptions}</select>
+        </div>
+        <div>
+          <label class="mee-lbl" for="meeTargetTtsLocale">Target language</label>
+          <select id="meeTargetTtsLocale" class="mee-input">${ttsOptions}</select>
+        </div>
+      </div>
+    </fieldset>
     <details class="mee-media"${isEdit && (existing.mediaUrl || _cardHasAudio(existing)) ? ' open' : ''}>
       <summary>Media &amp; recordings <span class="mee-lbl-hint">(optional)</span></summary>
       ${showAudio ? `<div class="mee-row"><div class="mee-lbl">Source recording</div>${audioBar('meeSrcAudio')}</div>
@@ -16164,6 +16203,8 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
     onValidity: valid => $d.closest('.ui-dialog').find('.ui-dialog-buttonpane button').first().prop('disabled', !valid) })
   $d.find('#meeSource').val(existing ? existing.source || '' : '')
   $d.find('#meeTarget').val(existing ? existing.target || '' : '')
+  const $sourceTts = $d.find('#meeSourceTtsLocale').val(sourceLocale)
+  const $targetTts = $d.find('#meeTargetTtsLocale').val(targetLocale)
   const frontIsSource = window._practiceFrontIsSource !== false
   $d.find('#meeSourcePreview').attr('data-practice-face', frontIsSource ? 'front' : 'back')
   $d.find('#meeTargetPreview').attr('data-practice-face', frontIsSource ? 'back' : 'front')
@@ -16672,9 +16713,7 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
   if (showTranslate) { makeTranslator('source'); makeTranslator('target') }
 
   // ── Swap the two faces ──
-  // Text and recording change places together. A face's recording is that
-  // face's text spoken aloud, so moving one without the other would leave the
-  // card saying one thing and sounding another.
+  // The recording and speech language travel with the text.
   $d.find('#meeSwap').on('click', () => {
     if (translating) { if (activeNote) activeNote('Wait for the translation to finish.', '#a00'); return }
     if (_speechListening) { alert('Stop dictation first.'); return }
@@ -16686,6 +16725,9 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
     const $src = $d.find('#meeSource'), $tgt = $d.find('#meeTarget')
     const sv = $src.val(), tv = $tgt.val()
     $src.val(tv); $tgt.val(sv)
+    const sourceLanguage = $sourceTts.val()
+    $sourceTts.val($targetTts.val())
+    $targetTts.val(sourceLanguage)
     if (recSource && recTarget) {
       const a = recSource.state(), b = recTarget.state()
       recSource.setState(b); recTarget.setState(a)
@@ -16734,7 +16776,8 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
       : null
     const originalTgt = existing ? _cardTargetAudio(existing) : null
 
-    const patch = { source, target }
+    const patch = { source, target,
+      sourceTtsLocale: $sourceTts.val(), targetTtsLocale: $targetTts.val() }
     // Absent from the patch when the picker was never rendered, so a card saved
     // on a page with no tracks keeps whatever it already had.
     if (showMusic) patch.musicTrackId = String($d.find('#meeMusic').val() || '')
@@ -16753,8 +16796,8 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
     // Only when the text actually moved. A direction the user picked says which
     // language they meant, which is not the same claim as where the captured
     // rows now live.
-    if (facesSwapped && existing && existing.captionField) {
-      patch.captionField = existing.captionField === 'target' ? 'source' : 'target'
+    if (facesSwapped) {
+      patch.captionField = _captionFieldOf(existing) === 'target' ? 'source' : 'target'
     }
     let saved
     if (isEdit) {
@@ -20606,20 +20649,19 @@ async function _showPracticeAudioPanel(it) {
 // Speak one face of an otherwise silent manual card. Navigation, Stop and
 // headset Pause share the existing _recTTS state, so no old card keeps
 // speaking over the next one.
-async function _playSilentCardTtsAndWait(face, itemToken) {
+async function _playSilentCardTtsAndWait(item, face, itemToken) {
   if (!face?.tts) return
   const current = () => window._playingRecording && !window._practiceActive &&
     window._recPlayItemToken === itemToken && !window._recNavRequest &&
     !Number.isInteger(window._recNavGotoIndex)
   if (!current()) return
-  const lang = face.key === 'target' ? 'en-US' : speechLocale(_ttsLangCode(), 'en-US')
   let utterance = null
   _setRecPlayPhase('clip')
   let task
   task = speakTts(face.text, {
     ..._cardSpeechOptions(),
     synth: window.speechSynthesis, Utterance: window.SpeechSynthesisUtterance,
-    lang, rate: _preferredRecordingAudioRate(), isCurrent: current,
+    lang: _cardTtsLocale(item, face.key), rate: _preferredRecordingAudioRate(), isCurrent: current,
     onBegin(u) {
       utterance = u
       window._recTTS = { kind: 'speech', utterance: u,
@@ -21119,7 +21161,7 @@ async function playRecording(opts) {
           }
           // Label the player so it's obvious which face is sounding, since
           // both faces of one card play back to back with no visual break.
-          if (clips[ci].tts) await _playSilentCardTtsAndWait(clips[ci], itemToken)
+          if (clips[ci].tts) await _playSilentCardTtsAndWait(it, clips[ci], itemToken)
           else await _playManualAudioAndWait(clips[ci].url, clips.length > 1 ? clips[ci].label : '')
           // Stop / prev / next during a clip must not start the next one.
           if (!sessionPlaying() || navPending()) break
@@ -21951,7 +21993,7 @@ function _togglePracticeTts(it) {
   const task = speakTts(text, {
     ..._cardSpeechOptions(),
     synth: window.speechSynthesis, Utterance: window.SpeechSynthesisUtterance,
-    lang: key === 'target' ? 'en-US' : speechLocale(_ttsLangCode(), 'en-US'),
+    lang: _cardTtsLocale(it, key),
     rate: Number(window._practicePlaybackRate) || _preferredPracticeSpeed(),
     isCurrent: () => window._practiceActive &&
       window._practiceIdx === idx &&
