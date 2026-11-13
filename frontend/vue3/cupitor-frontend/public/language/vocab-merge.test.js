@@ -267,14 +267,14 @@ describe("a deleted line through save and reload", () => {
 
 describe("vocabPendingHintText", () => {
   test("names additions and deletions", () => {
-    expect(vocabPendingHintText(2, 0)).toBe("unsaved changes pending — 2 new entries — Save & Close to commit");
-    expect(vocabPendingHintText(1, 0)).toBe("unsaved changes pending — 1 new entry — Save & Close to commit");
-    expect(vocabPendingHintText(0, 1)).toBe("unsaved changes pending — 1 deleted — Save & Close to commit");
-    expect(vocabPendingHintText(3, 2)).toBe("unsaved changes pending — 3 new entries, 2 deleted — Save & Close to commit");
+    expect(vocabPendingHintText(2, 0)).toBe("Unsaved changes · 2 new entries");
+    expect(vocabPendingHintText(1, 0)).toBe("Unsaved changes · 1 new entry");
+    expect(vocabPendingHintText(0, 1)).toBe("Unsaved changes · 1 deleted");
+    expect(vocabPendingHintText(3, 2)).toBe("Unsaved changes · 3 new entries, 2 deleted");
   });
   test("gives no number when none is known", () => {
-    expect(vocabPendingHintText(0, 0)).toBe("unsaved changes pending — Save & Close to commit");
-    expect(vocabPendingHintText(undefined, "x")).toBe("unsaved changes pending — Save & Close to commit");
-    expect(vocabPendingHintText(-1, null)).toBe("unsaved changes pending — Save & Close to commit");
+    expect(vocabPendingHintText(0, 0)).toBe("Unsaved changes");
+    expect(vocabPendingHintText(undefined, "x")).toBe("Unsaved changes");
+    expect(vocabPendingHintText(-1, null)).toBe("Unsaved changes");
   });
 });

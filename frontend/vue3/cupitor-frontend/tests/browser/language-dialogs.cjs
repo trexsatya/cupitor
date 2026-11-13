@@ -257,7 +257,7 @@ async function checkVocabInsertPositions(browser, mobile) {
     await page.waitForFunction(() => !document.querySelector('#addToVocabBtn').disabled)
     await page.evaluate(() => window.openAddToVocabDialog())
     const dialog = page.locator('#addToVocabularyDialog')
-    const choices = dialog.getByRole('group', { name: /Insert/ })
+    const choices = dialog.getByRole('group', { name: 'Insert (choose one)', exact: true })
     const textarea = dialog.locator('#vocabularySegmentTextarea')
     const choose = async name => {
       const label = choices.locator('label').filter({ hasText: name })
@@ -299,6 +299,24 @@ async function checkVocabInsertPositions(browser, mobile) {
     const shade = '(shade)|nyans|'
     const hue = '(hue)|kulör|'
     await stage(shade, [ref, otherRef, shade])
+    const pending = dialog.locator('#vocabPendingHint')
+    assert.equal(await pending.innerText(), 'Unsaved changes · 1 new entry')
+    const actions = await dialog.locator('.vocab-dialog-actions button').evaluateAll(buttons =>
+      buttons.map(button => {
+        const { top, bottom, left, right, height } = button.getBoundingClientRect()
+        return { top, bottom, left, right, height }
+      }))
+    const status = await pending.boundingBox()
+    assert(actions.every(({ top, bottom, left, right, height }) =>
+      top === actions[0].top && bottom < status.y && left >= 0 && right <= width && height >= 44),
+      JSON.stringify({ actions, status, width }))
+    const category = await dialog.locator('#vocabNewCategory').boundingBox()
+    const editor = await textarea.boundingBox()
+    assert.equal(category.width, editor.width)
+    if (mobile && process.env.SCREENSHOT_DIR) {
+      fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+      await dialog.locator('..').screenshot({ path: path.join(process.env.SCREENSHOT_DIR, 'add-to-vocab-mobile.png') })
+    }
     await selectRef(otherRef)
     await choose('Above')
     await stage(hue, [ref, hue, otherRef, shade])

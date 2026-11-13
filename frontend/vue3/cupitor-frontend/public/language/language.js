@@ -1330,8 +1330,8 @@ function saveSearch(word, count) {
 function openAddToVocabDialog() {
   // Without an own repo nothing typed here could be saved.
   if (!_requireSelf()) return
-  const w = window.innerWidth * 0.9
-  const h = window.innerHeight * 0.8
+  const width = Math.min(500, Math.floor(window.innerWidth * 0.94))
+  const maxHeight = Math.floor(window.innerHeight * 0.85)
 
   // The dialog was minimized, not closed, so the words half-typed in it are
   // still there. Pick it up where it was left instead of starting over — only
@@ -1393,17 +1393,10 @@ function openAddToVocabDialog() {
   setTimeout(() => {
     if (_restoreMinimizedDialog('addToVocabularyDialog')) return
     const $dialog = $("#addToVocabularyDialog")
-    if ($dialog.hasClass('ui-dialog-content')) {
-      $dialog.dialog('option', { width: w, height: h, title: 'Add to vocab', close: onDialogClose }).dialog('open')
-    } else {
-      $dialog.dialog({
-        width: w,
-        height: h,
-        title: 'Add to vocab',
-        modal: false,
-        close: onDialogClose
-      })
-    }
+    $dialog.dialog({
+      width, maxHeight, title: 'Add to vocab', close: onDialogClose,
+      classes: { 'ui-dialog': 'vocab-dialog-window' },
+    }).dialog('open')
     _addDialogMinimizeButton('addToVocabularyDialog', '➕', 'Add to vocab')
     _wireVocabKeyboardScroll()
   }, 0)
@@ -4933,6 +4926,7 @@ $(document).ready(function () {
   }
   $("#addToVocabularyDialogSelect").select2({
     placeholder: 'Reference word',
+    width: '100%',
     allowClear: true,
     matcher: diacriticAwareMatcher
   }).change(() => {
