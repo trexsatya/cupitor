@@ -13,7 +13,14 @@ import {
   MAX_IMAGES,
   normalizeNodeColor,
   NODE_SHAPES,
+  NODE_LINE_HEIGHT,
+  MAX_NODE_TEXT,
+  defaultNodeTextColor,
+  keepNodeOnCanvas,
+  nodeTextError,
+  nodeTextLines,
   nodeWidth,
+  nodeHeight,
   nodePolygon,
 } from './word-map-model.js'
 const el = (tag, text, cls) => {
@@ -42,10 +49,12 @@ const edgeStyle = (edge) =>
       ? 'dashed'
       : 'solid'
 const EDIT_HINT =
-  'Press N to add a word, or double-click empty canvas to add one at that spot. Select a word, then press C to connect it, or F2 / double-click to rename it. Delete/Backspace removes the selection; Ctrl/⌘+C and Ctrl/⌘+V copy/paste words. Drag words to move them; drag empty space or Shift-click to select a group.'
+  'Add a word or plain text, or double-click the canvas to add a word there. Double-click a node or press F2 to edit its text. Use Enter for a line break and Ctrl/⌘+Enter to apply. Drag nodes to move them, or Shift-click to select a group.'
 const READ_HINT =
   'Read mode: select a word or connection to see its details. Double-click a word to search subtitles. Switch to edit mode to change the map.'
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+const isApplyTextShortcut = e => e.key === 'Enter' && !e.isComposing &&
+  !e.altKey && !e.shiftKey && (e.ctrlKey || e.metaKey)
 // For webviews that cannot download or pick files (for example Flutter on macOS).
 // postMessage(text) must deliver the text to the host app. The host receives
 //   {"id":1,"type":"export","name":"map.json","text":"…"}  or  {"id":2,"type":"import"}
@@ -77,6 +86,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
         : new window.Event('wordmapsrestore'))
       return
     }
+    if (!existing.dispatchEvent(new window.Event('wordmapsleave', { cancelable: true }))) return
     existing.close()
     existing.remove()
     document.querySelector('#wordMapsRestore')?.remove()
@@ -98,11 +108,14 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     mode = 'edit',
     inline = null,
     lastTap = null,
-    transientId = null,
+    savedMap = null,
+    draftStart = '',
+    saving = false,
     syncing = false,
     minimized = false
   let searchFocus = null, searchNodes = new Set()
   let lastDetailsKey = ''
+  let formDefaults = ''
   const editing = () => mode === 'edit'
   const editOnly = []
   const status = el('span', '', 'wm-status')
@@ -119,16 +132,9 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       'Saved maps could not be read. Export or recover the stored data before saving new maps.'
   }
   let mapIndex = createWordMapIndex(maps)
-  let indexedIds = new Set(maps.map(item => item.id))
-  function updateMapIndex(all = false) {
-    const nextIds = new Set(maps.map(item => item.id))
-    for (const id of indexedIds) if (!nextIds.has(id)) mapIndex.remove(id)
-    for (const item of maps) if (all || item.id === map.id || !indexedIds.has(item.id)) mapIndex.update(item)
-    indexedIds = nextIds
-  }
   const header = el('header'),
     title = el('h2', 'Word maps'),
-    close = button('Close', () => dialog.close())
+    close = button('Close', () => { if (mayLeave()) dialog.close() })
   const fullscreenButton = button('', toggleFullscreen)
   const fullscreenIcon = svgEl('path', { d: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5' })
   const fullscreenSvg = svgEl('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'aria-hidden': 'true' })
@@ -194,7 +200,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   folderForm.onsubmit = event => {
     event.preventDefault()
     const raw = folderInput.value.trim(), path = folderPath(raw)
-    if (raw && (!path || path.length > 200)) { status.textContent = 'Enter a valid folder path, such as Swedish/People.'; return }
+    if (raw && (!path || path.length > 200)) { status.textContent = 'Enter a valid folder path, such as Swedish/People.'; return false }
+    folderInput.value = path || ''
     commit(() => { if (path) map.folder = path; else delete map.folder })
     folderScope = path
     renderLibrary()
@@ -231,35 +238,37 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   const scriptTools = el('div', null, 'wm-toolbar')
   scriptTools.hidden = true
   scriptTools.append(
-    button('Apply JSON', () => {
-      try {
-        const imported = readMap(script.value)
-        commit(() => {
-          Object.assign(map, imported, { id: map.id })
-        })
-        script.hidden = true
-        scriptTools.hidden = true
-        viewport.hidden = false
-      } catch (e) {
-        status.textContent = e.message
-      }
-    }),
+    button('Apply JSON', applyMapJson),
     button('Import as new map', () => {
       try {
         importText(script.value)
-        script.hidden = true
-        scriptTools.hidden = true
-        viewport.hidden = false
       } catch (e) {
         status.textContent = e.message
       }
     }),
-    button('Cancel', () => {
-      script.hidden = true
-      scriptTools.hidden = true
-      viewport.hidden = false
-    })
+    button('Cancel', closeMapJson)
   )
+  script.addEventListener('input', refreshDraftActions)
+  function closeMapJson() {
+    script.hidden = true
+    scriptTools.hidden = true
+    viewport.hidden = false
+    refreshDraftActions()
+  }
+  function applyMapJson() {
+    try {
+      const imported = readMap(script.value)
+      commit(() => {
+        map = { ...imported, id: map.id }
+        folderInput.value = map.folder || ''
+      })
+      closeMapJson()
+      return true
+    } catch (e) {
+      status.textContent = e.message
+      return false
+    }
+  }
   work.append(hint, viewport, script, scriptTools)
   layout.append(library, work, detailsButton, inspector)
   const file = el('input')
@@ -277,9 +286,23 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       file.value = ''
     }
   }
-  const addWordButton = iconButton(editBtn('+ Word', addWord, 'New word (N)'), 'M12 5v14M5 12h14')
+  const addWordButton = iconButton(editBtn('+ Word', () => addWord(), 'New word (N)'), 'M12 5v14M5 12h14')
+  const addTextButton = editBtn('+ Text', () => addWord(null, 'text'))
   const undo = editBtn('Undo', undoLast)
   const redo = editBtn('Redo', redoLast)
+  const draftActions = el('div', null, 'wm-draft-actions')
+  const saveButton = button('Save map', saveDraft)
+  const discardButton = button('Discard changes', discardDraft)
+  const editorActions = el('div', null, 'wm-editor-actions')
+  editorActions.append(button('Cancel text', () => finishInline(false)), button('Apply text', () => finishInline(true)))
+  editorActions.onpointerdown = e => { if (e.target.closest('button')) e.preventDefault() }
+  const draftButtons = el('div')
+  draftButtons.append(discardButton, saveButton)
+  draftActions.append(editorActions, draftButtons)
+  dialog.addEventListener('focusout', e => {
+    if (editorActions.contains(e.target) && !editorActions.contains(e.relatedTarget) &&
+        e.relatedTarget !== canvas.querySelector('.wm-node-editor')) finishInline(true)
+  })
   const zoomControls = el('div', null, 'wm-zoom-controls')
   zoomControls.setAttribute('role', 'group')
   zoomControls.setAttribute('aria-label', 'Canvas controls')
@@ -297,16 +320,14 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     modeGroup,
     syncButton,
     editBtn('New map', () => {
+      if (!mayLeave()) return
       const m = emptyMap()
       const folder = folderScope ?? map.folder
       if (folder) m.folder = folder
-      maps = savedMaps()
-      transientId = null
-      maps.push(m)
-      activate(m)
-      save()
+      activate(m, { draft: true })
     }),
     addWordButton,
+    addTextButton,
     undo,
     redo,
     editBtn('Arrange', () =>
@@ -348,13 +369,13 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
         : 'Could not copy. Use JSON, then select all and copy.'
     }),
     editBtn('Delete map', () => {
-      if (confirm('Delete “' + map.name + '”?')) {
-        mapIndex.remove(map.id)
-        indexedIds.delete(map.id)
-        maps = maps.filter((m) => m !== map)
+      if (saving || syncing || !confirm('Delete “' + map.name + '”?')) return
+      if (!savedMap) return discardDraft()
+      const next = maps.filter(item => item.id !== map.id)
+      persistMaps(next, map.id, () => {
+        maps = next
         activate(maps[0] || null)
-        save(false)
-      }
+      })
     })
   )
   const moreActions = el('div', null, 'wm-more-actions')
@@ -366,15 +387,17 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   moreButton.setAttribute('aria-label', 'More map actions')
   moreButton.setAttribute('aria-expanded', 'false')
   moreButton.setAttribute('aria-controls', moreActions.id)
-  const primary = new Set([picker, modeGroup, syncButton, addWordButton, zoomControls])
+  addWordButton.classList.add('wm-add-word')
+  addTextButton.classList.add('wm-add-text')
+  const primary = new Set([picker, modeGroup, syncButton, addWordButton, addTextButton])
   for (const control of [...toolbar.children]) if (!primary.has(control)) moreActions.append(control)
   toolbar.prepend(browseButton)
   toolbar.append(moreButton, moreActions)
   const footer = el('footer')
   footer.append(el('small', sync
-    ? 'Saved locally · Sync to GitHub to use your maps on other devices.'
-    : 'Saved locally · Sign in and set up your repository to sync with GitHub.'), status)
-  dialog.append(header, toolbar, layout, footer, file)
+    ? 'Save your edits, then sync to GitHub to use your maps on other devices.'
+    : 'Save your edits to keep them on this device.'), status)
+  dialog.append(header, toolbar, layout, draftActions, footer, file)
   document.body.append(dialog)
   dialog.addEventListener('click', e => {
     if (moreButton.contains(e.target)) return
@@ -389,9 +412,10 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   let libraryPage = 0, folderPage = 0
   function renderLibrary() {
     if (!map) return
-    const paths = folderPaths(maps)
+    const available = displayMaps()
+    const paths = folderPaths(available)
     const counts = new Map([['',0]])
-    for (const item of maps) {
+    for (const item of available) {
       const path = item.folder || ''
       if (!path) counts.set('',counts.get('')+1)
       else {
@@ -405,7 +429,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     if (folderScope && !paths.includes(folderScope)) folderScope = null
     folderTree.replaceChildren()
     const folderButton = (label, path, depth = 0) => {
-      const count = path === null ? maps.length : counts.get(path) || 0
+      const count = path === null ? available.length : counts.get(path) || 0
       const b = button(label + ' · ' + count, () => {
         folderScope = path
         libraryPage = 0
@@ -426,14 +450,14 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     appendPages(folderTree,paths.length,folderPage,'folders',next=>{folderPage=next;renderLibrary()})
     folderTree.querySelector('[aria-pressed="true"]')?.scrollIntoView?.({block: 'nearest'})
     const query = librarySearch.value.trim().toLocaleLowerCase()
-    const shown = maps.filter(m => (folderScope === null || (folderScope ? inFolder(m.folder || '', folderScope) : !m.folder)) &&
+    const shown = available.filter(m => (folderScope === null || (folderScope ? inFolder(m.folder || '', folderScope) : !m.folder)) &&
       (m.name + ' ' + (m.folder || '')).toLocaleLowerCase().includes(query))
     mapList.replaceChildren(el('p', shown.length + ' map' + (shown.length === 1 ? '' : 's'), 'wm-list-count'))
     libraryPage=Math.min(libraryPage,Math.max(0,Math.ceil(shown.length/LIBRARY_PAGE_SIZE)-1))
     for (const item of shown.slice(libraryPage*LIBRARY_PAGE_SIZE,(libraryPage+1)*LIBRARY_PAGE_SIZE)) {
       const b = button('', () => {
-        if (inline) finishInline(true)
-        activate(item); fitMap()
+        if (!switchMap(item)) return
+        fitMap()
         if (window.innerWidth <= 700) setLibrary(false)
       })
       b.className = 'wm-library-map'
@@ -445,7 +469,6 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     appendPages(mapList,shown.length,libraryPage,'maps',next=>{libraryPage=next;renderLibrary()})
     if (!shown.length) mapList.append(el('p', 'No maps in this view.', 'wm-list-empty'))
     folderOptions.replaceChildren(...paths.slice(0,200).map(path => new Option(path)))
-    if (document.activeElement !== folderInput) folderInput.value = map.folder || ''
     folderForm.hidden = !editing()
   }
   function appendPages(parent,count,page,label,change) {
@@ -463,7 +486,9 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     detailsButton.textContent = open ? 'Hide details' : 'Details'
     detailsButton.setAttribute('aria-expanded', String(open))
   }
-  picker.onchange = () => activate(maps.find((m) => m.id === picker.value))
+  picker.onchange = () => {
+    if (!switchMap(maps.find((m) => m.id === picker.value))) picker.value = map.id
+  }
   name.onchange = () => {
     if (!name.value.trim()) {
       name.value = map.name
@@ -524,6 +549,17 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       e.preventDefault()
       leaveFullscreen()
     }
+    if (!e.defaultPrevented && !mayLeave()) e.preventDefault()
+  })
+  const beforeUnload = e => {
+    if (!hasDraft() && !saving) return
+    e.preventDefault()
+    e.returnValue = ''
+  }
+  window.addEventListener('beforeunload', beforeUnload)
+  dialog.addEventListener('wordmapsleave', e => {
+    if (!mayLeave()) e.preventDefault()
+    else window.removeEventListener('beforeunload', beforeUnload)
   })
   dialog.addEventListener('wordmapsrestore', restoreMap)
   dialog.addEventListener('wordmapsfocus', event => {
@@ -534,7 +570,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   dialog.addEventListener('close', () => {
     // Native close events are queued; a quick restore may already be open.
     if (dialog.open || minimized) return
-    if (inline) finishInline(true)
+    window.removeEventListener('beforeunload', beforeUnload)
     leaveFullscreen()
     restoreButton.remove()
     dialog.remove()
@@ -545,7 +581,6 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     restoringViewport = true
     restoreFullscreen = dialog.classList.contains('wm-fullscreen')
     leaveFullscreen()
-    if (inline) finishInline(true)
     minimized = true
     restoreButton.textContent = '↗ Word map: ' + map.name
     restoreButton.title = 'Restore ' + map.name
@@ -626,7 +661,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     const node = map.nodes.find(node => node.id === selection?.id)
     if (!node) return fitMap()
     if (!viewport.clientWidth || !viewport.clientHeight) return
-    zoom = Math.min(1, (viewport.clientWidth - 32) / (nodeWidth(node) + 32))
+    zoom = Math.max(0.1, Math.min(1, (viewport.clientWidth - 32) / (nodeWidth(node) + 32),
+      (viewport.clientHeight - 32) / (nodeHeight(node) + 32)))
     scale(0)
     viewport.scrollTo(Math.max(0, node.x * zoom - viewport.clientWidth / 2),
       Math.max(0, node.y * zoom - viewport.clientHeight / 2))
@@ -637,8 +673,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       status.textContent = 'This map is no longer available.'
       return
     }
-    if (inline) finishInline(true)
-    activate(found)
+    if (!switchMap(found)) return
     // Recompute against live data: a sync may have changed the map while a
     // result was open. A saved hit must never recolor or modify the map.
     const hit = findWordMaps([found], target.query)[0]
@@ -678,7 +713,10 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     return b
   }
   function setMode(next) {
-    if (inline) finishInline(true)
+    if (next === 'read' && editing() && !applyPendingEdits()) {
+      modeToggle.checked = true
+      return false
+    }
     mode = next
     connecting = null
     drag = null
@@ -694,26 +732,27 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     hint.textContent = editing() ? EDIT_HINT : READ_HINT
     draw()
     details()
+    return true
   }
   const nodeEl = (id) => [...canvas.querySelectorAll('[data-node]')].find((g) => g.getAttribute('data-node') === id)
   const edgeEl = (id) => [...canvas.querySelectorAll('[data-edge]')].find((g) => g.getAttribute('data-edge') === id)
   function undoLast() {
-    if (!history.length) return
+    if (saving || !history.length) return
     redoHistory.push(JSON.stringify(map))
-    Object.assign(map, JSON.parse(history.pop()))
+    map = JSON.parse(history.pop())
+    folderInput.value = map.folder || ''
     selection = null
     group.clear()
-    save()
     draw()
     details()
   }
   function redoLast() {
-    if (!redoHistory.length) return
+    if (saving || !redoHistory.length) return
     history.push(JSON.stringify(map))
-    Object.assign(map, JSON.parse(redoHistory.pop()))
+    map = JSON.parse(redoHistory.pop())
+    folderInput.value = map.folder || ''
     selection = null
     group.clear()
-    save()
     draw()
     details()
   }
@@ -742,7 +781,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     const idMap = new Map(copiedSelection.nodes.map(node => [node.id, newId()]))
     const minX = Math.min(...copiedSelection.nodes.map(node => node.x)), minY = Math.min(...copiedSelection.nodes.map(node => node.y))
     const dx = minX + 70 > 2210 ? -minX + 120 : 70, dy = minY + 50 > 1560 ? -minY + 80 : 50
-    const nodes = copiedSelection.nodes.map(node => ({ ...node, id: idMap.get(node.id), x: clamp(node.x + dx, 190, 2210), y: clamp(node.y + dy, 40, 1560), images: [...(node.images || [])] }))
+    const nodes = copiedSelection.nodes.map(node => ({ ...node, id: idMap.get(node.id),
+      ...keepNodeOnCanvas({ ...node, x: node.x + dx, y: node.y + dy }), images: [...(node.images || [])] }))
     const edges = copiedSelection.edges.filter(edge => oldIds.has(edge.from) && oldIds.has(edge.to)).map(edge => ({ ...edge, id: newId(), from: idMap.get(edge.from), to: idMap.get(edge.to) }))
     commit(() => {
       map.nodes.push(...nodes)
@@ -753,18 +793,18 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     status.textContent = nodes.length + ' word(s) pasted.'
     return true
   }
-  function addWord(position) {
-    if (!editing()) return
+  function addWord(position, shape = 'rectangle') {
+    if (!editing() || saving || !finishInline(true) || map.nodes.length >= 500) return
     let created
     commit(() => {
       created = {
         id: newId(),
-        word: 'New word',
+        word: shape === 'text' ? 'New text' : 'New word',
         x: position ? clamp(position.x, 190, 2210) : 220 + (map.nodes.length % 6) * 260,
         y: position ? clamp(position.y, 40, 1560) : 160 + Math.floor(map.nodes.length / 6) * 110,
         color: '#dc3636',
-        textColor: '#ffffff',
-        shape: 'rectangle',
+        textColor: defaultNodeTextColor(shape),
+        shape,
         lookup: '',
         note: '',
         images: [],
@@ -778,8 +818,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   }
   // Type a word straight into its box on the canvas.
   function startInline(id, isNew = false) {
-    if (!editing() || !map.nodes.some((n) => n.id === id)) return
-    if (inline) finishInline(true)
+    if (!editing() || saving || !map.nodes.some((n) => n.id === id)) return
+    if (!finishInline(true)) return
     if (connecting) {
       connecting = null
       hint.textContent = EDIT_HINT
@@ -789,17 +829,28 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     inline = { id, isNew }
     draw()
     details()
-    const input = canvas.querySelector('foreignObject input')
+    const input = canvas.querySelector('.wm-node-editor')
     input?.focus()
     input?.select()
   }
   function finishInline(keep) {
-    if (!inline) return
+    if (!inline) return true
+    const input = canvas.querySelector('.wm-node-editor')
     const { id, isNew } = inline,
-      value = (canvas.querySelector('foreignObject input')?.value || '').trim(),
+      value = (input?.value || '').trim(),
       n = map.nodes.find((x) => x.id === id)
+    const problem = keep && nodeTextError(value)
+    if (problem) {
+      status.textContent = problem
+      return false
+    }
     inline = null
-    if (isNew && (!keep || !value)) undoLast() // drop the word that was just created
+    if (isNew && (!keep || !value)) {
+      map = JSON.parse(history.pop())
+      selection = null
+      draw()
+      details()
+    }
     else if (keep && n && value && value !== n.word) {
       // Not commit(): rebuilding the details panel here would swallow the click
       // that moved focus out of the box, so only its Word field is updated.
@@ -807,18 +858,20 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       if (history.length > 50) history.shift()
       redoHistory = []
       n.word = value
-      save()
+      Object.assign(n, keepNodeOnCanvas(n))
       draw()
-      const field = inspector.querySelector('form input')
-      if (field && selection?.id === id) field.value = value
+      const field = inspector.querySelector('form .wm-word-field')
+      if (field && selection?.id === id) field.value = field.defaultValue = value
     } else draw()
+    refreshDraftActions()
     if (document.activeElement === document.body || canvas.contains(document.activeElement))
       nodeEl(id)?.focus({ preventScroll: true })
+    return true
   }
   function startConnecting(id) {
     const n = map.nodes.find((x) => x.id === id)
     if (!n || !editing()) return
-    if (inline) finishInline(true)
+    if (!finishInline(true)) return
     connecting = id
     details()
     inspector.append(button('Cancel connection', cancelConnecting))
@@ -869,12 +922,9 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   function importText(text) {
     if (text.length > 2000000) throw Error('Please select a JSON file smaller than 2 MB.')
     const imported = readMap(text)
+    if (!mayLeave()) return
     imported.id = newId()
-    maps = savedMaps()
-    transientId = null
-    maps.push(imported)
-    activate(imported)
-    save()
+    activate(imported, { draft: true })
   }
   async function copyText(text) {
     try {
@@ -905,8 +955,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     }
     const left = Math.min(...map.nodes.map(n => n.x - nodeWidth(n) / 2))
     const right = Math.max(...map.nodes.map(n => n.x + nodeWidth(n) / 2))
-    const top = Math.min(...map.nodes.map(n => n.y - 27))
-    const bottom = Math.max(...map.nodes.map(n => n.y + 27))
+    const top = Math.min(...map.nodes.map(n => n.y - nodeHeight(n) / 2))
+    const bottom = Math.max(...map.nodes.map(n => n.y + nodeHeight(n) / 2))
     zoom = Math.max(0.1, Math.min(1.1,
       (viewport.clientWidth - 32) / (right - left),
       (viewport.clientHeight - 32) / (bottom - top)))
@@ -924,19 +974,88 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
-  const savedMaps = () => maps.filter(m => m.id !== transientId)
+  const displayMaps = () => savedMap
+    ? maps.map(item => item.id === map.id ? map : item)
+    : [...maps, map]
+  const formState = form => JSON.stringify([...form.elements]
+    .filter(field => field.matches('input, select, textarea'))
+    .map(field => field.type === 'checkbox' ? field.checked : field.value))
+  function changedInspector() {
+    const form = inspector.querySelector('form')
+    return form && formState(form) !== formDefaults ? form : null
+  }
+  function hasDraft() {
+    return JSON.stringify(map) !== draftStart || !!changedInspector() ||
+      (inline && canvas.querySelector('.wm-node-editor')?.value !== map.nodes.find(n => n.id === inline.id)?.word) ||
+      (!script.hidden && script.value !== JSON.stringify(map, null, 2)) ||
+      name.value.trim() !== map.name ||
+      (!folderForm.hidden && folderInput.value.trim() !== (map.folder || ''))
+  }
+  function refreshDraftActions() {
+    const dirty = !!hasDraft()
+    draftActions.hidden = !editing() && !dirty
+    editorActions.hidden = !inline
+    saveButton.disabled = !dirty || saving || syncing || storageBroken || !!storage.status?.error
+    discardButton.disabled = !dirty || saving
+  }
+  inspector.addEventListener('input', refreshDraftActions)
+  inspector.addEventListener('change', refreshDraftActions)
+  name.addEventListener('input', refreshDraftActions)
+  folderInput.addEventListener('input', refreshDraftActions)
+  function mayLeave() {
+    return !saving && (!hasDraft() || confirm('Discard unsaved changes to this word map?'))
+  }
+  function switchMap(item) {
+    if (!item || item.id === map.id) return !!item
+    if (!mayLeave()) return false
+    activate(item)
+    return true
+  }
+  function discardDraft() {
+    if (saving) return
+    activate(savedMap || maps[0] || null)
+    status.textContent = 'Changes discarded.'
+  }
+  function applyPendingEdits() {
+    if (!finishInline(true)) return false
+    const form = changedInspector()
+    if (form && (!form.reportValidity() || form.onsubmit(new window.Event('submit')) === false)) return false
+    if (name.value.trim() && name.value.trim() !== map.name) name.onchange()
+    if (!folderForm.hidden && folderInput.value.trim() !== (map.folder || '') &&
+        folderForm.onsubmit(new window.Event('submit')) === false) return false
+    return script.hidden || applyMapJson()
+  }
+  function saveDraft() {
+    if (saving || syncing || storageBroken || storage.status?.error || !hasDraft() ||
+        (editing() && !applyPendingEdits())) return
+    let nextMap
+    try { nextMap = readMap(map) } catch (error) { status.textContent = error.message; return }
+    const submitted = JSON.stringify(map)
+    const next = savedMap ? maps.map(item => item.id === map.id ? nextMap : item) : [...maps, nextMap]
+    persistMaps(next, nextMap.id, () => {
+      maps = next
+      savedMap = nextMap
+      draftStart = JSON.stringify(nextMap)
+      if (JSON.stringify(map) === submitted && !changedInspector() &&
+          name.value.trim() === map.name && folderInput.value.trim() === (map.folder || '')) {
+        map = readMap(nextMap)
+        draw()
+        details()
+      }
+    })
+  }
   function refreshSync() {
-    syncButton.disabled = !sync || syncing || storageBroken || !!storage.status?.error
-    syncButton.textContent = syncing ? 'Syncing…' : (sync?.dirty(savedMaps()) || storage.status?.error) ? 'Sync*' : 'Sync'
+    syncButton.disabled = !sync || syncing || saving || storageBroken || !!storage.status?.error
+    syncButton.textContent = syncing ? 'Syncing…' : (sync?.dirty(maps) || storage.status?.error) ? 'Sync*' : 'Sync'
     iconButton(syncButton, 'M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 2M4 17l2 2a7 7 0 0 0 12-2')
     syncButton.setAttribute('aria-label', 'Sync maps')
     syncButton.title = !sync
       ? 'Sign in and set up your repository to sync'
       : 'Load and save word maps in your GitHub repository'
+    refreshDraftActions()
   }
   async function runSync(pull) {
-    if (!sync || syncing || storageBroken) return
-    if (inline) finishInline(true)
+    if (!sync || syncing || saving || storageBroken) return
     syncing = true
     refreshSync()
     status.textContent = pull ? 'Loading maps from GitHub…' : 'Syncing maps to GitHub…'
@@ -944,30 +1063,44 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       if (storage.flush) await storage.flush()
       const getMaps = () => {
         if (!dialog.isConnected) return JSON.parse(storage.getItem(storageKey) || '[]')
-        // Inline text may have changed while the network request was pending.
-        if (inline) finishInline(true)
-        return savedMaps()
+        return maps
       }
+      let draftNotice = ''
       const adopt = next => {
         storage.setItem(storageKey, JSON.stringify(next))
         if (!dialog.isConnected) return
         const currentId = map.id
         const focused = searchFocus
+        const keepDraft = hasDraft()
         maps = next
         mapIndex = createWordMapIndex(maps)
-        indexedIds = new Set(maps.map(item => item.id))
-        transientId = null
-        activate(maps.find(m => m.id === currentId) || maps[0] || null)
-        if (focused && map.id === focused.mapId) revealSearchResult(focused)
+        const current = maps.find(m => m.id === currentId)
+        if (keepDraft) {
+          if (savedMap && JSON.stringify(current) !== draftStart) {
+            if (!current) {
+              map.id = newId()
+              map.name += ' (local draft)'
+            }
+            draftNotice = current
+              ? 'GitHub also changed this map. Save to keep your draft, or discard it to load the latest saved version.'
+              : 'GitHub removed this map. Save to keep your draft as a new map.'
+          }
+          savedMap = current || null
+          draftStart = current ? JSON.stringify(current) : null
+          drawPicker()
+        } else {
+          activate(current || maps[0] || null)
+          if (focused && map.id === focused.mapId) revealSearchResult(focused)
+        }
         window.dispatchEvent(new window.CustomEvent('wordmapschanged', { detail: { storageKey } }))
       }
       const result = await sync[pull ? 'pull' : 'push'](getMaps, adopt)
       if (storage.flush) await storage.flush()
-      status.textContent = result.conflicts
+      status.textContent = draftNotice || (result.conflicts
         ? 'Loaded from GitHub. Conflicting maps kept locally; resolve them with Sync.'
         : sync.dirty(getMaps())
           ? 'Saved locally · unsynced changes'
-          : 'Maps are in sync with GitHub'
+          : 'Maps are in sync with GitHub')
     } catch (e) {
       status.textContent = e.code === 'word-maps-sync-cancelled'
         ? e.message
@@ -977,69 +1110,87 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       refreshSync()
     }
   }
-  function save(persistDraft = true) {
+  function persistMaps(next, changedId, applied) {
     if (storageBroken) {
       status.textContent =
         'Saving blocked: existing stored maps could not be read. Export your work to keep it.'
       return
     }
-    try {
-      if (persistDraft && map.id === transientId) transientId = null
-      updateMapIndex()
-      if (storage.saveMaps) storage.saveMaps(storageKey, savedMaps(), map.id)
-      else storage.setItem(storageKey, JSON.stringify(savedMaps()))
+    const complete = () => {
+      const changed = next.find(item => item.id === changedId)
+      if (changed) mapIndex.update(changed)
+      else mapIndex.remove(changedId)
+      applied()
       window.dispatchEvent(new window.CustomEvent('wordmapschanged', { detail: { storageKey } }))
-      status.textContent = storage.flush ? 'Saving…' : sync ? 'Saved locally · unsynced changes' : 'Saved on this device'
-      if (storage.flush) storage.flush().then(() => {
-        status.textContent = sync ? 'Saved locally · unsynced changes' : 'Saved on this device'
+      status.textContent = sync ? 'Saved locally · unsynced changes' : 'Saved on this device'
+    }
+    const failed = () => {
+      status.textContent = 'Could not save. Export your map to keep your changes.'
+    }
+    try {
+      if (storage.saveMaps) storage.saveMaps(storageKey, next, changedId)
+      else storage.setItem(storageKey, JSON.stringify(next))
+      if (!storage.flush) {
+        complete()
         refreshSync()
-      }, () => {
-        status.textContent = 'Could not save. Export your map to keep your changes.'
+        return
+      }
+      saving = true
+      status.textContent = 'Saving…'
+      refreshSync()
+      storage.flush().then(complete, failed).finally(() => {
+        saving = false
         refreshSync()
       })
-      refreshSync()
     } catch (_) {
-      status.textContent = 'Could not save. Export your map to keep your changes.'
+      saving = false
+      failed()
+      refreshSync()
     }
   }
   function commit(fn) {
-    if (!editing()) return
-    if (inline) finishInline(true)
-    history.push(JSON.stringify(map))
+    if (!editing() || saving) return
+    if (!finishInline(true)) return
+    const before = JSON.stringify(map)
+    fn()
+    if (JSON.stringify(map) === before) return
+    history.push(before)
     if (history.length > 50) history.shift()
     redoHistory = []
-    fn()
-    save()
     draw()
     details()
   }
-  function activate(value) {
+  function activate(value, { draft = false } = {}) {
     searchFocus = null
     searchNodes.clear()
     name.classList.remove('wm-search-title')
     picker.classList.remove('wm-search-title')
-    map = value
+    savedMap = draft ? null : value
+    map = value ? readMap(value) : emptyMap()
+    draftStart = draft ? null : JSON.stringify(map)
     selection = null
     group.clear()
     marquee = null
+    drag = null
     inline = null
     connecting = null
     history = []
     redoHistory = []
-    if (!map) {
-      map = emptyMap()
-      maps.push(map)
-      transientId = map.id
-    }
+    script.hidden = true
+    scriptTools.hidden = true
+    viewport.hidden = false
+    folderInput.value = map.folder || ''
+    name.value = map.name
     draw()
     details()
     viewport.scrollTo(0, 0)
     if (dialog.open && window.innerWidth < 700) fitMap()
   }
-  function draw(diagramOnly = false) {
-    if (!diagramOnly) {
+  function drawPicker() {
+    const nameDraft = document.activeElement === name ? name.value : null
     picker.replaceChildren()
-    const pickerMaps = maps.length <= 200 ? maps : [map, ...maps.filter(item=>item.id!==map.id).slice(0,100)]
+    const available = displayMaps()
+    const pickerMaps = available.length <= 200 ? available : [map, ...available.filter(item=>item.id!==map.id).slice(0,100)]
     for (const folder of ['', ...folderPaths(pickerMaps)]) {
       const items = pickerMaps.filter(m => (m.folder || '') === folder)
       if (!items.length) continue
@@ -1049,14 +1200,18 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     }
     renderLibrary()
     picker.value = map.id
-    name.value = map.name
-    }
+    name.value = nameDraft ?? map.name
+  }
+  function draw(diagramOnly = false) {
+    if (!diagramOnly) drawPicker()
     undo.disabled = !history.length
     redo.disabled = !redoHistory.length
+    refreshDraftActions()
     const active = !inline && canvas.contains(document.activeElement) ? document.activeElement : null,
       focusNode = active?.closest?.('[data-node]')?.getAttribute('data-node'),
       focusEdge = active?.closest?.('[data-edge]')?.getAttribute('data-edge')
-    const oldInput = canvas.querySelector('foreignObject input')
+    const oldInput = canvas.querySelector('.wm-node-editor')
+    const inlineValue = oldInput?.value
     if (oldInput) oldInput.onblur = null // removing a focused input fires blur during the redraw
     canvas.replaceChildren()
     const defs = svgEl('defs')
@@ -1155,6 +1310,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     }
     for (const n of map.nodes) {
       const w = nodeWidth(n),
+        h = nodeHeight(n),
+        textOnly = n.shape === 'text',
         inGroup = group.has(n.id),
         g = svgEl('g', {
           'data-node': n.id,
@@ -1168,50 +1325,47 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       if (relatedCount) {
         const otherMaps = mapIndex.related(n.word, map.id, 5)
         const badge = svgEl('g', { class: 'wm-cross-map-indicator', 'aria-label': 'Also in ' + relatedCount + ' maps: ' + otherMaps.map(other => other.name).join(', ') })
-        badge.append(svgEl('circle', { cx: w / 2 - 2, cy: -25, r: 12, fill: '#1769c2', stroke: 'white', 'stroke-width': 2 }))
-        badge.append(svgEl('text', { x: w / 2 - 2, y: -20, 'text-anchor': 'middle', fill: 'white', 'font-size': 14, 'font-weight': 700 }, String(relatedCount)))
+        badge.append(svgEl('circle', { cx: w / 2 - 2, cy: 2 - h / 2, r: 12, fill: '#1769c2', stroke: 'white', 'stroke-width': 2 }))
+        badge.append(svgEl('text', { x: w / 2 - 2, y: 7 - h / 2, 'text-anchor': 'middle', fill: 'white', 'font-size': 14, 'font-weight': 700 }, String(relatedCount)))
         badge.style.pointerEvents = 'none'
         g.append(badge)
       }
       if (searchNodes.has(n.id)) {
         g.classList.add('wm-search-match')
-        g.append(svgEl('rect', { x: -w / 2 - 7, y: -34, width: w + 14, height: 68, rx: 16,
+        g.append(svgEl('rect', { x: -w / 2 - 7, y: -h / 2 - 7, width: w + 14, height: h + 14, rx: 16,
           fill: 'none', stroke: '#d97706', 'stroke-width': 6, 'stroke-dasharray': '10 4',
           'pointer-events': 'none', 'aria-hidden': 'true' }))
       }
       if (!editing()) g.style.cursor = 'pointer'
+      const selected = selection?.id === n.id || inGroup
+      const bounds = { x: -w / 2, y: -h / 2, width: w, height: h }
       const attrs = {
-        fill: n.color || '#dc3636',
-        stroke: selection?.id === n.id || inGroup ? '#174b8c' : 'white',
-        'stroke-width': selection?.id === n.id || inGroup ? 4 : 2,
+        fill: textOnly ? 'transparent' : n.color,
+        stroke: selected ? '#174b8c' : textOnly ? 'none' : 'white',
+        'stroke-width': selected ? 4 : 2,
       }
-      if (inGroup) attrs['stroke-dasharray'] = '8 4'
+      if (inGroup || (textOnly && selected)) attrs['stroke-dasharray'] = '8 4'
       const points = nodePolygon(n)
-      g.append(
-        n.shape === 'ellipse'
-          ? svgEl('ellipse', { ...attrs, rx: w / 2, ry: 27 })
-          : points
-            ? svgEl('polygon', { ...attrs, points: points.map(p => p.join(',')).join(' ') })
-            : svgEl('rect', { ...attrs, x: -w / 2, y: -27, width: w, height: 54, rx: 13 })
-      )
+      g.append(n.shape === 'ellipse'
+        ? svgEl('ellipse', { ...attrs, rx: w / 2, ry: h / 2 })
+        : points
+          ? svgEl('polygon', { ...attrs, points: points.map(p => p.join(',')).join(' ') })
+          : svgEl('rect', { ...attrs, ...bounds, rx: textOnly ? 5 : 13, 'aria-hidden': 'true' }))
       if (inline?.id === n.id) {
-        const iw = Math.max(w, 240),
-          fo = svgEl('foreignObject', { x: -iw / 2, y: -27, width: iw, height: 54 }),
-          input = document.createElement('input')
-        input.value = n.word
-        input.maxLength = 100
-        input.setAttribute('aria-label', 'Word text. Enter to save, Escape to cancel.')
-        input.style.cssText =
-          'width:100%;height:100%;box-sizing:border-box;padding:0 10px;text-align:center;' +
-          'font:inherit;font-size:22px;border:3px solid #fff;border-radius:13px;outline:none;' +
-          'color:' + (n.textColor || '#ffffff') + ';' +
-          'background:' +
-          (n.color || '#dc3636')
+        const iw = Math.max(w, 330), ih = clamp(h, 106, 240),
+          fo = svgEl('foreignObject', { x: -iw / 2, y: -ih / 2, width: iw, height: ih }),
+          input = el('textarea', null, 'wm-node-editor')
+        input.value = inlineValue ?? n.word
+        input.maxLength = MAX_NODE_TEXT
+        input.setAttribute('aria-label', 'Node text. Ctrl or Command plus Enter to apply, Escape to cancel.')
+        input.style.color = n.textColor
+        input.style.background = textOnly ? '#ffffff' : n.color
+        input.oninput = refreshDraftActions
         input.onpointerdown = (ev) => ev.stopPropagation()
         input.onkeydown = (ev) => {
           ev.stopPropagation()
           if (ev.isComposing) return
-          if (ev.key === 'Enter') {
+          if (isApplyTextShortcut(ev)) {
             ev.preventDefault()
             finishInline(true)
           } else if (ev.key === 'Escape') {
@@ -1219,29 +1373,27 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
             finishInline(false)
           }
         }
-        input.onblur = () => finishInline(true)
+        input.onblur = e => {
+          if (!editorActions.contains(e.relatedTarget)) finishInline(true)
+        }
         fo.append(input)
         g.append(fo)
-      } else
-        g.append(
-          svgEl(
-            'text',
-            {
-              'text-anchor': 'middle',
-              'dominant-baseline': 'central',
-              fill: n.textColor || '#ffffff',
-              'font-size': 22,
-            },
-            n.word
-          )
-        )
+      } else {
+        const lines = nodeTextLines(n.word)
+        const label = svgEl('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central',
+          fill: n.textColor || defaultNodeTextColor(n.shape), 'font-size': 22 })
+        lines.forEach((line, i) => label.append(svgEl('tspan', {
+          x: 0, y: (i - (lines.length - 1) / 2) * NODE_LINE_HEIGHT, 'xml:space': 'preserve',
+        }, line)))
+        g.append(label)
+      }
       g.onpointerdown = (e) => {
-        if (e.button !== 0) return
+        if (e.button !== 0 || saving) return
         e.preventDefault()
         if (!editing()) {
           if (lastTap?.id === n.id && e.timeStamp - lastTap.t < 400) {
             lastTap = null
-            if (onLookup) { minimizeMap(); onLookup(n.lookup || n.word) }
+            if (onLookup) { minimizeMap(); onLookup(n.lookup || n.word.replace(/\s+/g, ' ')) }
           } else {
             lastTap = { id: n.id, t: e.timeStamp }
             select('node', n.id)
@@ -1259,7 +1411,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
           starts: new Map(
             ids.map((id) => {
               const m = map.nodes.find((x) => x.id === id)
-              return [id, { x: m.x, y: m.y }]
+              return [id, { ...m }]
             })
           ),
           startX: e.clientX,
@@ -1362,7 +1514,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   })
   canvas.onpointerdown = (e) => {
     // Node and edge handlers deal with their own presses; this is empty canvas only.
-    if (e.button !== 0 || e.target.closest?.('[data-node],[data-edge]')) return
+    if (e.button !== 0 || saving || e.target.closest?.('[data-node],[data-edge]')) return
     if (!editing()) {
       if (selection || group.size) {
         selection = null
@@ -1415,7 +1567,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       group = new Set(marquee.base)
       for (const n of map.nodes) {
         const hw = nodeWidth(n) / 2
-        if (n.x + hw >= l && n.x - hw <= r && n.y + 27 >= t && n.y - 27 <= b) group.add(n.id)
+        const hh = nodeHeight(n) / 2
+        if (n.x + hw >= l && n.x - hw <= r && n.y + hh >= t && n.y - hh <= b) group.add(n.id)
       }
       selection = null
       draw(true)
@@ -1428,9 +1581,11 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true
     if (drag.moved) {
       // Clamp the whole group together so its shape is preserved at the edges.
-      const s = [...drag.starts.values()]
-      dx = clamp(dx, 190 - Math.min(...s.map((v) => v.x)), 2210 - Math.max(...s.map((v) => v.x)))
-      dy = clamp(dy, 40 - Math.min(...s.map((v) => v.y)), 1560 - Math.max(...s.map((v) => v.y)))
+      const starts = [...drag.starts.values()]
+      dx = clamp(dx, Math.max(...starts.map(n => -Math.max(n.x - nodeWidth(n) / 2, 0))),
+        Math.min(...starts.map(n => Math.max(2400 - n.x - nodeWidth(n) / 2, 0))))
+      dy = clamp(dy, Math.max(...starts.map(n => -Math.max(n.y - nodeHeight(n) / 2, 0))),
+        Math.min(...starts.map(n => Math.max(1600 - n.y - nodeHeight(n) / 2, 0))))
       for (const [id, start] of drag.starts) {
         const n = map.nodes.find((n) => n.id === id)
         n.x = start.x + dx
@@ -1463,7 +1618,6 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       history.push(d.before)
       if (history.length > 50) history.shift()
       redoHistory = []
-      save()
       draw()
     } else if (editing() && lastTap?.id === d.id && e.timeStamp - lastTap.t < 400) {
       lastTap = null
@@ -1477,7 +1631,11 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   canvas.addEventListener(
     'pointerdown',
     (e) => {
-      if (inline && !e.target.closest?.('foreignObject')) finishInline(true)
+      if (inline && !e.target.closest?.('foreignObject') && !finishInline(true)) {
+        e.preventDefault()
+        e.stopPropagation()
+        canvas.querySelector('.wm-node-editor')?.focus()
+      }
     },
     true
   )
@@ -1556,7 +1714,12 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     }
     form.append(group)
     return {
+      group,
       get value() { return normalizeNodeColor(code.value) },
+      set(value) {
+        code.value = picker.value = value
+        code.setCustomValidity('')
+      },
       valid() { if (normalizeNodeColor(code.value)) return true; code.reportValidity(); return false },
     }
   }
@@ -1575,7 +1738,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     const renderPage=page=>{
       container.replaceChildren()
       for(const other of mapIndex.related(node.word,map.id,100,page*100))container.append(button(other.name,()=>{
-        activate(other)
+        if (!switchMap(other)) return
         const id=mapIndex.nodes(node.word,other.id)[0]
         if(id)select('node',id)
         if(readMode)setMode('read')
@@ -1586,7 +1749,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   }
   function readDetails(n, e) {
     if (n) {
-      inspector.append(el('h3', n.word))
+      inspector.append(el('h3', n.word, 'wm-node-title'))
       inspector.append(...[row('Looks up as', n.lookup)].filter(Boolean))
       renderRelatedMaps(n,true)
       if (n.note) {
@@ -1598,7 +1761,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       inspector.append(
         button('Find vocabulary & clips', () => {
           minimizeMap()
-          onLookup(n.lookup || n.word)
+          onLookup(n.lookup || n.word.replace(/\s+/g, ' '))
         })
       )
     } else {
@@ -1622,6 +1785,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     if (key && key !== lastDetailsKey) setInspector(true)
     lastDetailsKey = key
     inspector.replaceChildren()
+    formDefaults = ''
+    refreshDraftActions()
     if (group.size > 1) {
       const members = map.nodes.filter((n) => group.has(n.id))
       inspector.append(
@@ -1643,12 +1808,14 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       form.append(apply)
       form.onsubmit = (ev) => {
         ev.preventDefault()
-        if (!color.valid() || !textColor.valid()) return
+        if (!color.valid() || !textColor.valid()) return false
         commit(() =>
           members.forEach((n) => {
             n.color = color.value
-            n.textColor = textColor.value
+            n.textColor = shape.value === 'text' && n.shape !== 'text' && textColor.value === defaultNodeTextColor(n.shape)
+              ? defaultNodeTextColor('text') : textColor.value
             if (shape.value) n.shape = shape.value
+            Object.assign(n, keepNodeOnCanvas(n))
           })
         )
       }
@@ -1667,6 +1834,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
           details()
         })
       )
+      formDefaults = formState(form)
+      refreshDraftActions()
       return
     }
     const n = selection?.kind === 'node' ? map.nodes.find((n) => n.id === selection.id) : null,
@@ -1699,16 +1868,18 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       readDetails(n, e)
       return
     }
-    inspector.append(el('h3', n ? 'Word' : 'Connection'))
+    inspector.append(el('h3', n ? n.shape === 'text' ? 'Text' : 'Word' : 'Connection'))
     if (n) {
       renderRelatedMaps(n,false)
     }
     const form = el('form')
     inspector.append(form)
     if (n) {
-      const word = field(form, 'Word / phrase', n.word)
+      const word = field(form, 'Word / phrase', n.word, 'textarea')
+      word.className = 'wm-word-field'
+      word.rows = 2
       word.required = true
-      word.maxLength = 100
+      word.maxLength = MAX_NODE_TEXT
       const lookup = field(form, 'Vocabulary lookup', n.lookup)
       lookup.placeholder = 'Defaults to the word'
       const list = el('datalist')
@@ -1732,6 +1903,15 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
           (n.images || []).join('\n'),
           'textarea'
         )
+      const shapeChanged = () => {
+        color.group.hidden = shape.value === 'text'
+        const previous = n.shape
+        if (shape.value !== previous && textColor.value === defaultNodeTextColor(previous)) {
+          textColor.set(defaultNodeTextColor(shape.value))
+        }
+      }
+      shape.onchange = shapeChanged
+      shapeChanged()
       images.placeholder = 'https://example.com/picture.gif'
       images.rows = 3
       images.spellcheck = false
@@ -1739,21 +1919,29 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       const apply = button('Apply word', () => {})
       apply.type = 'submit'
       form.append(apply)
+      word.addEventListener('keydown', e => {
+        if (!isApplyTextShortcut(e)) return
+        e.preventDefault()
+        form.requestSubmit(apply)
+      })
       form.onsubmit = (ev) => {
         ev.preventDefault()
-        if (!word.value.trim() || !color.valid() || !textColor.valid()) return
+        if (!word.value.trim() || (shape.value !== 'text' && !color.valid()) || !textColor.valid()) return false
+        const problem = nodeTextError(word.value.trim())
+        if (problem) { status.textContent = problem; return false }
         const parsed = parseImageLinks(images.value)
-        commit(() =>
+        commit(() => {
           Object.assign(n, {
             word: word.value.trim(),
             lookup: lookup.value.trim(),
-            color: color.value,
+            color: color.value || n.color,
             textColor: textColor.value,
             shape: shape.value,
             note: note.value,
             images: parsed.links,
           })
-        )
+          Object.assign(n, keepNodeOnCanvas(n))
+        })
         const warn =
           (parsed.rejected ? parsed.rejected + ' link(s) ignored: only http and https links work. ' : '') +
           (parsed.truncated ? parsed.truncated + ' link(s) over the limit of ' + MAX_IMAGES + ' dropped.' : '')
@@ -1762,7 +1950,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       inspector.append(
         button('Find vocabulary & clips', () => {
           minimizeMap()
-          onLookup(n.lookup || n.word)
+          onLookup(n.lookup || n.word.replace(/\s+/g, ' '))
         }),
         button('Connect to another word (C)', () => startConnecting(n.id)),
         button('Delete word', () =>
@@ -1835,6 +2023,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
         )
       )
     }
+    formDefaults = formState(form)
+    refreshDraftActions()
   }
   activate(maps[0] || null)
   setMode(map.nodes.length ? 'read' : 'edit')
