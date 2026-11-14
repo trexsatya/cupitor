@@ -53,6 +53,8 @@ const EDIT_HINT =
 const READ_HINT =
   'Read mode: select a word or connection to see its details. Double-click a word to search subtitles. Switch to edit mode to change the map.'
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+const isApplyTextShortcut = e => e.key === 'Enter' && !e.isComposing &&
+  !e.altKey && !e.shiftKey && (e.ctrlKey || e.metaKey)
 // For webviews that cannot download or pick files (for example Flutter on macOS).
 // postMessage(text) must deliver the text to the host app. The host receives
 //   {"id":1,"type":"export","name":"map.json","text":"…"}  or  {"id":2,"type":"import"}
@@ -1363,7 +1365,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
         input.onkeydown = (ev) => {
           ev.stopPropagation()
           if (ev.isComposing) return
-          if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
+          if (isApplyTextShortcut(ev)) {
             ev.preventDefault()
             finishInline(true)
           } else if (ev.key === 'Escape') {
@@ -1917,6 +1919,11 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       const apply = button('Apply word', () => {})
       apply.type = 'submit'
       form.append(apply)
+      word.addEventListener('keydown', e => {
+        if (!isApplyTextShortcut(e)) return
+        e.preventDefault()
+        form.requestSubmit(apply)
+      })
       form.onsubmit = (ev) => {
         ev.preventDefault()
         if (!word.value.trim() || (shape.value !== 'text' && !color.valid()) || !textColor.valid()) return false
