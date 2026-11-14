@@ -10,6 +10,8 @@ async function checkLookup(browser, language, mobile = false) {
   const errors = []
   page.on('pageerror', e => errors.push(e.message))
   page.setDefaultTimeout(10000)
+  await page.context().route('https://*.wiktionary.org/**', route =>
+    route.fulfill({ contentType: 'text/html', body: '<title>Wiktionary</title>' }))
   await page.route('**/*', route => {
     // Avoid loading the shared fixture's Swedish verb-expansion rules into
     // the Spanish conjugator. The same test word lets us check language gating.
@@ -42,11 +44,21 @@ async function checkLookup(browser, language, mobile = false) {
     assert.equal(await soLink.count(), language === 'swedish' ? 1 : 0)
     if (language === 'swedish') assert.equal(await soLink.getAttribute('href'), base + 'hagla.html')
 
-    // Use the real generated word link and the document's real popup handler.
-    const wiki = group.locator('span.link[data-lookup-word="hagla"]').first()
     const click = locator => mobile ? locator.tap() : locator.click()
-    await click(wiki)
     const popup = page.locator('#subtitleWordPopover')
+    const assertShortcut = async (link, expectedUrl) => {
+      assert.equal(await link.getAttribute('href'), expectedUrl)
+      const [tab] = await Promise.all([page.waitForEvent('popup'), click(link)])
+      try {
+        await tab.waitForURL(expectedUrl)
+        assert.equal(await popup.isVisible(), false)
+      } finally { await tab.close() }
+    }
+    const wiktionary = `https://${language === 'swedish' ? 'sv' : 'es'}.wiktionary.org`
+    await assertShortcut(group.getByRole('link', { name: 'hagla', exact: true }), `${wiktionary}/wiki/hagla`)
+
+    const wiki = group.locator('.srt-file span.link[data-lookup-word="hagla"]').first()
+    await click(wiki)
     await popup.waitFor({ state: 'visible' })
     const assertOutsideWord = async () => {
       const wordBox = await wiki.boundingBox(), popupBox = await popup.boundingBox()
@@ -85,6 +97,12 @@ async function checkLookup(browser, language, mobile = false) {
     const fallback = page.locator(`#result a[href^="${base}"]`)
     assert.equal(await fallback.count(), language === 'swedish' ? 1 : 0)
     if (language === 'swedish') assert.equal(await fallback.getAttribute('href'), base + 'sk%C3%B6ta%20sig.html')
+    const phraseHeading = page.locator('#result .l-accordion').filter({ hasText: /^\s*sköta sig\s*$/ })
+    if (await phraseHeading.count() && !(await phraseHeading.evaluate(el => el.classList.contains('active')))) {
+      await click(phraseHeading)
+    }
+    await assertShortcut(page.locator('#result').getByRole('link', { name: 'sköta sig', exact: true }),
+      `${wiktionary}/w/index.php?search=sk%C3%B6ta+sig`)
     assert.deepEqual(errors, [])
     console.log(`${language}${mobile ? ' mobile' : ''}: dictionary links, word popup, language gating and no-match fallback passed`)
   } catch (error) {

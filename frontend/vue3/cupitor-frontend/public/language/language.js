@@ -3892,9 +3892,7 @@ window.toggleControlPanel = toggleControlPanel
 $('document').ready(e => {
   // Click on a subtitle-word `.link` opens a small option popover with
   // "Search here" (populates the search box) and "Search on wiki" (opens
-  // the Wiktionary URL). Real `<a class="link">` anchors keep the
-  // direct-open behaviour for the header "Wiki:" / "Images" / "Filmot"
-  // shortcut links, since the popover doesn't make sense there.
+  // the Wiktionary URL). Result header shortcuts are regular anchors.
   document.addEventListener('click', function (e) {
     if (!$(e.target).hasClass("link") && !$(e.target).hasClass('link-special')) return
     e.preventDefault()
@@ -4365,6 +4363,16 @@ function getWikiLink(word, uri = null, cls = 'link', index = null) {
   uriComponent = uriComponent.toLowerCase()
   // `word` is subtitle / vocabulary text (possibly another user's): text only.
   return `<span> <span data-index="${_.escape(String(index))}" data-lookup-word="${_.escape(uriComponent)}" class="${cls}" href="https://${getLangFromUrl().code}.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${_subtitleText(word)}</span></span>`;
+}
+
+function getWikiShortcut(word) {
+  const term = word.trim()
+  if (!term) return ''
+  const wiki = `https://${getLangFromUrl().code}.wiktionary.org`
+  const path = /\s/.test(term)
+    ? `w/index.php?search=${encodeURIComponent(term).replace(/%20/g, '+')}`
+    : `wiki/${encodeURIComponent(term.toLowerCase())}`
+  return `<a href="${wiki}/${path}" target="_blank" rel="noopener noreferrer">${_.escape(word)}</a>`
 }
 
 function getSwedishDictionaryUrl(word, language = getLangFromUrl().code) {
@@ -7641,18 +7649,10 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
             _syncSearchPlaylistSelection(selection)
           })
 
-        const isMultiWord = word.trim().split(/\s+/).length > 1
-        // Multi-word phrase: render as a popover-triggering `.link` span (NOT an
-        // <a>, which the document click handler opens directly) so clicking it
-        // shows the same "Search here / Search on wiki" popover as single words.
-        // The href carries the phrase-search Wiktionary URL for the wiki action.
-        const wikiPart = isMultiWord
-            ? `<span> <span class="link" data-lookup-word="${_.escape(word.trim())}" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}">${_.escape(word)}</span></span>`
-            : getWikiLinks(word)
         // The sweep-up heading is not a word, so there is nothing to look it up
         // in — a Wiktionary link for "_everything_else" would be a dead end.
         if (!isSweepUp) {
-          wordBlock.append(`<div style=""> Wiki: ${wikiPart}${getSwedishDictionaryLink(word)} 丨
+          wordBlock.append(`<div style=""> Wiki: ${getWikiShortcut(word)}${getSwedishDictionaryLink(word)} 丨
             <a href="https://www.google.com/search?q=${_.escape(encodeURIComponent(word))}&udm=2" target="_blank">Images</a> 丨
             <a href="https://filmot.com/search/%22${_.escape(encodeURIComponent(word))}%22/1?lang=${getLangFromUrl().code}" target="_blank">YouTube (Filmot)</a> </div> <br>`)
         }
@@ -7856,7 +7856,7 @@ function _refreshAccordionStickyHeight() {
 function resultNotFound(search) {
   return `
 <h3>No results found for ${_.escape(search)}</h3>
-Try Wiki ${getWikiLinks(search)}${getSwedishDictionaryLink(search, getSelectedLang() === 'en' ? 'en' : getLangFromUrl().code)}
+Try Wiki ${getWikiShortcut(search)}${getSwedishDictionaryLink(search, getSelectedLang() === 'en' ? 'en' : getLangFromUrl().code)}
 `;
 }
 
