@@ -4,6 +4,51 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { serveFixtures } = require('./language-dialogs.cjs')
 
+async function checkHeader(page, mobile) {
+  const shortcuts = [
+    ['headerPlaylistsBtn', 'recordingReviewDialog'],
+    ['headerWordMapsBtn', 'wordMapsDialog'],
+    ['headerPracticeLogBtn', 'practiceLogDialog'],
+    // The guest fixture follows the existing account setup flow for edits.
+    ['headerAddToVocabBtn', 'accountDialog'],
+  ]
+  for (const [id] of shortcuts) assert.equal(await page.locator('#' + id).isVisible(), !mobile, id)
+  if (mobile) return
+
+  const measure = () => page.evaluate(() => {
+    const bounds = selector => {
+      const { top, bottom, left, right } = document.querySelector(selector).getBoundingClientRect()
+      return { top, bottom, left, right }
+    }
+    return {
+      toolbar: bounds('.lang-toolbar'), controls: bounds('.lang-toolbar-center'),
+      chips: bounds('#searchSourceChips'), shortcuts: bounds('.lang-header-shortcuts'),
+    }
+  })
+  const wide = await measure()
+  assert.ok(wide.chips.right <= wide.controls.left && wide.controls.right <= wide.shortcuts.left)
+  assert.ok(wide.shortcuts.top < wide.chips.bottom && wide.chips.top < wide.shortcuts.bottom)
+  await page.setViewportSize({ width: 1000, height: 900 })
+  try {
+    const narrow = await measure()
+    assert.ok(narrow.chips.right <= narrow.shortcuts.left)
+    assert.ok(narrow.shortcuts.right <= narrow.toolbar.right)
+  } finally {
+    await page.setViewportSize({ width: 1280, height: 900 })
+  }
+
+  for (const [button, dialog] of shortcuts) {
+    await page.locator('#' + button).click()
+    const panel = page.locator('#' + dialog)
+    await panel.waitFor({ state: 'visible' })
+    await panel.evaluate(el => {
+      if (el.tagName === 'DIALOG') el.close()
+      else window.jQuery(el).dialog('close')
+    })
+    await panel.waitFor({ state: 'hidden' })
+  }
+}
+
 async function check(browser, mobile) {
   const page = await browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 900 }, isMobile: mobile, hasTouch: mobile })
   const errors = []
@@ -79,6 +124,7 @@ async function check(browser, mobile) {
       fs.mkdirSync(process.env.SCREENSHOT_DIR, {recursive:true})
       await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR, `cupitor-search-chips-${mobile?'mobile':'desktop'}.png`)})
     }
+    await checkHeader(page, mobile)
     await page.locator('#includeLibraryInSearchCb').check()
     await page.locator('#wordMapSearchIncludeCb').check()
     await page.locator('#manualSearchIncludeCb').check()

@@ -1241,7 +1241,7 @@ function loadWholeVocabulary(onDone) {
   // the selection to. The placeholder text on each select2 fills the visual.
   $('#searchedWords').append(new Option('', '', false, false))
   $('#addToVocabularyDialogSelect').append(new Option('', '', false, false))
-  $('#addToVocabBtn').prop('disabled', true)
+  $('#addToVocabBtn, #headerAddToVocabBtn').prop('disabled', true)
   // The dialog's reference list is being refilled: no line to delete yet.
   _vocabSelectRebuilds++
   _refreshVocabDeleteBtn()
@@ -1291,7 +1291,7 @@ function loadWholeVocabulary(onDone) {
     // the dialog buttons.
     try { populateLines(it) } catch (e) { console.warn('loadWholeVocabulary: skipped category', it, e) }
   }, () => {
-    $('#addToVocabBtn').prop('disabled', false)
+    $('#addToVocabBtn, #headerAddToVocabBtn').prop('disabled', false)
     $('#vocabLoadingBar').hide()
     _vocabSelectRebuilds = Math.max(0, _vocabSelectRebuilds - 1)
     _refreshVocabDeleteBtn()
@@ -3238,7 +3238,7 @@ function _refreshPracticeLogBtnHighlight() {
     const cur = _currentWeekLabel(), nxt = _nextWeekLabel()
     needs = _practiceLogWeekHasUntouchedItem(data, cur) || _practiceLogWeekHasUntouchedItem(data, nxt)
   } catch (_) { needs = true }
-  $('#practiceLogFrontBtn, #practiceLogSettingsBtn').toggleClass('practice-log-needs-attention', needs)
+  $('#practiceLogFrontBtn, #practiceLogSettingsBtn, #headerPracticeLogBtn').toggleClass('practice-log-needs-attention', needs)
 }
 
 // Thin shim — VM in ./renderer/practice-log-render-vm.js, DOM emit in
@@ -24408,7 +24408,7 @@ $(document).on('click', '#recStartBtn',  startRecording)
 $(document).on('click', '#recPauseBtn',  pauseRecording)
 $(document).on('click', '#recResumeBtn', resumeRecording)
 $(document).on('click', '#recStopBtn',   stopRecording)
-$(document).on('click', '#recReviewBtn', openRecordingReviewDialog)
+$(document).on('click', '#recReviewBtn, #headerPlaylistsBtn', openRecordingReviewDialog)
 $(document).on('click', '.capture-btn', function (e) {
   e.preventDefault()
   e.stopPropagation()

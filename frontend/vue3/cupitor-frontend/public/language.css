@@ -38,16 +38,27 @@ body:is(.practice-mode, .rec-playing) #userDataError {
 }
 
 /* ── Toolbar ──────────────────────────────────────── */
+.lang-header { container-type: inline-size; }
+
 .lang-toolbar {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+        "previous controls next"
+        "return return return"
+        "sources sources sources";
     align-items: center;
-    justify-content: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    padding: 4px 0;
+    column-gap: 6px;
 }
+.lang-toolbar #prevSearchBtn { grid-area: previous; }
+.lang-toolbar #nextSearchBtn { grid-area: next; }
+.lang-toolbar #returnToMediaPlayer { grid-area: return; justify-self: start; }
+.lang-toolbar .search-source-chips { grid-area: sources; }
+.lang-header-shortcuts { display: none; }
 
 .lang-toolbar-center {
+    grid-area: controls;
+    padding-block: 4px;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -6021,6 +6032,54 @@ body.dialog-above-practice .ui-dialog {
 .search-source-chip:has(input:checked) { background: #e1eefb; border-color: #4078b5; color: #164b82; font-weight: 600; }
 .search-source-chip:has(input:checked)::before { background: currentColor; }
 .search-source-chip:has(input:focus-visible) { outline: 2px solid #4078b5; outline-offset: 2px; }
+
+@media (min-width: 1000px) {
+    .lang-toolbar {
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
+        grid-template-areas:
+            "previous controls controls next"
+            "sources sources shortcuts shortcuts"
+            "return return return return";
+        padding-block: 4px;
+    }
+    .lang-header .search-source-chips {
+        flex-wrap: nowrap;
+        justify-self: start;
+        margin: 4px 0;
+        gap: 4px;
+    }
+    .lang-header .search-source-chip { flex: 0 0 auto; min-height: 30px; padding-inline: 7px; }
+    .lang-header-shortcuts {
+        grid-area: shortcuts;
+        display: flex;
+        justify-self: end;
+        align-items: center;
+        gap: 4px;
+    }
+    .lang-header-shortcuts button { justify-content: center; min-width: 32px; min-height: 30px; gap: 6px; }
+    .lang-header-shortcuts button:disabled { cursor: default; opacity: .55; }
+    .lang-header-shortcuts span { display: none; }
+    #practiceLogFrontBanner { display: none !important; }
+
+    /* Use the lookup pane's actual width, including in split views. */
+    @container (min-width: 680px) {
+        .lang-toolbar {
+            grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+            grid-template-areas:
+                "previous sources controls shortcuts next"
+                "return return return return return";
+        }
+        .lang-header .lang-toolbar-center {
+            flex-wrap: nowrap;
+            border-inline: 1px solid #dbe1e8;
+            padding: 0 8px;
+        }
+    }
+
+    @container (min-width: 1030px) {
+        .lang-header-shortcuts span { display: inline; }
+    }
+}
 
 /* Search-result selection and compact pagination */
 #result .search-playlist-item-choice {
