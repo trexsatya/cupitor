@@ -236,63 +236,78 @@
 <div id="languageColumns">
     <div style="float: left; width: 59%; position: relative;" class="fl-left">
         <div id="mainControlInputs" style="clear: both">
-            <!-- Primary toolbar: always visible -->
-            <div class="lang-toolbar">
-                <!-- Previous search -->
-                <button class="lang-tool-btn lang-tool-btn--icon" id="prevSearchBtn" title="Previous search (hold for the list)">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                        <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
-                    </svg>
-                </button>
-                <div class="lang-toolbar-center">
-                <!-- Settings gear button -->
-                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleSettingsPanelBtn" title="Settings" onclick="openSettingsDialog()">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492M5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0"/>
-                        <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.47l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115z"/>
-                    </svg>
-                </button>
-                <!-- Media film-reel button -->
-                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleMediaPanelBtn" title="Media" onclick="toggleControlPanel('mediaControlPanel')">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M0 1a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1zm4 0v6h8V1zm8 8H4v6h8zM1 1v2h2V1zm2 3H1v2h2zM1 7v2h2V7zm2 3H1v2h2zm-2 3v2h2v-2zM15 1h-2v2h2zm-2 3v2h2V4zm2 3h-2v2h2zm-2 3v2h2v-2zm2 3h-2v2h2z"/>
-                    </svg>
-                </button>
-                <!-- Section toggle buttons -->
-                <span class="lang-toolbar-separator"></span>
-                <button id="toggleMainControl" class="lang-tool-btn lang-tool-btn--icon" title="Toggle controls" data-toggle-state="expanded" data-view-id="mainControlBody">
-                    <svg width="18" data-role="collapseUpSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
-                    <svg width="18" data-role="expandDownSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
-                </button>
-                <button id="toggleResultContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle results" data-toggle-state="collapsed" data-view-id="resultContainer">
-                    <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
-                    <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
-                </button>
-                <button type="button" id="cupPageFindToggle" class="lang-tool-btn lang-tool-btn--icon" title="Find on page (Ctrl/Cmd+F)" aria-label="Find on page" aria-controls="cupPageFindBar" aria-expanded="false">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" role="presentation" aria-hidden="true">
-                        <circle cx="10.8" cy="10.8" r="6.7"></circle>
-                        <path d="m16 16 5 5"></path>
-                    </svg>
-                </button>
-                <button id="toggleMediaContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle video" data-toggle-state="collapsed" data-view-id="mediaContainer">
-                    <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
-                    <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
-                </button>
+            <div class="lang-header">
+                <!-- Primary toolbar: always visible -->
+                <div class="lang-toolbar">
+                    <!-- Previous search -->
+                    <button class="lang-tool-btn lang-tool-btn--icon" id="prevSearchBtn" title="Previous search (hold for the list)">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
+                        </svg>
+                    </button>
+                    <div id="searchSourceChips" class="search-source-chips" role="group" aria-label="Search sources">
+                        <label class="search-source-chip"><input type="checkbox" id="includeLibraryInSearchCb"><span>Books</span></label>
+                        <label class="search-source-chip"><input type="checkbox" id="includeSrtsInSearchCb" checked><span>SRTs</span></label>
+                        <label class="search-source-chip"><input type="checkbox" id="wordMapSearchIncludeCb"><span>Maps</span></label>
+                        <label class="search-source-chip"><input type="checkbox" id="manualSearchIncludeCb"><span>Cards</span></label>
+                    </div>
+                    <div class="lang-toolbar-center">
+                        <!-- Settings gear button -->
+                        <button class="lang-tool-btn lang-tool-btn--icon" id="toggleSettingsPanelBtn" title="Settings" onclick="openSettingsDialog()">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492M5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0"/>
+                                <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.47l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115z"/>
+                            </svg>
+                        </button>
+                        <!-- Media film-reel button -->
+                        <button class="lang-tool-btn lang-tool-btn--icon" id="toggleMediaPanelBtn" title="Media" onclick="toggleControlPanel('mediaControlPanel')">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M0 1a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1zm4 0v6h8V1zm8 8H4v6h8zM1 1v2h2V1zm2 3H1v2h2zM1 7v2h2V7zm2 3H1v2h2zm-2 3v2h2v-2zM15 1h-2v2h2zm-2 3v2h2V4zm2 3h-2v2h2zm-2 3v2h2v-2zm2 3h-2v2h2z"/>
+                            </svg>
+                        </button>
+                        <!-- Section toggle buttons -->
+                        <span class="lang-toolbar-separator"></span>
+                        <button id="toggleMainControl" class="lang-tool-btn lang-tool-btn--icon" title="Toggle controls" data-toggle-state="expanded" data-view-id="mainControlBody">
+                            <svg width="18" data-role="collapseUpSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
+                            <svg width="18" data-role="expandDownSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
+                        </button>
+                        <button id="toggleResultContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle results" data-toggle-state="collapsed" data-view-id="resultContainer">
+                            <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
+                            <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
+                        </button>
+                        <button type="button" id="cupPageFindToggle" class="lang-tool-btn lang-tool-btn--icon" title="Find on page (Ctrl/Cmd+F)" aria-label="Find on page" aria-controls="cupPageFindBar" aria-expanded="false">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" role="presentation" aria-hidden="true">
+                                <circle cx="10.8" cy="10.8" r="6.7"></circle>
+                                <path d="m16 16 5 5"></path>
+                            </svg>
+                        </button>
+                        <button id="toggleMediaContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle video" data-toggle-state="collapsed" data-view-id="mediaContainer">
+                            <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
+                            <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
+                        </button>
+                    </div>
+                    <div class="lang-header-shortcuts" role="group" aria-label="Study tools">
+                        <button type="button" id="headerPlaylistsBtn" class="lang-tool-btn lang-tool-btn--icon" title="Playlists" aria-label="Playlists">
+                            <i class="fas fa-list-ul" aria-hidden="true"></i><span>Playlists</span>
+                        </button>
+                        <button type="button" id="headerWordMapsBtn" class="lang-tool-btn lang-tool-btn--icon" onclick="openWordMaps()" title="Word Maps" aria-label="Word Maps">
+                            <i class="fas fa-project-diagram" aria-hidden="true"></i><span>Word Maps</span>
+                        </button>
+                        <button type="button" id="headerPracticeLogBtn" class="lang-tool-btn lang-tool-btn--icon" onclick="openPracticeLogDialog()" title="Practice Log" aria-label="Practice Log">
+                            <i class="fas fa-clipboard-list" aria-hidden="true"></i><span>Practice Log</span>
+                        </button>
+                        <button type="button" id="headerAddToVocabBtn" class="lang-tool-btn lang-tool-btn--icon" onclick="openAddToVocabDialog()" title="Add to Vocabulary" aria-label="Add to Vocabulary" disabled>
+                            <i class="fas fa-book-medical" aria-hidden="true"></i><span>Add to Vocabulary</span>
+                        </button>
+                    </div>
+                    <!-- Next search -->
+                    <button class="lang-tool-btn lang-tool-btn--icon" id="nextSearchBtn" title="Next search (hold for the list)">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708"/>
+                        </svg>
+                    </button>
+                    <button type="button" id="returnToMediaPlayer" class="lang-tool-btn" style="display:none;">Back to player</button>
                 </div>
-                <!-- Next search -->
-                <button class="lang-tool-btn lang-tool-btn--icon" id="nextSearchBtn" title="Next search (hold for the list)">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                        <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708"/>
-                    </svg>
-                </button>
-            </div>
-
-            <button type="button" id="returnToMediaPlayer" class="lang-tool-btn" style="display:none;">Back to player</button>
-            <div id="searchSourceChips" class="search-source-chips" role="group" aria-label="Search sources">
-                <label class="search-source-chip"><input type="checkbox" id="includeLibraryInSearchCb"><span>Books</span></label>
-                <label class="search-source-chip"><input type="checkbox" id="includeSrtsInSearchCb" checked><span>SRTs</span></label>
-                <label class="search-source-chip"><input type="checkbox" id="wordMapSearchIncludeCb"><span>Maps</span></label>
-                <label class="search-source-chip"><input type="checkbox" id="manualSearchIncludeCb"><span>Cards</span></label>
             </div>
 
             <div id="mainControlBody">
