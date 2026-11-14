@@ -63,6 +63,7 @@ test('edit, connect, save and reopen; appearance and lookup survive', () => {
   input('Relationship', 'not related')
   input('Arrows', 'both')
   submit()
+  click('Save map')
   assert.equal(saved().edges[0].marker, '×')
   assert.equal(saved().edges[0].dashed, true)
   // The invisible hit area must not inherit visible arrowheads.
@@ -99,7 +100,7 @@ test('unreadable stored data is preserved and save failure is visible', () => {
   assert.equal(localStorage.getItem('maps'), 'damaged')
   assert.match(
     document.querySelector('.wm-status').textContent,
-    /Saving blocked/
+    /Saved maps could not be read/
   )
 })
 
@@ -128,9 +129,10 @@ test('GitHub load does not publish a phantom blank map and Sync marks changes cl
     1
   )
   click('+ Word')
-  const inline = document.querySelector('foreignObject input')
+  const inline = document.querySelector('foreignObject textarea')
   inline.value = 'Synced word'
-  inline.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }))
+  finishNewWord()
+  click('Save map')
   assert.equal(document.querySelector('.wm-sync').textContent, 'Sync*')
   click('Sync*')
   await new Promise((r) => setTimeout(r, 0))
@@ -155,8 +157,10 @@ test('closing during GitHub load keeps newly saved local edits', async () => {
     commitFile: async () => {},
     resolveConflicts: async () => null,
   })
+  localStorage.setItem('maps', JSON.stringify([{ version: 1, id: 'm', name: 'Saved map', nodes: [], edges: [] }]))
   openWordMaps({ storageKey: 'maps', onLookup() {}, sync })
   click('+ Word')
+  finishNewWord()
   click('Close')
   const newer = JSON.parse(localStorage.getItem('maps'))
   newer[0].name = 'changed after closing'
@@ -167,6 +171,83 @@ test('closing during GitHub load keeps newly saved local edits', async () => {
     JSON.parse(localStorage.getItem('maps'))[0].name,
     'changed after closing'
   )
+})
+
+test('plain text and shaped nodes keep line breaks; discard restores the last saved map', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  click('+ Text')
+  const editor = document.querySelector('.wm-node-editor')
+  editor.value = 'First line\nSecond line'
+  finishNewWord()
+  const label = document.querySelector('[data-node]')
+  assert.equal(label.querySelector('rect').getAttribute('fill'), 'transparent')
+  assert.equal(label.querySelector('text').getAttribute('fill'), '#263343')
+  assert.deepEqual([...label.querySelectorAll('tspan')].map(line => line.textContent), ['First line', 'Second line'])
+  assert.equal(localStorage.getItem('maps'), null)
+  click('Save map')
+  const before = localStorage.getItem('maps')
+  assert.equal(saved().nodes[0].word, 'First line\nSecond line')
+
+  click('+ Word')
+  document.querySelector('.wm-node-editor').value = 'Shaped\nword'
+  finishNewWord()
+  assert.equal(document.querySelectorAll('[data-node]')[1].querySelector('rect').getAttribute('height'), '80')
+  input('Word / phrase', 'Unapplied form text')
+  const title = document.querySelector('[aria-label="Map name"]')
+  title.value = 'Draft name'
+  title.dispatchEvent(new window.Event('change'))
+  click('Discard changes')
+  assert.equal(localStorage.getItem('maps'), before)
+  assert.equal(document.querySelectorAll('[data-node]').length, 1)
+  assert.equal(title.value, 'Untitled map')
+  click('Close')
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  assert.deepEqual([...document.querySelectorAll('[data-node] tspan')].map(line => line.textContent),
+    ['First line', 'Second line'])
+})
+
+test('discard drops a new draft, and declining to leave keeps pending editor text', () => {
+  setup()
+  const original = { version: 1, id: 'saved', name: 'Saved map', nodes: [], edges: [] }
+  localStorage.setItem('maps', JSON.stringify([original]))
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  click('New map')
+  click('+ Text')
+  const editor = document.querySelector('.wm-node-editor')
+  editor.value = 'Draft\ntext'
+  globalThis.confirm = () => false
+  click('Close')
+  assert.equal(document.querySelector('.wm-node-editor').value, 'Draft\ntext')
+  click('Discard changes')
+  assert.equal(document.querySelector('[aria-label="Saved word map"]').value, 'saved')
+  assert.deepEqual(JSON.parse(localStorage.getItem('maps')), [original])
+  assert.equal(document.querySelectorAll('[data-node]').length, 0)
+})
+
+test('save includes pending inspector fields and keeps drafts out of GitHub sync', async () => {
+  setup()
+  let pushed
+  const sync = {
+    dirty: () => false,
+    pull: async () => ({}),
+    push: async (getMaps, adopt) => {
+      pushed = JSON.parse(JSON.stringify(getMaps()))
+      adopt(pushed)
+      return {}
+    },
+  }
+  openWordMaps({ storageKey: 'maps', onLookup() {}, sync })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  click('+ Text')
+  finishNewWord()
+  input('Word / phrase', 'Pending\nedit')
+  click('Sync')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.deepEqual(pushed, [])
+  assert.equal(document.querySelector('.wm-word-field').value, 'Pending\nedit')
+  click('Save map')
+  assert.equal(saved().nodes[0].word, 'Pending\nedit')
 })
 
 test('one Read/Edit switch toggles editing controls', () => {
@@ -197,9 +278,9 @@ test('lookup minimizes and restoring preserves the selected word, mode and zoom'
   let lookup
   openWordMaps({ storageKey: 'maps', onLookup: (word) => (lookup = word) })
   click('+ Word')
-  const inline = document.querySelector('foreignObject input')
+  const inline = document.querySelector('foreignObject textarea')
   inline.value = 'Lodrät'
-  inline.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }))
+  finishNewWord()
   click('+')
   const dialog = document.querySelector('#wordMapsDialog'),
     canvas = dialog.querySelector('svg')
@@ -235,8 +316,8 @@ function colourInput(label, value) {
 }
 function finishNewWord() {
   document
-    .querySelector('foreignObject input')
-    .dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }))
+    .querySelector('foreignObject textarea')
+    .dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }))
 }
 test('node foreground/background codes update swatches, canvas and saved maps', () => {
   setup()
@@ -254,6 +335,7 @@ test('node foreground/background codes update swatches, canvas and saved maps', 
     '#123456'
   )
   submit()
+  click('Save map')
   assert.equal(saved().nodes[0].color, '#aabbcc')
   assert.equal(saved().nodes[0].textColor, '#123456')
   assert.equal(
@@ -270,6 +352,7 @@ test('node foreground/background codes update swatches, canvas and saved maps', 
     '#654321'
   )
   submit()
+  click('Save map')
   click('Close')
   openWordMaps({ storageKey: 'maps', onLookup() {} })
   assert.equal(
@@ -289,7 +372,7 @@ test('node foreground/background codes update swatches, canvas and saved maps', 
     .dispatchEvent(
       new window.KeyboardEvent('keydown', { key: 'F2', bubbles: true })
     )
-  const editor = document.querySelector('foreignObject input')
+  const editor = document.querySelector('foreignObject textarea')
   assert.equal(editor.style.color, 'rgb(101, 67, 33)')
   assert.equal(editor.style.background, 'rgb(170, 187, 204)')
 })
@@ -306,6 +389,7 @@ test('invalid colour codes cannot overwrite a saved node', () => {
   colourInput('Text color hex code', '#111')
   assert.equal(code.checkValidity(), true)
   submit()
+  click('Save map')
   assert.equal(saved().nodes[0].textColor, '#111111')
 })
 test('group styling accepts colour codes and angled shapes', () => {
@@ -327,6 +411,7 @@ test('group styling accepts colour codes and angled shapes', () => {
   colourInput('Text color for all hex code', '#ffeedd')
   input('Shape for all', 'parallelogram')
   submit()
+  click('Save map')
   for (const n of saved().nodes) {
     assert.equal(n.color, '#001122')
     assert.equal(n.textColor, '#ffeedd')
@@ -342,6 +427,7 @@ test('hexagon and parallelogram shapes render polygons and persist on reload', (
   for (const shape of ['hexagon', 'parallelogram']) {
     input('Shape', shape)
     submit()
+    click('Save map')
     assert.equal(saved().nodes[0].shape, shape)
     const points = document
       .querySelector('[data-node] polygon')
@@ -598,12 +684,15 @@ test('selected nodes can be copied, pasted, deleted and restored with undo/redo'
   const dialog = document.querySelector('#wordMapsDialog')
   dialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true }))
   dialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true, cancelable: true }))
-  assert.equal(saved().nodes.length, 2)
+  const nodeCount = () => document.querySelectorAll('[data-node]').length
+  assert.equal(nodeCount(), 2)
   dialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }))
-  assert.equal(saved().nodes.length, 1)
+  assert.equal(nodeCount(), 1)
   click('Undo')
-  assert.equal(saved().nodes.length, 2)
+  assert.equal(nodeCount(), 2)
   click('Redo')
+  assert.equal(nodeCount(), 1)
+  click('Save map')
   assert.equal(saved().nodes.length, 1)
 })
 
@@ -618,6 +707,7 @@ test('folder browsing, nested moves, new maps and reload preserve stable identit
   const field = document.querySelector('[aria-label="Map folder path"]')
   field.value = 'Swedish/People/Conflict'
   document.querySelector('.wm-folder-form').dispatchEvent(new window.Event('submit', {cancelable: true}))
+  click('Save map')
   let data = JSON.parse(localStorage.getItem('maps'))
   assert.equal(data.find(m => m.id === 'one').folder, 'Swedish/People/Conflict')
   assert.equal(data.find(m => m.id === 'two').folder, 'Swedish/Nature')
@@ -625,6 +715,7 @@ test('folder browsing, nested moves, new maps and reload preserve stable identit
   document.querySelector('[data-folder="Swedish/People"]').click()
   assert.equal(document.querySelectorAll('.wm-library-map').length, 1)
   click('New map')
+  click('Save map')
   data = JSON.parse(localStorage.getItem('maps'))
   assert.equal(data.length, 3)
   assert.equal(data[2].folder, 'Swedish/People')

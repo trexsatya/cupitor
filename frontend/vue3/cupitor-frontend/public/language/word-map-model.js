@@ -40,19 +40,50 @@ export function parseImageLinks(text) {
   }
 }
 export const NODE_SHAPES = [
+  ['text', 'Text only'],
   ['rectangle', 'Rounded rectangle'],
   ['ellipse', 'Ellipse'],
   ['hexagon', 'Hexagon (triangular ends)'],
   ['parallelogram', 'Parallelogram (slanted sides)'],
 ]
+export const MAX_NODE_TEXT = 500
+export const MAX_NODE_LINES = 24
+export function nodeTextError(word) {
+  if (word.length > MAX_NODE_TEXT || word.split(/\r\n?|\n/).length > MAX_NODE_LINES) {
+    return `Use at most ${MAX_NODE_TEXT} characters and ${MAX_NODE_LINES} lines.`
+  }
+  return ''
+}
+export const defaultNodeTextColor = shape => shape === 'text' ? '#263343' : '#ffffff'
+export function nodeTextLines(word) {
+  return word.replace(/\r\n?/g, '\n').split('\n').flatMap(line => {
+    const lines = []
+    const chars = [...line]
+    while (chars.length > 28) {
+      const space = chars.slice(0, 29).lastIndexOf(' ')
+      lines.push(chars.splice(0, space > 0 ? space + 1 : 28).join('').trimEnd())
+    }
+    lines.push(chars.join(''))
+    return lines
+  })
+}
 export function nodeWidth(node) {
-  const base = Math.max(110, Math.min(380, node.word.length * 12 + 30))
+  const lines = nodeTextLines(node.word)
+  const longest = Math.max(...lines.map(line => [...line].length))
+  const base = Math.max(node.shape === 'text' ? 32 : 110, Math.min(380, longest * 12 + 30))
+  if (node.shape === 'ellipse' && lines.length > 1) return base * Math.SQRT2
   // Keep the same space for text when the sides taper inward.
   return base + (['hexagon', 'parallelogram'].includes(node.shape) ? 44 : 0)
 }
+export const NODE_LINE_HEIGHT = 26
+export function nodeHeight(node) {
+  const lines = nodeTextLines(node.word)
+  const height = (node.shape === 'text' ? 32 : 54) + (lines.length - 1) * NODE_LINE_HEIGHT
+  return node.shape === 'ellipse' && lines.length > 1 ? height * Math.SQRT2 : height
+}
 export function nodePolygon(node) {
   const w = nodeWidth(node) / 2,
-    h = 27,
+    h = nodeHeight(node) / 2,
     inset = 22
   if (node.shape === 'hexagon')
     return [
@@ -109,23 +140,22 @@ export function readMap(value) {
       ids.has(n.id) ||
       typeof n.word !== 'string' ||
       !n.word.trim() ||
-      n.word.length > 100 ||
+      nodeTextError(n.word) ||
       !Number.isFinite(n.x) ||
       !Number.isFinite(n.y)
     )
       throw Error(
-        'Each word needs a unique id, text (up to 100 characters), and numeric x/y positions.'
+        `Each word needs a unique id, text (up to ${MAX_NODE_TEXT} characters and ${MAX_NODE_LINES} lines), and numeric x/y positions.`
       )
     ids.add(n.id)
     return {
       id: n.id,
       word: n.word,
-      x: Math.max(80, Math.min(2320, n.x)),
-      y: Math.max(40, Math.min(1560, n.y)),
+      ...keepNodeOnCanvas(n),
       lookup: str(n.lookup),
       note: str(n.note),
       color: normalizeNodeColor(n.color, '#dc3636'),
-      textColor: normalizeNodeColor(n.textColor, '#ffffff'),
+      textColor: normalizeNodeColor(n.textColor, defaultNodeTextColor(n.shape)),
       shape: NODE_SHAPES.some(([shape]) => shape === n.shape) ? n.shape : 'rectangle',
       images: [
         ...new Set((Array.isArray(n.images) ? n.images : []).map(imageLink).filter(Boolean)),
@@ -165,6 +195,14 @@ export function readMap(value) {
   return { version: 1, id: str(data.id) || newId(), name: data.name.slice(0, 200),
     ...(folder ? { folder } : {}), nodes, edges }
 }
+export function keepNodeOnCanvas(node) {
+  const halfWidth = Math.max(80, nodeWidth(node) / 2)
+  const halfHeight = Math.max(40, nodeHeight(node) / 2)
+  return {
+    x: Math.max(halfWidth, Math.min(2400 - halfWidth, node.x)),
+    y: Math.max(halfHeight, Math.min(1600 - halfHeight, node.y)),
+  }
+}
 export function removeNode(map, id) {
   map.nodes = map.nodes.filter((n) => n.id !== id)
   map.edges = map.edges.filter((e) => e.from !== id && e.to !== id)
@@ -172,7 +210,7 @@ export function removeNode(map, id) {
 export function edgeEnds(a, b) {
   const boundary = (n, dx, dy) => {
     const w = nodeWidth(n) / 2,
-      h = 27,
+      h = nodeHeight(n) / 2,
       polygon = nodePolygon(n)
     let t
     if (n.shape === 'ellipse') {

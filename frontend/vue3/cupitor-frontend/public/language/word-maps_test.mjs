@@ -63,6 +63,7 @@ test('edit, connect, save and reopen; appearance and lookup survive', () => {
   input('Relationship', 'not related')
   input('Arrows', 'both')
   submit()
+  click('Save map')
   assert.equal(saved().edges[0].marker, '×')
   assert.equal(saved().edges[0].dashed, true)
   // The invisible hit area must not inherit visible arrowheads.
@@ -99,6 +100,6 @@ test('unreadable stored data is preserved and save failure is visible', () => {
   assert.equal(localStorage.getItem('maps'), 'damaged')
   assert.match(
     document.querySelector('.wm-status').textContent,
-    /Saving blocked/
+    /Saved maps could not be read/
   )
 })

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { emptyMap, readMap, removeNode, edgeEnds } from './word-map-model.js'
+import { emptyMap, readMap, removeNode, edgeEnds, nodeHeight, nodeWidth, nodeTextLines } from './word-map-model.js'
 const sample = () => ({
   ...emptyMap('Relations'),
   nodes: [
@@ -82,6 +82,22 @@ test('angled node shapes survive import/export and unknown shapes fall back', ()
   assert.deepEqual(readMap(JSON.stringify(map)), map)
   data.nodes[0].shape = 'unknown'
   assert.equal(readMap(data).nodes[0].shape, 'rectangle')
+})
+test('multiline labels round-trip and connection endpoints use their height', () => {
+  const data = sample()
+  data.nodes[0].shape = 'text'
+  data.nodes[0].word = 'One\n\nTwo'
+  data.nodes[1].x = data.nodes[0].x
+  data.nodes[1].y = 300
+  const map = readMap(data)
+  const [a, b] = map.nodes
+  assert.equal(a.shape, 'text')
+  assert.equal(a.textColor, '#263343')
+  assert.equal(nodeWidth(a), 66)
+  assert.equal(nodeHeight(a), 84)
+  assert.deepEqual(nodeTextLines(a.word), ['One', '', 'Two'])
+  assert.equal(edgeEnds(a, b)[0].y, a.y + 42)
+  assert.deepEqual(readMap(JSON.stringify(map)), map)
 })
 test('arrows touch the triangular tips and slanted sides, not bounding boxes', () => {
   const a = { id: 'a', word: 'Rät', x: 100, y: 100, shape: 'hexagon' }
