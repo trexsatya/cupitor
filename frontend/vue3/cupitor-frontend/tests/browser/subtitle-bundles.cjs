@@ -1,7 +1,7 @@
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
-const { serveFixtures } = require('./language-dialogs.cjs')
+const { serveFixtures, clickSubtitleInfo } = require('./language-dialogs.cjs')
 const path = require('node:path')
 const fs = require('node:fs')
 
@@ -104,7 +104,7 @@ async function check(browser, mobile) {
     await page.waitForFunction(() => document.querySelectorAll('#result .srt-file').length === 2)
 
     const click = locator => mobile ? locator.tap() : locator.click()
-    await click(page.locator(`#result .play-btn-container[data-url="${a}"] .media-info`).first())
+    await clickSubtitleInfo(page, a, click)
     await click(page.locator('#info-dialog-content').getByRole('button', { name: 'Show complete SRT' }))
     const fullSrt = page.locator('#fullSrtDialog')
     await fullSrt.locator('.full-srt-text').waitFor({ state: 'visible' })

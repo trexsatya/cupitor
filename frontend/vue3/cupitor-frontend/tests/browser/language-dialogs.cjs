@@ -63,6 +63,15 @@ async function clickSearchTool(page, selector) {
   await control.click()
 }
 
+async function clickSubtitleInfo(page, link, click) {
+  await page.locator('#searchLoadingOverlay').waitFor({ state: 'hidden' })
+  const info = page.locator(`#result .play-btn-container[data-url="${link}"] .media-info`).first()
+  const group = info.locator('xpath=ancestor::div[@class="subtitle-result-group"][1]')
+  const heading = group.locator('.subtitle-result-toggle')
+  if (await heading.getAttribute('aria-expanded') === 'false') await click(heading)
+  await click(info)
+}
+
 async function checkDialogs(browser, mobile) {
   const page = await browser.newPage({ viewport: mobile ? { width: 430, height: 900 } : { width: 1280, height: 900 },
     isMobile: mobile, hasTouch: mobile })
@@ -402,4 +411,4 @@ if (require.main === module) (async () => {
   }
 })().catch(error => { console.error(error); process.exitCode = 1 })
 
-module.exports = { serveFixtures, checkVocabInsertPositions, clickSearchTool }
+module.exports = { serveFixtures, checkVocabInsertPositions, clickSearchTool, clickSubtitleInfo }
