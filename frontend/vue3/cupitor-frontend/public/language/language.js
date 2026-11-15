@@ -3671,8 +3671,8 @@ export function renderVocabularyCategory(category) {
     let txt = line;
     const $line = $(`<div class="vocabulary-line"></div>`);
     if (txt.trim().length) {
-      $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`);
-      $line.find("i.fa").click(selectSearchedWord);
+      $('<button type="button" class="vocab-entry-search" aria-label="Search this vocabulary entry"><i class="fas fa-search" aria-hidden="true"></i></button>')
+        .on('click', selectSearchedWord).appendTo($line)
     } else {
       txt = "------------------";
     }
@@ -6687,10 +6687,10 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
 
       const div = $(`
   <div class="line-part">
-      <i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;"></i>
+      <button type="button" class="vocab-entry-search subtitle-entry-search" aria-label="Search this subtitle line" title="Search this subtitle line"><i class="fas fa-crosshairs" aria-hidden="true"></i></button>
       ${highlightedText(chunk.replaceAll("|", " | "))}
   </div>`);
-      $(div).find("i.fa").click(selectSearchedWord)
+      div.find(".subtitle-entry-search").on("click", selectSearchedWord)
       div.data({text: chunk})
       $line.append(div)
 
@@ -8356,7 +8356,7 @@ function _buildVocabLine(it, highlight, searchOverride) {
   let txt = it.item
   const $line = $('<div class="vocabulary-line"></div>')
   if (txt.trim().length) {
-    $('<button type="button" class="vocab-entry-search fa-mouse-pointer" aria-label="Search this vocabulary entry"><i class="fas fa-search" aria-hidden="true"></i></button>')
+    $('<button type="button" class="vocab-entry-search" aria-label="Search this vocabulary entry"><i class="fas fa-search" aria-hidden="true"></i></button>')
       .on('click', selectSearchedWord).appendTo($line)
   } else {
     txt = '------------------'
@@ -8386,19 +8386,14 @@ function _buildVocabLine(it, highlight, searchOverride) {
 // Idempotently attach an accordion delegate to a container holding
 // `.similar-segment-header` / `.similar-segment-body` pairs. Single-open:
 // clicking a header collapses any other open one and toggles the clicked
-// segment. Clicks that originate on the `i.fa` arrow inside a header pass
-// through to selectSearchedWord without triggering the toggle.
+// segment. The vocabulary search button has its own click action.
 function _attachAccordionDelegate($container) {
   if (!$container || !$container.length) return
   if ($container.data('accordionBound')) return
   $container.data('accordionBound', true)
   $container.on('keydown', '.similar-segment-header', _activateVocabularyHeader)
   $container.on('click', '.similar-segment-header', function (e) {
-    // The matched-line header may also contain a red `<i class="fa-mouse-pointer">`
-    // arrow that re-anchors the search via selectSearchedWord — let those
-    // clicks pass through. Other icons inside the header (e.g. the
-    // `.similar-chevron` itself) should still toggle the accordion.
-    if ($(e.target).closest('.fa-mouse-pointer').length) return
+    if ($(e.target).closest('.vocab-entry-search').length) return
     const $this = $(this)
     const $body = $this.siblings('.similar-segment-body')
     const wasOpen = !$body.is('[hidden]')
@@ -8439,8 +8434,8 @@ function _buildSimilarSegment({ lineIdx, candidate, searchWord, tier, distance, 
     let txt = it.item
     const $line = $(`<div class="vocabulary-line"></div>`)
     if (txt.trim().length) {
-      $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`)
-      $line.find('i.fa').click(selectSearchedWord)
+      $('<button type="button" class="vocab-entry-search" aria-label="Search this vocabulary entry"><i class="fas fa-search" aria-hidden="true"></i></button>')
+        .on('click', selectSearchedWord).appendTo($line)
     } else {
       txt = '------------------'
     }
