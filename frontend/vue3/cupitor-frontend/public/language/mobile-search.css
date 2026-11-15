@@ -357,8 +357,8 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     .lang-select-with-toggle .select2-selection--single .select2-selection__placeholder { color: var(--search-muted); }
     .lang-select-with-toggle .select2-selection--single .select2-selection__arrow { top: 50%; transform: translateY(-50%); }
     .mobile-search-language { display: flex; position: relative; align-items: center; margin: 0; }
-    .mobile-search-language i { position: absolute; inset-inline-start: 10px; color: var(--search-accent); pointer-events: none; }
-    #searchLanguageSelect { padding-inline: 32px 6px; }
+    .mobile-search-language i { display: none; }
+    #searchLanguageSelect { padding: 0 8px; }
     .vocabulary-picker-open > .mobile-search-language { display: none; }
     .vocabulary-picker-open .select2-selection--single { border-color: var(--search-accent); background: var(--search-active); }
     .search-vocabulary-dropdown.select2-dropdown { border-color: var(--search-border); border-radius: 8px; }
@@ -505,8 +505,8 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     .lang-select-with-toggle .select2-selection--single .select2-selection__placeholder { color: var(--search-muted); }
     .lang-select-with-toggle .select2-selection--single .select2-selection__arrow { top: 50%; transform: translateY(-50%); }
     .mobile-search-language { position: relative; display: flex; flex: 4 1 122px; min-width: 0; margin: 0; align-items: center; }
-    .mobile-search-language i { position: absolute; inset-inline-start: 11px; color: var(--search-accent); pointer-events: none; }
-    #searchLanguageSelect { width: 100%; padding-inline: 32px 6px; }
+    .mobile-search-language i { display: none; }
+    #searchLanguageSelect { width: 100%; padding: 0 8px; }
 
     .vocabulary-picker-open > .mobile-search-language { display: none; }
     .vocabulary-picker-open .select2-selection--single {
