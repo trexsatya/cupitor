@@ -15,11 +15,14 @@ import { orderedRecordingEntries } from './recordings-order.js'
 const MANUAL_ST = 'Manual'
 const MANUAL_W = 'Card'
 
-function searchRegex(search, flags) {
+export function searchRegex(search, flags, match = 'partial') {
   const s = String(search == null ? '' : search).trim()
   if (!s) return null
   try {
-    return new RegExp(relaxSpaces(s), flags)
+    const pattern = relaxSpaces(s)
+    const word = '[\\p{L}\\p{M}\\p{N}_]'
+    const regex = new RegExp(pattern, match === 'partial' ? flags : flags + 'u')
+    return match === 'partial' ? regex : new RegExp(`(?<!${word})(?:${regex.source})(?!${word})`, regex.flags)
   } catch (_) {
     return null
   }
@@ -29,8 +32,8 @@ function searchRegex(search, flags) {
 // playlist-name order. Virtual playlists are skipped (they show cards that
 // live in another playlist, which would list one card twice), and so are the
 // app's book playlists, which cannot hold manual cards.
-export function findManualCards(recordings, search, { limit = 200 } = {}) {
-  const re = searchRegex(search, 'i')
+export function findManualCards(recordings, search, { limit = 200, match = 'exact' } = {}) {
+  const re = searchRegex(search, 'i', match)
   if (!re || !recordings) return []
   const out = []
   for (const name of Object.keys(recordings).sort((a, b) => a.localeCompare(b))) {
@@ -54,9 +57,9 @@ export function findManualCards(recordings, search, { limit = 200 } = {}) {
 // `text` as HTML with every match of `search` wrapped in the result list's
 // highlight span. Escaped throughout: card text is typed or captured off a
 // web page, and must never become markup.
-export function highlightMatchesHtml(text, search) {
+export function highlightMatchesHtml(text, search, match = 'partial') {
   const s = String(text == null ? '' : text)
-  const re = searchRegex(search, 'gi')
+  const re = searchRegex(search, 'gi', match)
   const parts = []
   let at = 0
   if (re) {
@@ -76,9 +79,9 @@ export function highlightMatchesHtml(text, search) {
 // included) flattened to single spaces, cut to about `radius` characters
 // either side of the match at word boundaries, with … where it was cut, and
 // every match inside the cut highlighted. Null when nothing matches.
-export function matchSnippetHtml(text, search, radius = 40) {
+export function matchSnippetHtml(text, search, radius = 40, match = 'partial') {
   const flat = String(text == null ? '' : text).replace(/\s+/g, ' ').trim()
-  const re = searchRegex(search, 'i')
+  const re = searchRegex(search, 'i', match)
   const m = re && flat ? re.exec(flat) : null
   if (!m) return null
   const mEnd = m.index + m[0].length
@@ -93,7 +96,7 @@ export function matchSnippetHtml(text, search, radius = 40) {
     if (sp > mEnd) end = sp
   }
   return (start > 0 ? '…' : '') +
-    highlightMatchesHtml(flat.slice(start, end), search) +
+    highlightMatchesHtml(flat.slice(start, end), search, match) +
     (end < flat.length ? '…' : '')
 }
 
@@ -102,13 +105,13 @@ export function matchSnippetHtml(text, search, radius = 40) {
 // renders it folded; the header stays so the count is still visible.
 // `ownerLabel(playlist)` gives a display-only owner label shown before the
 // playlist name ('' for none); data-playlist always holds the plain name.
-export function renderManualResultsHtml(hits, search, { collapsed = false, ownerLabel = () => '' } = {}) {
+export function renderManualResultsHtml(hits, search, { collapsed = false, match = 'exact', ownerLabel = () => '' } = {}) {
   if (!hits || !hits.length) {
     return '<div class="manual-results-empty">No manual cards match.</div>'
   }
   const rows = hits.map(({ playlist, item, itemNumber }) => {
-    const snippet = matchSnippetHtml(cardPlainText(item.source), search) ||
-      matchSnippetHtml(cardPlainText(item.target), search) || ''
+    const snippet = matchSnippetHtml(cardPlainText(item.source), search, 40, match) ||
+      matchSnippetHtml(cardPlainText(item.target), search, 40, match) || ''
     const label = ownerLabel(playlist)
     const shown = label ? `${label} · ${playlist}` : playlist
     return `<button type="button" class="manual-hit" data-playlist="${escapeHtml(playlist)}" data-id="${escapeHtml(item.id)}" title="Open this card">` +

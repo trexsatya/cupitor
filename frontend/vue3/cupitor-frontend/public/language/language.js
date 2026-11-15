@@ -2691,6 +2691,7 @@ window._appSettings = {
   autoLibrarySearch: false,
   // List matching manual cards (from every playlist) with the search results.
   includeManualInSearch: false,
+  manualCardSearchMatch: 'exact',
   // Whether that block starts folded. Sticky, like libraryResultsCollapsed.
   manualResultsCollapsed: false,
   includeWordMapsInSearch: false,
@@ -12337,13 +12338,26 @@ function _renderManualSearchResults() {
   const on = !!(window._appSettings && window._appSettings.includeManualInSearch)
   const term = _librarySearchTerm()
   if (!on || !term || !String(term).trim()) { $out.html(''); return }
-  const hits = _findManualCards(window._recordings, term)
+  const match = window._appSettings?.manualCardSearchMatch === 'partial' ? 'partial' : 'exact'
+  const hits = _findManualCards(window._recordings, term, { match })
   const owner = _ownerLabeller()
-  $out.html(_renderManualResultsHtml(hits, term, {
+  $out.html(`<label>Card match <select id="manualCardSearchMatch">
+    <option value="exact">Exact</option><option value="partial">Partial</option>
+  </select></label>`)
+  $out.find('#manualCardSearchMatch').val(match)
+  $out.append(_renderManualResultsHtml(hits, term, {
+    match,
     collapsed: !!(window._appSettings && window._appSettings.manualResultsCollapsed),
     ownerLabel: name => owner(window._recordings && window._recordings[name]),
   }))
 }
+
+$(document).on('change', '#manualCardSearchMatch', e => {
+  window._appSettings.manualCardSearchMatch = e.target.value
+  saveAppSettings()
+  _renderManualSearchResults()
+  document.getElementById('manualCardSearchMatch')?.focus()
+})
 
 $(document).on('change', '#manualSearchIncludeCb', e => {
   if (!window._appSettings) window._appSettings = {}
