@@ -166,6 +166,8 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     body.search-keyboard-open :is(#mobileSearchNav, #recPlayingRestorePill, #practiceMode .practice-restore, #minimizedDialogs, #srtLoadingBanner) {
         display: none !important;
     }
+    /* Keep the floated results inside the page, above the reserved dock space. */
+    #languageColumns { display: flow-root; }
     #languageColumns > .fl-left { width: 100% !important; }
     #subtitleColumn {
         border-inline-start: 0 !important;
