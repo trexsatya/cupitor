@@ -1,72 +1,47 @@
-// View-model for the Practice Log dialog. Two tabs (Plan / History),
-// each with its own VM builder. Status lookup is shared so the renderer
-// emits identical labels + css classes for both tabs.
-//
-// Inputs come from `./practice-log.js`-shaped data — the in-memory
-// `window._practiceLog` map. We don't reach into it directly here;
-// callers pass it in.
-//
-// Module name has '-render-vm' rather than just '-vm' to avoid colliding
-// with the legacy ./practice-log.js (storage) and ./practice-log.test.js
-// at the parent folder.
+import {
+  hasPracticeLogEntry, practiceLogMeasure, practiceWeekDates,
+  PRACTICE_LOG_DEFAULT_ITEMS, PRACTICE_LOG_DEFAULT_RETAIN, PRACTICE_LOG_STATUSES,
+} from '../practice-log.js'
 
-import { PRACTICE_LOG_STATUSES, PRACTICE_LOG_DEFAULT_ITEMS, PRACTICE_LOG_DEFAULT_RETAIN } from '../practice-log.js'
-
-// Lookup the {value, label, cls} record for a given status. Returns the
-// 'not_started' default entry when the value is unknown — production
-// code rendered the same fallback inline.
 export function statusInfo(value) {
-  return PRACTICE_LOG_STATUSES.find(s => s.value === (value || 'not_started')) || PRACTICE_LOG_STATUSES[0]
+  return PRACTICE_LOG_STATUSES.find(status => status.value === value) || PRACTICE_LOG_STATUSES[0]
 }
 
-// VM for the Plan tab. Expects `weekRecord` to already be backfilled
-// (call ensurePracticeLogWeek in the wrapper first so this stays pure).
-export function buildPracticeLogPlanVM(customItems, weekRecord, weekLabel) {
-  const items = (customItems || []).map(name => {
-    const rec = (weekRecord && weekRecord[name]) || { status: 'not_started', notes: '' }
-    return {
-      name,
-      status: rec.status || 'not_started',
-      notes: rec.notes || '',
-      ...(rec.goal ? { goal: rec.goal } : {}),
-      isDefault: PRACTICE_LOG_DEFAULT_ITEMS.indexOf(name) !== -1,
-    }
-  })
-  return { weekLabel, items }
+function projectItem(name, record) {
+  const info = statusInfo(record.status)
+  return {
+    name, goal: typeof record.goal === 'string' ? record.goal : '',
+    notes: typeof record.notes === 'string' ? record.notes.trim() : '',
+    status: info.value, statusLabel: info.label, statusCls: info.cls,
+    measure: practiceLogMeasure(record),
+  }
 }
 
-// VM for the History tab. Takes the whole practice-log `data`, applies
-// the retention slice (most-recent N weeks by ISO label), and projects
-// each week to its renderable shape.
-//
-// Returns one of:
-//   { state: 'empty', retainWeeks }
-//   { state: 'normal', retainWeeks, weeks: [{ label, items: [{...}], empty }] }
-export function buildPracticeLogHistoryVM(data) {
-  const safeData = data || {}
-  const retainWeeks = Math.max(
-    1,
-    parseInt(safeData.historyRetainWeeks, 10) || PRACTICE_LOG_DEFAULT_RETAIN
-  )
-  const allWeeks = Object.keys(safeData.weeks || {}).sort().reverse()
-  if (!allWeeks.length) return { state: 'empty', retainWeeks }
-  const slice = allWeeks.slice(0, retainWeeks)
-  const weeks = slice.map(wk => {
-    const week = safeData.weeks[wk] || {}
-    const itemNames = Object.keys(week)
-    const items = itemNames.map(name => {
-      const rec = week[name] || {}
-      const info = statusInfo(rec.status)
-      return {
-        name,
-        status: rec.status || 'not_started',
-        notes: (rec.notes || '').trim(),
-        ...(rec.goal ? { goal: rec.goal } : {}),
-        statusLabel: info.label,
-        statusCls: info.cls,
-      }
-    })
-    return { label: wk, items, empty: !itemNames.length }
-  })
-  return { state: 'normal', retainWeeks, weeks }
+export function buildPracticeLogPlanVM(customItems, weekRecord, weekLabel, isNext = false) {
+  const entries = Object.entries(weekRecord || {}).filter(([, record]) => hasPracticeLogEntry(record))
+  const planned = new Map(entries)
+  const names = [...new Set([...(customItems || []), ...planned.keys()])]
+  const items = names.filter(name => planned.has(name)).map(name => ({
+    ...projectItem(name, planned.get(name)),
+    removable: (customItems || []).includes(name) && !PRACTICE_LOG_DEFAULT_ITEMS.includes(name),
+  }))
+  return {
+    weekLabel, dates: practiceWeekDates(weekLabel), isNext, items,
+    done: items.filter(item => item.status === 'done').length,
+    available: names.filter(name => !planned.has(name)),
+  }
+}
+
+export function buildPracticeLogHistoryVM(data, currentWeek = '') {
+  const retainWeeks = Math.max(1, parseInt(data?.historyRetainWeeks, 10) || PRACTICE_LOG_DEFAULT_RETAIN)
+  const pastLabels = Object.keys(data?.weeks || {}).filter(label => !currentWeek || label < currentWeek)
+  const weeks = pastLabels.sort().reverse().flatMap(label => {
+    const items = Object.entries(data.weeks[label] || {})
+      .filter(([, record]) => hasPracticeLogEntry(record))
+      .map(([name, record]) => projectItem(name, record))
+    return items.length ? [{
+      label, dates: practiceWeekDates(label), items, done: items.filter(item => item.status === 'done').length,
+    }] : []
+  }).slice(0, retainWeeks)
+  return { state: weeks.length ? 'normal' : 'empty', retainWeeks, weeks }
 }

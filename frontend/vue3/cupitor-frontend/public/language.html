@@ -728,37 +728,40 @@
             </div>
             <p id="vocabPendingHint" role="status" style="display:none;"></p>
         </div>
-        <div id="practiceLogDialog" title="Practice Log / Schedule" style="display: none;">
-            <div class="practice-log-tabs">
-                <button type="button" id="practiceLogReminders" class="lang-tool-btn">Reminders</button>
-                <button type="button" class="practice-log-tab" data-tab="current">Current week</button>
+        <div id="practiceLogDialog" title="Practice Log" style="display: none;">
+            <button type="button" id="practiceLogReminders" class="practice-log-ghost" aria-label="Reminders">
+                <i class="fas fa-bell" aria-hidden="true"></i> <span>Reminders</span>
+            </button>
+            <nav class="practice-log-tabs" aria-label="Practice Log views">
+                <button type="button" class="practice-log-tab" data-tab="current" aria-current="page">This week</button>
                 <button type="button" class="practice-log-tab" data-tab="next">Next week</button>
                 <button type="button" class="practice-log-tab" data-tab="history">History</button>
-            </div>
+            </nav>
             <section id="practiceReminderSettings" hidden></section>
-            <div id="practiceLogWeekLabel" class="practice-log-week-label"></div>
-            <div id="practiceLogPlanView" class="practice-log-plan">
+            <section id="practiceLogPlanView" aria-label="Weekly goals">
+                <div id="practiceLogWeekLabel" class="practice-log-week-label"></div>
                 <div id="practiceLogItems"></div>
-                <div class="practice-log-add-row">
-                    <input type="text" id="practiceLogNewItemName" placeholder="Add custom item (e.g. Pronunciation, Watching news)…" style="flex:1;">
-                    <button type="button" id="practiceLogAddItemBtn" class="lang-tool-btn">Add</button>
-                </div>
-            </div>
-            <div id="practiceLogHistoryView" class="practice-log-history" style="display:none;">
-                <div class="practice-log-history-config">
-                    <label title="How many weeks to keep in history. Older weeks are pruned the next time you Save & Push. Default 100.">Keep last
-                        <input type="number" id="practiceLogHistoryWeeks" min="1" max="9999" value="100" style="width:60px;">
-                        weeks of history
+                <button type="button" id="practiceLogAddItemBtn" class="practice-log-add">
+                    <i class="fas fa-plus" aria-hidden="true"></i> Add a goal
+                </button>
+            </section>
+            <section id="practiceLogHistoryView" aria-label="Past weeks" style="display:none;">
+                <details class="practice-log-history-config">
+                    <summary><i class="fas fa-cog" aria-hidden="true"></i> History settings</summary>
+                    <label>Weeks to keep
+                        <input type="number" id="practiceLogHistoryWeeks" min="1" max="9999" value="100" inputmode="numeric">
                     </label>
-                </div>
+                </details>
                 <div id="practiceLogHistoryList"></div>
-            </div>
+            </section>
             <div class="practice-log-actions">
-                <button type="button" id="practiceLogSaveBtn" class="lang-tool-btn">Save &amp; Push</button>
-                <button type="button" id="practiceLogCloseBtn" class="lang-tool-btn">Close</button>
-                <span id="practiceLogPendingHint" style="display:none;font-size:0.75em;color:#a06000;margin-left:8px;">unsaved changes pending — Save &amp; Push to commit</span>
-                <span id="practiceLogStatus" style="font-size:0.75em;color:#666;margin-left:8px;"></span>
+                <div class="practice-log-save-state" role="status">
+                    <span id="practiceLogPendingHint">Saved on this device</span>
+                    <span id="practiceLogStatus"></span>
+                </div>
+                <button type="button" id="practiceLogSaveBtn" class="practice-log-secondary">Sync</button>
             </div>
+            <dialog id="practiceLogEditor" class="practice-log-editor" aria-labelledby="practiceLogEditorTitle"></dialog>
         </div>
 
         <div id="localMedia" style="float: left; margin-top: 1.5em;">
