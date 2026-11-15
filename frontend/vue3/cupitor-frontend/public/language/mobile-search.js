@@ -42,6 +42,7 @@ export function wireMobileSearch() {
       else anchor.after(control)
     }
     document.getElementById('searchVocabularyMenu').style.display = 'none'
+    document.getElementById('searchVocabularyByPrefixBtn').setAttribute('aria-expanded', 'false')
     document.querySelectorAll('#vocabularyResult .search-related').forEach(group => { group.open = !mobile.matches })
   }
   mobile.addEventListener('change', updateLayout)

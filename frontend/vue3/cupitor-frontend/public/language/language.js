@@ -3861,7 +3861,7 @@ function getTopOffsetForCollapseButton() {
 }
 
 function updateToggleButton(button, newState) {
-  const targetView = $('#' + button.data('viewId'));
+  button.filter('[aria-controls]').attr('aria-expanded', String(newState === 'expanded'))
 
   if (newState === 'expanded') {
     button.find('svg[data-role="collapseUpSign"]').show()
@@ -4031,21 +4031,33 @@ $('document').ready(e => {
   })
   wireMobileSearch()
 
-  $('#searchVocabularyByPrefixBtn').click(e => {
+  const $searchOptionsButton = $('#searchVocabularyByPrefixBtn')
+  const setSearchOptionsOpen = open => {
+    $('#searchVocabularyMenu').toggle(open)
+    $searchOptionsButton.attr('aria-expanded', String(open))
+  }
+  $searchOptionsButton.click(e => {
     e.stopPropagation()
-    $('#searchVocabularyMenu').toggle()
+    setSearchOptionsOpen($searchOptionsButton.attr('aria-expanded') !== 'true')
   })
   $('#searchVocabularyMenu').on('click', '.search-vocab-menu-item', e => {
     const mode = $(e.currentTarget).data('mode')
-    $('#searchVocabularyMenu').hide()
+    setSearchOptionsOpen(false)
+    if ($searchOptionsButton.is(':visible')) $searchOptionsButton.trigger('focus')
     if (mode === 'prefix') searchVocabularyByPrefix()
     else if (mode === 'similar') searchVocabularyBySimilarity()
     else if (mode === 'rerun') searchTextChanged()
   })
   $(document).on('click', e => {
     if (!$(e.target).closest('#searchVocabularyMenu, #searchVocabularyByPrefixBtn').length) {
-      $('#searchVocabularyMenu').hide()
+      setSearchOptionsOpen(false)
     }
+  })
+  $('.search-vocab-popover-wrap').on('keydown', e => {
+    if (e.key !== 'Escape' || $searchOptionsButton.attr('aria-expanded') !== 'true') return
+    e.stopPropagation()
+    setSearchOptionsOpen(false)
+    $searchOptionsButton.trigger('focus')
   })
 
   $('#rewindBtn').click(rewind)
@@ -9383,12 +9395,6 @@ async function render(searchResults, search, className, token) {
   // populate phase so the result area never goes blank mid-search.
   $result.html('<div style="color:grey;padding:6px;">Loading…</div>')
   _ensureLibrarySearchBar()
-
-  if (className === "secondary") {
-    $result.css({backgroundColor: '#e3cece'})
-  } else {
-    $result.css({backgroundColor: 'white'})
-  }
 
   const searchResultsFiltered = _filterSearchChannels(filterByLanguage(searchResults));
 

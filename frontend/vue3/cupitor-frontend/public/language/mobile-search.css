@@ -35,12 +35,65 @@
 .lang-toolbar button[aria-disabled="true"] { color: var(--search-muted); opacity: .62; cursor: default; }
 
 #mobileSearchNav, .search-source-check, .mobile-search-label, .mobile-search-icon, .mobile-search-language,
-.mobile-action-label, .mobile-select-clips-label, .mobile-translation-label,
-.mobile-subtitle-title, #mobileSearchSources, .mobile-vocab-title { display: none; }
+.mobile-action-label, .mobile-translation-label,
+.desktop-control-icon, #mobileSearchSources { display: none; }
 
 .search-vocabulary-category { color: #666; font-size: .75em; margin-inline-start: 6px; }
 .search-prefixes-label { font-size: .85em; color: #666; margin: 8px 0 4px; }
 .search-results { overflow: scroll; height: 85%; clear: both; }
+
+.mobile-vocab-title, .mobile-subtitle-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--search-heading);
+    margin: 0 0 8px;
+}
+#result #searchPlaylistToolbar .mobile-subtitle-title { margin: 0 auto 0 0; }
+.mobile-select-clips-label { display: inline; font-weight: 600; }
+#vocabularyResult { border: 0; margin: 0 0 8px; }
+#vocabularyResult:empty { display: none; }
+#vocabularyResult .similar-segment-header.highlighted {
+    background: #fbf5e7;
+    color: var(--search-ink);
+    border: 1px solid #e6d8b8;
+    border-radius: 10px;
+    overflow-wrap: anywhere;
+}
+#vocabularyResult .vocabulary-line mark { color: var(--search-ink); background: #f5e6b8; padding: 0; }
+#subtitleSearchStatus { color: var(--search-muted); margin: 8px 0; }
+#subtitleSearchStatus .subtitle-search-status-text { color: inherit; font-size: .875rem; }
+#result #searchPlaylistToolbar { margin-block: 6px 10px; width: 100%; }
+#result .subtitle-result-group { background: #fff; border: 1px solid var(--search-divider); border-bottom: 0; }
+#result .subtitle-result-group:first-of-type { border-radius: 10px 10px 0 0; }
+#result .subtitle-result-group:last-of-type { border-bottom: 1px solid var(--search-divider); border-radius: 0 0 10px 10px; }
+#result .subtitle-result-group:first-of-type:last-of-type { border-radius: 10px; }
+#result .subtitle-result-group .l-accordion {
+    border-radius: inherit;
+    color: var(--search-ink);
+    margin: 0;
+    padding: 0;
+    font-size: 1rem;
+}
+#result .subtitle-result-group .match-count {
+    flex: none;
+    border-radius: 6px;
+    padding: 2px 7px;
+    color: var(--search-muted);
+    background: #ecf3ef;
+    margin-inline-start: auto;
+}
+#result .subtitle-result-toggle .subtitle-result-word { color: inherit; font-weight: 600; }
+#result .subtitle-result-group .similar-chevron { order: 2; color: var(--search-accent); }
+
+.search-source-chip input:checked + .search-source-face .search-source-check {
+    display: inline-block;
+    flex: none;
+    width: 6px;
+    height: 10px;
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    transform: translateY(-1px) rotate(45deg);
+}
 
 :is(.lang-header, .lang-search-row, #resultContainer, #mobileSearchNav, .search-sheet, #searchHistoryPanel) :focus-visible {
     outline: 2px solid var(--search-accent);
@@ -136,24 +189,221 @@ body:has(.search-sheet[open]) { overflow: hidden; }
 }
 
 @media (min-width: 1000px) {
-    .lang-toolbar {
-        grid-template-columns: auto minmax(0, 1fr) auto auto;
-        grid-template-areas:
-            "brand brand brand history"
-            "previous controls controls next"
-            "sources sources shortcuts shortcuts"
-            "return return return return";
+    body:not(.rec-playing,.practice-mode,.local-media-mode,.youtube-media-mode) {
+        background: var(--search-paper);
     }
-    .search-related > summary { display: none; }
-    @container (min-width: 680px) {
+    #languageColumns {
+        display: flex;
+        align-items: flex-start;
+        gap: 24px;
+        box-sizing: border-box;
+        max-width: 1264px;
+        margin-inline: auto;
+        padding: 8px clamp(12px, 2vw, 24px) 0;
+    }
+    #languageColumns > .fl-left { flex: 3 1 0; min-width: 0; }
+    #subtitleColumn {
+        flex: 2 1 0;
+        min-width: 0;
+        left: auto !important;
+        padding-inline-start: 18px;
+        border-inline-start: 1px solid var(--search-divider);
+    }
+    #subtitleColumn:not(:has(
+        #sv-sub:not(:empty), #en-sub:not(:empty), #subtitle-timestamp:not(:empty),
+        #mediaRelatedContainer:not([style*="display: none"]), #subControls:not([style*="display: none"])
+    )) { display: none; }
+
+    .lang-toolbar {
+        grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+        grid-template-areas:
+            "brand previous next history"
+            "shortcuts shortcuts shortcuts shortcuts"
+            "sources sources controls controls"
+            "return return return return";
+        gap: 8px 6px;
+        padding-block: 0 10px;
+        border-bottom: 1px solid var(--search-divider);
+    }
+    .search-brand { font-size: 1.35rem; }
+    .lang-toolbar :is(.lang-tool-btn, .search-header-button), #searchVocabularyByPrefixBtn {
+        justify-content: center;
+        min-width: 36px;
+        min-height: 36px;
+        border-radius: 8px;
+        background: #fff;
+        color: var(--search-ink);
+        border: 1px solid var(--search-divider);
+    }
+    .search-brand #searchHelpBtn { border-color: transparent; background: transparent; color: var(--search-accent); }
+    .lang-toolbar :is(.lang-tool-btn, .search-header-button):not(:disabled,[aria-disabled="true"]):hover,
+    #searchVocabularyByPrefixBtn:is(:hover,[aria-expanded="true"]) {
+        background: var(--search-active);
+        color: var(--search-accent);
+    }
+    .lang-toolbar #nextSearchBtn { margin-inline-start: -6px; border-radius: 0 8px 8px 0; }
+    .lang-toolbar #prevSearchBtn { border-radius: 8px 0 0 8px; border-inline-end: 0; }
+    .lang-header .lang-toolbar-center {
+        justify-content: end;
+        flex-wrap: wrap;
+        border: 0;
+        padding: 0;
+    }
+    .desktop-control-icon { display: inline; }
+    .lang-toolbar-center :is(#toggleMainControl, #toggleResultContainer) svg { display: none !important; }
+    .lang-toolbar-center :is(#toggleMainControl, #toggleResultContainer, #cupPageFindToggle)[aria-expanded="true"] {
+        border-color: var(--search-border);
+        background: var(--search-active);
+        color: var(--search-accent);
+    }
+    .lang-header-shortcuts {
+        grid-area: shortcuts;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+    }
+    .lang-header-shortcuts button { font-weight: 600; gap: 7px; padding-inline: 10px; }
+    .lang-header-shortcuts button:disabled { cursor: default; opacity: .55; }
+    #practiceLogFrontBanner { display: none !important; }
+    .lang-header-shortcuts i { color: var(--search-accent); }
+    .lang-toolbar #headerPracticeLogBtn.practice-log-needs-attention {
+        animation: none;
+        background: #fbf5e7 !important;
+        color: #644714 !important;
+        border-color: #c0a16b;
+    }
+    .lang-toolbar #headerPracticeLogBtn.practice-log-needs-attention i { color: inherit; }
+
+    @container (min-width: 52rem) {
         .lang-toolbar {
-            grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+            grid-template-columns: minmax(0, 1fr) repeat(4, auto);
             grid-template-areas:
-                "brand brand brand brand history"
-                "previous sources controls shortcuts next"
+                "brand previous next history shortcuts"
+                "sources sources controls controls controls"
                 "return return return return return";
         }
+        .lang-header-shortcuts { justify-self: end; margin-inline-start: 8px; }
     }
+    @container (max-width: 32rem) {
+        .lang-toolbar { grid-template-areas:
+            "brand previous next history"
+            "shortcuts shortcuts shortcuts shortcuts"
+            "sources sources sources sources"
+            "controls controls controls controls"
+            "return return return return"; }
+        .lang-header .lang-toolbar-center { justify-content: start; }
+    }
+
+    .lang-header .search-source-chips { justify-self: start; gap: 6px; margin: 0; }
+    .lang-header .search-source-chip {
+        flex: 0 0 auto;
+        min-height: 32px;
+        padding: 3px 10px;
+        color: var(--search-muted);
+        border-color: var(--search-border);
+        background: #fff;
+    }
+    .lang-header .search-source-chip:is(:hover,:has(input:checked)) {
+        color: var(--search-accent);
+        border-color: var(--search-accent);
+        background: var(--search-active);
+    }
+    .search-source-chip:has(input:focus-visible) { outline-color: var(--search-accent); }
+    .lang-header .search-source-chip:has(input:checked)::before { display: none; }
+    .lang-header .search-source-face { display: flex; align-items: center; gap: 6px; }
+
+    .lang-search-row { gap: 8px; margin-block: 12px 16px; }
+    .mobile-search-label { display: block; margin: 0; font-size: .875rem; font-weight: 600; color: var(--search-muted); }
+    .mobile-search-icon { display: block; position: absolute; inset-inline-start: 13px; color: var(--search-muted); pointer-events: none; }
+    .lang-search-input-wrap, .lang-search-input { min-width: 0; }
+    .lang-search-input-wrap .lang-search-input {
+        min-height: 42px;
+        padding-inline: 38px 40px;
+        border-color: var(--search-border);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--search-ink);
+        font-size: 1rem;
+    }
+    .lang-search-input-clear, .lang-search-input-clear:hover {
+        inset-inline-end: 5px;
+        width: 30px;
+        height: 30px;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--search-accent);
+        font-size: 1.3rem;
+    }
+    .lang-search-input-clear:hover { background: var(--search-active); }
+    #searchVocabularyByPrefixBtn { min-height: 42px; border-color: var(--search-border); }
+    #searchVocabularyByPrefixBtn i { margin-inline-end: 5px; color: var(--search-accent); }
+    .search-vocab-menu { min-width: 160px; border-color: var(--search-divider); border-radius: 8px; }
+    .search-vocab-menu-item { padding: 7px 9px; border: 0; background: transparent; }
+    .search-vocab-menu-item:hover { background: var(--search-active); }
+    .lang-select-with-toggle > :is(.toggle, #toggleLangCb) { display: none !important; }
+    .lang-select-with-toggle .select2-selection--single,
+    .lang-select-with-toggle #searchedWords:not(.select2-hidden-accessible),
+    #searchLanguageSelect {
+        min-height: 36px;
+        height: auto;
+        color: var(--search-ink);
+        background: #fff;
+        border: 1px solid var(--search-border);
+        border-radius: 8px;
+    }
+    .lang-select-with-toggle .select2-selection--single { display: flex; align-items: center; }
+    .lang-select-with-toggle .select2-selection--single .select2-selection__rendered { width: 100%; padding-inline: 10px 25px; color: inherit; }
+    .lang-select-with-toggle .select2-selection--single .select2-selection__placeholder { color: var(--search-muted); }
+    .lang-select-with-toggle .select2-selection--single .select2-selection__arrow { top: 50%; transform: translateY(-50%); }
+    .mobile-search-language { display: flex; position: relative; align-items: center; margin: 0; }
+    .mobile-search-language i { position: absolute; inset-inline-start: 10px; color: var(--search-accent); pointer-events: none; }
+    #searchLanguageSelect { padding-inline: 32px 6px; }
+    .vocabulary-picker-open > .mobile-search-language { display: none; }
+    .vocabulary-picker-open .select2-selection--single { border-color: var(--search-accent); background: var(--search-active); }
+    .search-vocabulary-dropdown.select2-dropdown { border-color: var(--search-border); border-radius: 8px; }
+    .search-vocabulary-dropdown .select2-results__option--highlighted[aria-selected] { background: var(--search-active); color: var(--search-ink); }
+
+    #vocabularyResult .vocabulary-segment { border-color: var(--search-divider); margin: 0 0 10px; }
+    #vocabularyResult .vocabulary-segment-content { margin-block: 0 10px; }
+    #vocabularyResult .similar-segment-header.highlighted { min-height: 42px; padding: 8px 12px; flex-wrap: wrap; }
+    #vocabularyResult .similar-chevron { color: var(--search-accent); }
+    .search-vocabulary-category, .search-prefixes-label { color: var(--search-muted); }
+    .search-related > summary { display: none; }
+    #vocabularyResult .prefix-group-header {
+        min-height: 34px;
+        border: 1px solid var(--search-divider);
+        border-radius: 8px;
+        background: #fff;
+        padding-inline: 10px;
+    }
+    #vocabularyResult .prefix-group-part { color: var(--search-accent); }
+    #translationPanel { background: #f3f8f5; border-color: var(--search-divider); border-radius: 8px; }
+    #translationSlot .xl-summary :is(.xl-dir, .xl-n) { color: var(--search-accent); }
+    #result #searchPlaylistToolbar button {
+        min-height: 32px;
+        padding: 3px 10px;
+        gap: 6px;
+        border-color: var(--search-border);
+        border-radius: 8px;
+        color: var(--search-accent);
+        background: #fff;
+        font-size: .8125rem;
+    }
+    #result { max-height: 75vh; max-height: 75dvh; }
+    #result #searchPlaylistToolbar button:is(:hover,[aria-pressed="true"]) { background: var(--search-active); }
+    #result #searchPlaylistCreateBtn { width: 32px; padding: 0; }
+    #result .subtitle-result-group .l-accordion { min-height: 38px; }
+    #result .subtitle-result-toggle { color: inherit; border-radius: inherit; }
+    #result .subtitle-result-toggle:hover { background: #f3f8f5; }
+    #result .sub-lines-cntnr .main-line { color: var(--search-ink); }
+    #result .sub-lines-cntnr .secondary-line { color: var(--search-muted); }
+    #result .sub-lines-cntnr .line:nth-child(even) { background: #f3f8f5; }
+    #result .sub-lines-cntnr .highlight { background: #f5e6b8; color: var(--search-ink); }
+    #result .sub-lines-cntnr > div { min-width: 0; overflow-wrap: anywhere; }
+    #result .sub-lines-cntnr > div:first-child { border-color: var(--search-divider) !important; }
+    #result .subtitle-result-group .no-result { color: var(--search-muted); }
+    #result .subtitle-result-group .srt-guess-only { opacity: 1; color: var(--search-muted); }
 }
 @media (max-width: 999px) {
     body:not(.rec-playing,.practice-mode,.local-media-mode,.youtube-media-mode) {
@@ -341,15 +591,6 @@ body:has(.search-sheet[open]) { overflow: hidden; }
         border-color: currentColor;
         font-weight: 700;
     }
-    .search-source-chip input:checked + .search-source-face .search-source-check {
-        display: block;
-        flex: none;
-        width: 6px;
-        height: 10px;
-        border: solid currentColor;
-        border-width: 0 2px 2px 0;
-        transform: translateY(-1px) rotate(45deg);
-    }
     .search-source-chip:has(input:focus-visible) { outline-color: var(--search-accent); }
 
     #mobileSearchNav {
@@ -414,15 +655,6 @@ body:has(.search-sheet[open]) { overflow: hidden; }
         padding-bottom: max(16px, env(safe-area-inset-bottom));
     }
 
-    #vocabularyResult { border: 0; margin: 0 0 8px; }
-    #vocabularyResult:empty { display: none; }
-    .mobile-vocab-title, .mobile-subtitle-title {
-        display: block;
-        font-size: 1.125rem;
-        font-weight: 700;
-        color: var(--search-heading);
-        margin: 0 0 8px;
-    }
     #vocabularyResult .vocabulary-segment { border: 0; margin: 0 0 8px; }
     #vocabularyResult .vocabulary-segment-content { margin: 0; }
     #vocabularyResult .similar-segment-header.highlighted {
@@ -430,12 +662,8 @@ body:has(.search-sheet[open]) { overflow: hidden; }
         flex-wrap: wrap;
         min-height: 54px;
         padding: 10px 12px;
-        border: 1px solid #e6d8b8;
         border-radius: 12px;
-        background: #fbf5e7;
-        color: var(--search-ink);
         font-size: 1.0625rem;
-        overflow-wrap: anywhere;
     }
     #vocabularyResult .similar-segment-header > .similar-chevron { order: 3; color: var(--search-accent); margin-inline-start: auto; }
     #vocabularyResult .similar-segment-header > .search-vocabulary-category {
@@ -445,7 +673,6 @@ body:has(.search-sheet[open]) { overflow: hidden; }
         color: var(--search-muted);
         font-size: .875rem;
     }
-    #vocabularyResult .vocabulary-line mark { color: var(--search-ink); background: #f5e6b8; padding: 0; }
     #vocabularyResult .prefix-group-header { min-height: 44px; }
     .search-related > summary, #translationSlot #translationPanel .xl-summary {
         display: flex;
@@ -486,10 +713,7 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     #translationPanel:not([open]) .xl-summary :is(.xl-dir, .xl-word) { display: none; }
     #translationSlot .xl-n { color: var(--search-accent); background: var(--search-active); padding: 2px 7px; border-radius: 6px; }
 
-    #subtitleSearchStatus { color: var(--search-muted); margin: 8px 0; }
-    #subtitleSearchStatus .subtitle-search-status-text { color: inherit; font-size: .875rem; }
-    #result #searchPlaylistToolbar { justify-content: flex-start; margin-block: 6px 10px; width: 100%; }
-    #result #searchPlaylistToolbar .mobile-subtitle-title { margin: 0 auto 0 0; }
+    #result #searchPlaylistToolbar { justify-content: flex-start; }
     #result #searchPlaylistToolbar button {
         min-width: 44px;
         min-height: 44px;
@@ -520,22 +744,8 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     }
     #result #searchPlaylistSelectBtn[aria-pressed="true"]::before { box-shadow: inset 0 0 0 1px var(--search-accent); }
     #result #searchPlaylistSelectBtn svg { width: 14px; height: 14px; }
-    .mobile-select-clips-label { display: inline; font-weight: 600; }
     #result #searchPlaylistActions { flex: 0 0 100%; justify-content: flex-end; }
-    #result .subtitle-result-group { background: #fff; border: 1px solid var(--search-divider); border-bottom: 0; }
-    #result .subtitle-result-group:first-of-type { border-radius: 12px 12px 0 0; }
-    #result .subtitle-result-group:last-of-type { border-bottom: 1px solid var(--search-divider); border-radius: 0 0 12px 12px; }
-    #result .subtitle-result-group .l-accordion { min-height: 44px; color: var(--search-ink); margin: 0; padding: 0; font-size: 1rem; }
-    #result .subtitle-result-group .match-count {
-        flex: none;
-        border-radius: 6px;
-        padding: 2px 7px;
-        color: var(--search-muted);
-        background: #ecf3ef;
-        margin-inline-start: auto;
-    }
-    #result .subtitle-result-toggle .subtitle-result-word { color: inherit; font-weight: 600; }
-    #result .subtitle-result-group .similar-chevron { order: 2; color: var(--search-accent); }
+    #result .subtitle-result-group .l-accordion { min-height: 44px; }
     #result .subtitle-result-group .active .similar-chevron { transform: rotate(90deg); }
     #result .subtitle-result-group :is(.search-playlist-choice, .search-playlist-item-choice) { min-height: 44px; }
 }
