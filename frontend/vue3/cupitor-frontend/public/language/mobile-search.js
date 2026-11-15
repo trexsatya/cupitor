@@ -62,6 +62,7 @@ export function wireMobileSearch() {
     document.getElementById('mobileSearchToolsBtn').focus({ preventScroll: true })
   }, true)
 
+  watchSearchKeyboard(mobile)
   const nav = document.getElementById('mobileSearchNav')
   new ResizeObserver(() => {
     const height = nav.getBoundingClientRect().height
@@ -75,4 +76,35 @@ export function wireMobileSearch() {
     if (e.detail === 0) document.getElementById('searchText').focus()
     else window.scrollTo(0, 0)
   })
+}
+
+// WebViews can resize the layout viewport for the keyboard. Browsers may
+// resize only the visual viewport, so listen to both and account for zoom.
+function watchSearchKeyboard(mobile) {
+  const touch = window.matchMedia('(pointer: coarse)')
+  const viewport = window.visualViewport
+  const height = () => viewport ? viewport.height * viewport.scale : window.innerHeight
+  let previousWidth = window.innerWidth
+  let restingHeight = height()
+
+  function update() {
+    const field = document.activeElement
+    const editing = mobile.matches && touch.matches && field?.matches(
+      'textarea:not([readonly]), [contenteditable]:not([contenteditable="false"]), ' +
+      'input:not([readonly]):is([type="text"], [type="search"], [type="url"], [type="email"], ' +
+      '[type="tel"], [type="password"], [type="number"], :not([type]))'
+    )
+    const visibleHeight = height()
+    if (previousWidth !== window.innerWidth || !editing || visibleHeight > restingHeight) {
+      previousWidth = window.innerWidth
+      restingHeight = visibleHeight
+    }
+    // Minor browser chrome changes should not hide the search navigation.
+    document.body.classList.toggle('search-keyboard-open', !!editing && restingHeight - visibleHeight >= 100)
+  }
+
+  document.addEventListener('focusin', update)
+  document.addEventListener('focusout', () => requestAnimationFrame(update))
+  window.addEventListener('resize', update)
+  viewport?.addEventListener('resize', update)
 }

@@ -58,6 +58,18 @@ async function checkHeader(page, mobile) {
     await language.selectOption('sv')
     await page.waitForFunction(() => window._subtitleSearchCompletion?.complete && document.querySelector('#searchLoadingOverlay').hidden)
 
+    const sourceRows = () => page.locator('#searchSourceChips label').evaluateAll(labels => {
+      const rows = new Map()
+      for (const label of labels) {
+        const top = label.getBoundingClientRect().top
+        rows.set(top, (rows.get(top) || 0) + 1)
+      }
+      return [...rows.values()]
+    })
+    await page.setViewportSize({ width: 350, height: 800 })
+    assert.deepEqual(await sourceRows(), [4], 'the four filters fit on an ordinary phone')
+    assert.equal(await page.locator('#subtitle-container').isVisible(), false, 'idle captions take no space')
+    assert.equal(await page.locator('#subtitleColumn').evaluate(el => getComputedStyle(el).borderLeftWidth), '0px')
     await page.setViewportSize({ width: 320, height: 700 })
     await page.locator('html').evaluate(el => { el.style.fontSize = '20px' })
     try {
@@ -67,6 +79,7 @@ async function checkHeader(page, mobile) {
       }))
       assert.ok(sizes.every(({ width, height }) => width >= 44 && height >= 44), 'all nav buttons accommodate touch')
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320, 'large text reflows at 320px')
+      assert.deepEqual(await sourceRows(), [2, 2], 'larger text keeps the two rows balanced')
     } finally {
       await page.locator('html').evaluate(el => { el.style.fontSize = '' })
       await page.setViewportSize({ width: 390, height: 900 })

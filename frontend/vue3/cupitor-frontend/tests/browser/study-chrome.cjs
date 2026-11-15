@@ -222,7 +222,13 @@ async function checkStudyChrome(browser) {
       await page.keyboard.press('s')
       await page.locator('#practiceMode .practice-topbar').waitFor({ state: 'visible' })
       await page.locator('#practiceMode .practice-minimize').click()
-      assert.equal(await page.locator('#practiceMode .practice-restore').isVisible(), true)
+      const restore = page.locator('#practiceMode .practice-restore')
+      assert.equal(await restore.isVisible(), true)
+      if (mobile) {
+        const pill = await restore.boundingBox()
+        const dock = await page.locator('#mobileSearchNav').boundingBox()
+        assert.ok(pill && dock && pill.y + pill.height <= dock.y - 8, 'minimized Practice clears the bottom bar')
+      }
       assert.equal(await page.locator('#studyControlsWakeSurface').isVisible(), false)
       await checkHost(true)
       await page.locator('#practiceMode .practice-restore-btn').click()
