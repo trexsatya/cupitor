@@ -12,6 +12,13 @@ async function check(browser, mobile) {
   const errors = []
   page.on('pageerror', e => errors.push(e.message))
   page.setDefaultTimeout(15000)
+  const waitForReady = async () => {
+    // The language module awaits IndexedDB during startup, even after network idle.
+    await page.waitForFunction(() => Boolean(
+      window._appSettings && window._vocabularyReadyPromise && window._subtitlesReadyPromise
+    ))
+    await page.evaluate(() => Promise.all([window._vocabularyReadyPromise,window._subtitlesReadyPromise]))
+  }
   try {
     await page.route('**/*', serveFixtures)
     await page.addInitScript(() => {
@@ -34,8 +41,8 @@ async function check(browser, mobile) {
       Object.defineProperty(window,'speechSynthesis',{configurable:true,value:synth})
       Object.defineProperty(window,'SpeechSynthesisUtterance',{configurable:true,value:Utterance})
     })
-    await page.goto('http://127.0.0.1:3000/language.html', {waitUntil:'networkidle'})
-    await page.evaluate(() => Promise.all([window._vocabularyReadyPromise,window._subtitlesReadyPromise]))
+    await page.goto('http://127.0.0.1:3000/language.html', {waitUntil:'domcontentloaded'})
+    await waitForReady()
     const read = () => page.evaluate(() => window.__ttsSpoken.slice())
     const card = {id:'tts-silent-manual',manual:true,source:'Hej världen',target:'Hello world',_temporary:true}
     await page.evaluate(card => {
@@ -147,8 +154,8 @@ async function check(browser, mobile) {
     assert.equal(await targetLanguage.inputValue(), 'sv-SE')
     await saveEditor('Save')
     await page.evaluate(() => window.cupitorUserData.flush())
-    await page.reload({waitUntil:'networkidle'})
-    await page.evaluate(() => Promise.all([window._vocabularyReadyPromise,window._subtitlesReadyPromise]))
+    await page.reload({waitUntil:'domcontentloaded'})
+    await waitForReady()
     await editQuiz()
     assert.equal(await sourceLanguage.inputValue(), 'es-ES', 'Swapped language survives reload')
     assert.equal(await targetLanguage.inputValue(), 'sv-SE')

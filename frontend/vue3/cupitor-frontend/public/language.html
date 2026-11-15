@@ -252,6 +252,29 @@
                             <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
                         </svg>
                     </button>
+                    <!-- Next search -->
+                    <button class="lang-tool-btn lang-tool-btn--icon" id="nextSearchBtn" title="Next search (hold for the list)" aria-label="Next search">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708"/>
+                        </svg>
+                    </button>
+                    <button type="button" id="searchHistoryBtn" class="search-header-button" title="Recent searches" aria-label="Recent searches" aria-controls="searchHistoryPanel" aria-expanded="false">
+                        <i class="fas fa-history" aria-hidden="true"></i>
+                    </button>
+                    <div class="lang-header-shortcuts" role="group" aria-label="Study tools">
+                        <button type="button" id="headerPlaylistsBtn" class="lang-tool-btn lang-tool-btn--icon" title="Playlists" aria-label="Playlists">
+                            <i class="fas fa-list-ul" aria-hidden="true"></i><span>Playlists</span>
+                        </button>
+                        <button type="button" id="headerWordMapsBtn" class="lang-tool-btn lang-tool-btn--icon" onclick="openWordMaps()" title="Word Maps" aria-label="Word Maps">
+                            <i class="fas fa-project-diagram" aria-hidden="true"></i><span>Word Maps</span>
+                        </button>
+                        <button type="button" id="headerPracticeLogBtn" class="lang-tool-btn lang-tool-btn--icon" onclick="openPracticeLogDialog()" title="Practice Log" aria-label="Practice Log">
+                            <i class="fas fa-clipboard-list" aria-hidden="true"></i><span>Practice Log</span>
+                        </button>
+                        <button type="button" id="headerAddToVocabBtn" class="lang-tool-btn lang-tool-btn--icon" onclick="openAddToVocabDialog()" title="Add to Vocabulary" aria-label="Add to Vocabulary" disabled>
+                            <i class="fas fa-book-medical" aria-hidden="true"></i><span>Add to Vocabulary</span>
+                        </button>
+                    </div>
                     <div id="searchSourceChips" class="search-source-chips" role="group" aria-label="Search sources">
                         <label class="search-source-chip"><input type="checkbox" id="includeLibraryInSearchCb"><span class="search-source-face"><i class="search-source-check" aria-hidden="true"></i>Books</span></label>
                         <label class="search-source-chip"><input type="checkbox" id="includeSrtsInSearchCb" checked><span class="search-source-face"><i class="search-source-check" aria-hidden="true"></i>SRTs</span></label>
@@ -274,11 +297,13 @@
                         </button>
                         <!-- Section toggle buttons -->
                         <span class="lang-toolbar-separator"></span>
-                        <button id="toggleMainControl" class="lang-tool-btn lang-tool-btn--icon" title="Toggle controls" data-toggle-state="expanded" data-view-id="mainControlBody">
+                        <button id="toggleMainControl" class="lang-tool-btn lang-tool-btn--icon" title="Toggle search controls" aria-controls="mainControlBody" aria-expanded="true" data-toggle-state="expanded" data-view-id="mainControlBody">
+                            <i class="desktop-control-icon fas fa-sliders-h" aria-hidden="true"></i>
                             <svg width="18" data-role="collapseUpSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
                             <svg width="18" data-role="expandDownSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
                         </button>
-                        <button id="toggleResultContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle results" data-toggle-state="collapsed" data-view-id="resultContainer">
+                        <button id="toggleResultContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle results" aria-controls="resultContainer" aria-expanded="false" data-toggle-state="collapsed" data-view-id="resultContainer">
+                            <i class="desktop-control-icon fas fa-list-alt" aria-hidden="true"></i>
                             <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
                             <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
                         </button>
@@ -293,29 +318,6 @@
                             <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
                         </button>
                     </div>
-                    <div class="lang-header-shortcuts" role="group" aria-label="Study tools">
-                        <button type="button" id="headerPlaylistsBtn" class="lang-tool-btn lang-tool-btn--icon" title="Playlists" aria-label="Playlists">
-                            <i class="fas fa-list-ul" aria-hidden="true"></i><span>Playlists</span>
-                        </button>
-                        <button type="button" id="headerWordMapsBtn" class="lang-tool-btn lang-tool-btn--icon" onclick="openWordMaps()" title="Word Maps" aria-label="Word Maps">
-                            <i class="fas fa-project-diagram" aria-hidden="true"></i><span>Word Maps</span>
-                        </button>
-                        <button type="button" id="headerPracticeLogBtn" class="lang-tool-btn lang-tool-btn--icon" onclick="openPracticeLogDialog()" title="Practice Log" aria-label="Practice Log">
-                            <i class="fas fa-clipboard-list" aria-hidden="true"></i><span>Practice Log</span>
-                        </button>
-                        <button type="button" id="headerAddToVocabBtn" class="lang-tool-btn lang-tool-btn--icon" onclick="openAddToVocabDialog()" title="Add to Vocabulary" aria-label="Add to Vocabulary" disabled>
-                            <i class="fas fa-book-medical" aria-hidden="true"></i><span>Add to Vocabulary</span>
-                        </button>
-                    </div>
-                    <!-- Next search -->
-                    <button class="lang-tool-btn lang-tool-btn--icon" id="nextSearchBtn" title="Next search (hold for the list)" aria-label="Next search">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                            <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708"/>
-                        </svg>
-                    </button>
-                    <button type="button" id="searchHistoryBtn" class="search-header-button" aria-label="Recent searches" aria-controls="searchHistoryPanel" aria-expanded="false">
-                        <i class="fas fa-history" aria-hidden="true"></i>
-                    </button>
                     <button type="button" id="returnToMediaPlayer" class="lang-tool-btn" style="display:none;">Back to player</button>
                 </div>
             </div>
@@ -336,7 +338,7 @@
                             <button type="button" id="searchTextClearBtn" class="lang-search-input-clear" title="Clear" aria-label="Clear" style="display:none;">×</button>
                         </span>
                         <div class="search-vocab-popover-wrap">
-                            <button class="lang-tool-btn" id="searchVocabularyByPrefixBtn" title="Search vocabulary…">…</button>
+                            <button class="lang-tool-btn" type="button" id="searchVocabularyByPrefixBtn" aria-controls="searchVocabularyMenu" aria-expanded="false"><i class="fas fa-sliders-h" aria-hidden="true"></i> Search options</button>
                             <div id="searchVocabularyMenu" class="search-vocab-menu" style="display:none;">
                                 <button type="button" class="lang-tool-btn search-vocab-menu-item" data-mode="prefix">Search by prefix</button>
                                 <button type="button" class="lang-tool-btn search-vocab-menu-item" data-mode="similar">Search Similar</button>
@@ -785,7 +787,7 @@
         </div>
     </div>
 
-    <div style="float: left; left: 2%; width: 40%; position: relative; border-left: 1px solid blue; margin-bottom: 12em;"
+    <div style="float: left; left: 2%; width: 40%; position: relative; margin-bottom: 12em;"
          class="fl-right" id="subtitleColumn">
         <div style="display: none;" id="mediaRelatedContainer">
             <div style="margin-top: 8em; position: absolute; bottom: 0; right: 4em;background-color: springgreen; padding-top: 1rem;" id="mediaControls">

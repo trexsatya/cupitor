@@ -156,27 +156,53 @@ async function checkHeader(page, mobile) {
     return
   }
 
-  const measure = () => page.evaluate(() => {
-    const bounds = selector => {
-      const { top, bottom, left, right } = document.querySelector(selector).getBoundingClientRect()
-      return { top, bottom, left, right }
-    }
-    return {
-      toolbar: bounds('.lang-toolbar'), controls: bounds('.lang-toolbar-center'),
-      chips: bounds('#searchSourceChips'), shortcuts: bounds('.lang-header-shortcuts'),
-    }
-  })
-  const wide = await measure()
-  assert.ok(wide.chips.right <= wide.controls.left && wide.controls.right <= wide.shortcuts.left)
-  assert.ok(wide.shortcuts.top < wide.chips.bottom && wide.chips.top < wide.shortcuts.bottom)
-  await page.setViewportSize({ width: 1000, height: 900 })
-  try {
-    const narrow = await measure()
-    assert.ok(narrow.chips.right <= narrow.shortcuts.left)
-    assert.ok(narrow.shortcuts.right <= narrow.toolbar.right)
-  } finally {
-    await page.setViewportSize({ width: 1280, height: 900 })
+  const assertDesktopLayout = async () => {
+    const layout = await page.evaluate(() => {
+      const bounds = selector => document.querySelector(selector).getBoundingClientRect().toJSON()
+      const shortcuts = [...document.querySelectorAll('.lang-header-shortcuts button span')]
+      return {
+        toolbar: bounds('.lang-toolbar'), controls: bounds('.lang-toolbar-center'),
+        chips: bounds('#searchSourceChips'), shortcuts: bounds('.lang-header-shortcuts'),
+        search: bounds('#searchText'), viewport: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        allLabelsVisible: shortcuts.every(label => label.getBoundingClientRect().width > 0),
+      }
+    })
+    assert.ok(layout.allLabelsVisible, 'desktop shortcuts show their names')
+    assert.ok(layout.shortcuts.bottom <= layout.chips.top && layout.chips.right <= layout.controls.left)
+    assert.ok(layout.controls.right <= layout.toolbar.right && layout.shortcuts.right <= layout.toolbar.right)
+    assert.ok(layout.search.width >= layout.viewport * .7, 'search uses the space freed by the idle caption pane')
+    assert.equal(layout.viewport, layout.scrollWidth, 'desktop layout fits without horizontal scrolling')
   }
+  const captions = page.locator('#subtitleColumn')
+  assert.equal(await captions.isVisible(), false, 'the idle caption pane takes no space')
+  for (const width of [1280, 1000]) {
+    await page.setViewportSize({ width, height: 900 })
+    await assertDesktopLayout()
+  }
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const line = captions.locator('#sv-sub')
+  await line.evaluate(el => { el.textContent = 'En färgsprakande kväll.' })
+  assert.equal(await line.isVisible(), true, 'an active caption opens the split view')
+  assert.ok((await captions.boundingBox()).x > (await page.locator('#searchText').boundingBox()).x)
+  await line.evaluate(el => { el.textContent = '' })
+  await captions.locator('#subControls').evaluate(el => { el.style.display = ''; el.firstElementChild.textContent = '1' })
+  assert.equal(await captions.isVisible(), true, 'subtitle navigation opens the split before a cue arrives')
+  await captions.locator('#subControls').evaluate(el => { el.style.display = 'none'; el.firstElementChild.textContent = '' })
+  assert.equal(await captions.isVisible(), false)
+
+  const options = page.getByRole('button', { name: 'Search options' })
+  await options.press('Enter')
+  assert.equal(await options.getAttribute('aria-expanded'), 'true')
+  await page.keyboard.press('Tab')
+  assert.equal(await page.getByRole('button', { name: 'Search by prefix' }).evaluate(el => el === document.activeElement), true)
+  await page.keyboard.press('Escape')
+  assert.equal(await options.getAttribute('aria-expanded'), 'false')
+  assert.equal(await options.evaluate(el => el === document.activeElement), true)
+
+  assert.equal(await page.getByRole('combobox', { name: 'Search language' }).isVisible(), true)
+  assert.equal(await page.getByRole('heading', { name: 'Subtitle results' }).isVisible(), true)
+  assert.equal(await page.getByRole('button', { name: 'Select clips for a playlist' }).innerText(), 'Select clips')
 
   for (const [button, dialog] of shortcuts) {
     await page.locator('#' + button).click()
