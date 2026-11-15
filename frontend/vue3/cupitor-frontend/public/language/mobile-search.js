@@ -1,3 +1,10 @@
+// Record load before jQuery's ready callback wires the toolbar.
+const pageLoadedAt = new Promise(resolve => {
+  const record = () => resolve(performance.now())
+  if (document.readyState === 'complete') record()
+  else window.addEventListener('load', record, { once: true })
+})
+
 // Keep the same toolbar controls, IDs, and handlers in both layouts.
 export function wireMobileSearch() {
   const mobile = window.matchMedia('(max-width: 999px)')
@@ -62,8 +69,13 @@ export function wireMobileSearch() {
     document.getElementById('mobileSearchToolsBtn').focus({ preventScroll: true })
   }, true)
 
+  wireVocabularyPicker()
   watchSearchKeyboard(mobile)
   const nav = document.getElementById('mobileSearchNav')
+  pageLoadedAt.then(loadedAt => {
+    const delay = Math.max(0, 10000 - (performance.now() - loadedAt))
+    setTimeout(() => nav.classList.add('search-nav-icons-only'), delay)
+  })
   new ResizeObserver(() => {
     const height = nav.getBoundingClientRect().height
     if (height) document.documentElement.style.setProperty('--mobile-search-nav-height', `${height}px`)
@@ -76,6 +88,21 @@ export function wireMobileSearch() {
     if (e.detail === 0) document.getElementById('searchText').focus()
     else window.scrollTo(0, 0)
   })
+}
+
+function wireVocabularyPicker() {
+  const select = document.getElementById('searchedWords')
+  const row = select.closest('.lang-select-with-toggle')
+  window.jQuery(select)
+    .on('select2:opening.mobileSearch', () => row.classList.add('vocabulary-picker-open'))
+    .on('select2:close.mobileSearch', () => row.classList.remove('vocabulary-picker-open'))
+    .on('select2:open.mobileSearch', () => {
+      const dropdown = document.getElementById('select2-searchedWords-results')?.closest('.select2-dropdown')
+      dropdown?.classList.add('search-vocabulary-dropdown')
+      const search = dropdown?.querySelector('.select2-search__field')
+      search?.setAttribute('placeholder', 'Search vocabulary')
+      search?.setAttribute('aria-label', 'Search vocabulary')
+    })
 }
 
 // WebViews can resize the layout viewport for the keyboard. Browsers may

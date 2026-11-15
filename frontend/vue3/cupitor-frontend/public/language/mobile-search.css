@@ -1,6 +1,7 @@
 :root {
     --search-ink: #172a27;
     --search-muted: #475b56;
+    --search-heading: #5b6d66;
     --search-accent: #15564a;
     --search-active: #ddf1e9;
     --search-border: #758b82;
@@ -257,6 +258,42 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     .mobile-search-language i { position: absolute; inset-inline-start: 11px; color: var(--search-accent); pointer-events: none; }
     #searchLanguageSelect { width: 100%; padding-inline: 32px 6px; }
 
+    .vocabulary-picker-open > .mobile-search-language { display: none; }
+    .vocabulary-picker-open .select2-selection--single {
+        background: var(--search-active);
+        border-color: var(--search-accent);
+        color: var(--search-accent);
+    }
+    .vocabulary-picker-open .select2-selection__arrow b {
+        border-color: transparent transparent var(--search-accent);
+    }
+    .search-vocabulary-dropdown.select2-dropdown {
+        border: 1px solid var(--search-border);
+        border-radius: 10px;
+    }
+    .search-vocabulary-dropdown .select2-search--dropdown { padding: 7px; }
+    .search-vocabulary-dropdown .select2-search--dropdown .select2-search__field {
+        min-height: 44px;
+        padding: 6px 36px 6px 10px;
+        border: 1px solid var(--search-border);
+        border-radius: 7px;
+        font-size: 1rem;
+        color: var(--search-ink);
+    }
+    .search-vocabulary-dropdown .select2-search__field:focus {
+        outline: 2px solid var(--search-accent);
+        outline-offset: -2px;
+    }
+    .search-vocabulary-dropdown .select2-results__option {
+        min-height: 44px;
+        padding: 10px;
+        overflow-wrap: anywhere;
+    }
+    .search-vocabulary-dropdown .select2-results__option--highlighted[aria-selected] {
+        background: var(--search-active);
+        color: var(--search-ink);
+    }
+
     #mobileSearchSources {
         display: block;
         container-type: inline-size;
@@ -264,42 +301,52 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     .search-source-chips {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        justify-content: start;
         margin: 0;
-        gap: 8px;
+        gap: 0 7px;
     }
     @container (min-width: 18.75rem) {
-        .search-source-chips { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .search-source-chips { grid-template-columns: repeat(4, 4.2rem); }
     }
-    .search-source-chip {
-        min-height: 46px;
+    .search-source-chip, .search-source-chip:has(input:checked) {
+        min-height: 44px;
         min-width: 0;
-        padding-inline: 5px;
-        gap: 5px;
-        border-radius: 10px;
-        background: #fff;
-        border-color: var(--search-border);
+        padding: 0;
+        border: 0;
+        gap: 0;
+        background: transparent;
         color: var(--search-ink);
         text-align: center;
-        font-size: .9rem;
+        font-size: .85rem;
+        font-weight: 500;
     }
-    .search-source-chip span { min-width: 0; overflow-wrap: anywhere; }
     .search-source-chip::before { display: none; }
-    .search-source-check {
-        display: inline-grid;
-        place-items: center;
-        flex: none;
-        width: 16px;
-        height: 16px;
-        border: 1px solid currentColor;
-        border-radius: 4px;
+    .search-source-face {
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        width: 100%;
+        min-height: 30px;
+        padding: 3px 5px;
+        border: 1px solid var(--search-border);
+        border-radius: 999px;
+        background: #fff;
+        overflow-wrap: anywhere;
     }
-    .search-source-chip:has(input:checked) { color: var(--search-accent); background: var(--search-active); border-color: currentColor; }
-    input:checked + .search-source-check { background: var(--search-accent); }
-    input:checked + .search-source-check::before {
-        content: '';
-        width: 5px;
-        height: 9px;
-        border: solid #fff;
+    .search-source-chip input:checked + .search-source-face {
+        color: var(--search-accent);
+        background: var(--search-active);
+        border-color: currentColor;
+        font-weight: 700;
+    }
+    .search-source-chip input:checked + .search-source-face .search-source-check {
+        display: block;
+        flex: none;
+        width: 6px;
+        height: 10px;
+        border: solid currentColor;
         border-width: 0 2px 2px 0;
         transform: translateY(-1px) rotate(45deg);
     }
@@ -332,6 +379,19 @@ body:has(.search-sheet[open]) { overflow: hidden; }
         overflow-wrap: anywhere;
         cursor: pointer;
     }
+    #mobileSearchNav.search-nav-icons-only button {
+        min-height: 44px;
+        justify-content: center;
+    }
+    /* Keep the names available to assistive technology in the compact bar. */
+    #mobileSearchNav.search-nav-icons-only .search-nav-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
     #mobileSearchNav button[aria-current] { color: var(--search-accent); font-weight: 700; }
     .search-nav-icon { padding: 4px 10px; border-radius: 999px; font-size: 1.05rem; }
     #mobileSearchNav button:is([aria-current], :hover) .search-nav-icon { background: var(--search-active); }
@@ -360,7 +420,7 @@ body:has(.search-sheet[open]) { overflow: hidden; }
         display: block;
         font-size: 1.125rem;
         font-weight: 700;
-        color: var(--search-ink);
+        color: var(--search-heading);
         margin: 0 0 8px;
     }
     #vocabularyResult .vocabulary-segment { border: 0; margin: 0 0 8px; }
@@ -439,7 +499,27 @@ body:has(.search-sheet[open]) { overflow: hidden; }
         color: var(--search-accent);
         background: var(--search-active);
     }
-    #searchPlaylistSelectBtn[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--search-accent); }
+    #result #searchPlaylistSelectBtn {
+        isolation: isolate;
+        min-height: max(44px, 1.4em + 18px);
+        gap: 5px;
+        padding: 0 8px;
+        border: 0;
+        background: transparent;
+        font-size: .75rem;
+        line-height: 1.3;
+    }
+    #result #searchPlaylistSelectBtn::before {
+        content: '';
+        position: absolute;
+        z-index: -1;
+        inset: 8.5px 0;
+        border: 1px solid var(--search-accent);
+        border-radius: 8px;
+        background: var(--search-active);
+    }
+    #result #searchPlaylistSelectBtn[aria-pressed="true"]::before { box-shadow: inset 0 0 0 1px var(--search-accent); }
+    #result #searchPlaylistSelectBtn svg { width: 14px; height: 14px; }
     .mobile-select-clips-label { display: inline; font-weight: 600; }
     #result #searchPlaylistActions { flex: 0 0 100%; justify-content: flex-end; }
     #result .subtitle-result-group { background: #fff; border: 1px solid var(--search-divider); border-bottom: 0; }

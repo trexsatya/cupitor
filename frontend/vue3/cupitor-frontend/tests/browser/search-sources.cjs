@@ -4,6 +4,40 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { serveFixtures, clickSearchTool } = require('./language-dialogs.cjs')
 
+async function checkMobileLabelTimeout(browser) {
+  const page = await browser.newPage({ viewport: { width: 350, height: 800 }, isMobile: true, hasTouch: true })
+  try {
+    await page.clock.install()
+    await page.route('**/*', serveFixtures)
+    await page.addInitScript(() => {
+      window.dontConfirmOnRefresh = true
+      window.addEventListener('load', () => { window.__loadedAt = Date.now() }, { once: true })
+    })
+    await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'load' })
+    await page.waitForFunction(() => document.querySelector('#mobileSearchSources #searchSourceChips'))
+    const loadedAt = await page.evaluate(() => window.__loadedAt)
+    await page.clock.pauseAt(new Date(loadedAt + 9950))
+    const nav = page.getByRole('navigation', { name: 'Cupitor navigation' })
+    const labels = nav.locator('.search-nav-label')
+    const widths = () => labels.evaluateAll(items => items.map(el => el.getBoundingClientRect().width))
+    assert.ok((await widths()).every(width => width > 1), 'labels remain visible before 10 seconds')
+    await page.clock.runFor(100)
+    assert.deepEqual(await widths(), [1, 1, 1, 1, 1], 'labels are visually hidden after 10 seconds')
+    const names = ['Search', 'Playlists', 'Word Maps', 'Practice Log', 'Tools']
+    for (const name of names) {
+      const button = nav.getByRole('button', { name, exact: true })
+      const bounds = await button.boundingBox()
+      assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, name + ' stays named and tappable')
+    }
+    await page.clock.resume()
+    await nav.getByRole('button', { name: 'Tools' }).tap()
+    await page.getByRole('dialog', { name: 'Tools' }).waitFor()
+    console.log('Mobile: navigation compresses after 10 seconds and remains named and usable')
+  } finally {
+    await page.close()
+  }
+}
+
 async function checkHeader(page, mobile) {
   const shortcuts = [
     ['headerPlaylistsBtn', 'recordingReviewDialog'],
@@ -68,6 +102,41 @@ async function checkHeader(page, mobile) {
     })
     await page.setViewportSize({ width: 350, height: 800 })
     assert.deepEqual(await sourceRows(), [4], 'the four filters fit on an ordinary phone')
+    const chips = await page.locator('#searchSourceChips label').evaluateAll(labels => labels.map(label => ({
+      target: label.getBoundingClientRect().height,
+      visual: label.querySelector('.search-source-face').getBoundingClientRect().height,
+    })))
+    assert.ok(chips.every(({ target, visual }) => target >= 44 && visual === 30), 'compact chips keep a 44px hit area')
+    const selectClips = page.getByRole('button', { name: 'Select clips for a playlist' })
+    const clipSizes = await selectClips.evaluate(el => {
+      const style = getComputedStyle(el, '::before')
+      const target = el.getBoundingClientRect().height
+      return { target, visual: target - parseFloat(style.top) - parseFloat(style.bottom) }
+    })
+    assert.deepEqual(clipSizes, { target: 44, visual: 27 })
+    assert.equal(await page.locator('.mobile-vocab-title').evaluate(el => getComputedStyle(el).color), 'rgb(91, 109, 102)')
+    assert.equal(await page.locator('.mobile-subtitle-title').evaluate(el => getComputedStyle(el).color), 'rgb(91, 109, 102)')
+
+    const picker = page.locator('#searchedWords + .select2 .select2-selection')
+    const fieldRow = page.locator('.lang-search-select-row .lang-select-with-toggle')
+    const original = await picker.boundingBox()
+    await picker.press('Enter')
+    const dropdown = page.locator('.search-vocabulary-dropdown')
+    await dropdown.waitFor({ state: 'visible' })
+    const [row, active, menu] = await Promise.all([fieldRow.boundingBox(), picker.boundingBox(), dropdown.boundingBox()])
+    assert.ok(active.width > original.width, 'opening Vocabulary expands the picker')
+    for (const bounds of [active, menu]) {
+      assert.ok(Math.abs(bounds.x - row.x) < 2 && Math.abs(bounds.width - row.width) < 2, 'picker and dropdown fill the row')
+    }
+    assert.equal(await language.isVisible(), false)
+    const typeahead = dropdown.getByRole('searchbox', { name: 'Search vocabulary' })
+    await typeahead.fill('färgsprakande')
+    assert.ok((await dropdown.getByRole('option').allTextContents()).some(text => text.includes('färgsprakande')))
+    await typeahead.press('Escape')
+    await dropdown.waitFor({ state: 'hidden' })
+    assert.equal(await language.isVisible(), true)
+    assert.ok(Math.abs((await picker.boundingBox()).width - original.width) < 1, 'closing restores the picker width')
+
     assert.equal(await page.locator('#subtitle-container').isVisible(), false, 'idle captions take no space')
     assert.equal(await page.locator('#subtitleColumn').evaluate(el => getComputedStyle(el).borderLeftWidth), '0px')
     await page.setViewportSize({ width: 320, height: 700 })
@@ -317,6 +386,6 @@ async function check(browser, mobile) {
   const browser = await chromium.launch({ headless: true,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ['--no-sandbox', '--disable-dev-shm-usage'] })
-  try { await check(browser, false); await check(browser, true) }
+  try { await check(browser, false); await check(browser, true); await checkMobileLabelTimeout(browser) }
   finally { await browser.close() }
 })().catch(error => { console.error(error); process.exitCode = 1 })
