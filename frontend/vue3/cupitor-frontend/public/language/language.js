@@ -6687,10 +6687,10 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
 
       const div = $(`
   <div class="line-part">
-      <button type="button" class="vocab-entry-search subtitle-entry-search" aria-label="Search this subtitle line" title="Search this subtitle line"><i class="fas fa-crosshairs" aria-hidden="true"></i></button>
+      <i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;"></i>
       ${highlightedText(chunk.replaceAll("|", " | "))}
   </div>`);
-      div.find(".subtitle-entry-search").on("click", selectSearchedWord)
+      $(div).find("i.fa").click(selectSearchedWord)
       div.data({text: chunk})
       $line.append(div)
 
@@ -6810,7 +6810,13 @@ const changeIndices = (id, from, to) => {
 }
 
 function collapseSubLines(evt) {
-  $(evt.target).parents('.lines-cntnr').find('.sub-lines-cntnr').slideToggle('slow')
+  const $button = $(evt.currentTarget)
+  const expanded = $button.attr('aria-expanded') !== 'true'
+  $button.attr('aria-expanded', String(expanded))
+  $button.find('i').toggleClass('fa-chevron-down', expanded).toggleClass('fa-chevron-right', !expanded)
+  const $lines = $button.closest('.lines-cntnr').find('.sub-lines-cntnr').stop(true, true)
+  if (expanded) $lines.slideDown('slow')
+  else $lines.slideUp('slow')
 }
 
 // Inline SVG/glyph for the media source. Falls back to the literal name
@@ -7356,7 +7362,7 @@ async function renderLines(id, url) {
   <span class="remove-next-btn btn"> - </span>
 
   <span class="play-btn-container" style="text-align: center;" data-id="${eId}" data-url="${eUrl}" data-source="${_.escape(subtitleFile.source || '')}" data-time-start="${timeStart}" data-time-end="${timeEnd}" data-match-line-index="${Number.isFinite(matchLineIndex) ? matchLineIndex : ''}">
-     <span class="info btn collapse-sub-lines"> 🗖 </span>
+     <button type="button" class="info btn collapse-sub-lines" aria-label="Toggle subtitle lines" aria-expanded="true" title="Show or hide subtitle lines"><i class="fas fa-chevron-down" aria-hidden="true"></i></button>
      <span class="info source-tag" data-source="${_.escape(String(subtitleFile.source || '').toLowerCase())}" title="${_.escape(subtitleFile.source || '')}">${_sourceBadgeHtml(subtitleFile.source)}</span>
      ${infoButton()}
      ${ownerTag}
