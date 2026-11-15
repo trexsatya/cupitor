@@ -2,7 +2,7 @@ const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { serveFixtures } = require('./language-dialogs.cjs')
+const { serveFixtures, clickSearchTool } = require('./language-dialogs.cjs')
 const { silentWav } = require('./player-replay.cjs')
 
 async function check(browser, mobile) {
@@ -94,6 +94,11 @@ async function check(browser, mobile) {
     await page.evaluate(() => window.startRecording())
     await page.locator('#searchText').fill('hagla')
     await page.locator('#searchText').press('Tab')
+    if (mobile) {
+      await page.waitForFunction(() => document.querySelector('#result .l-accordion[accordion-rendered]') &&
+        document.getElementById('searchLoadingOverlay').hidden)
+      await page.locator('#result .l-accordion:not(.no-result) .subtitle-result-toggle').first().click()
+    }
     const capture = page.locator('#result .capture-btn:visible').first()
     await capture.waitFor({ state: 'visible' })
     const beforeCancel = await page.evaluate(() => JSON.stringify(window._recordings))
@@ -109,7 +114,7 @@ async function check(browser, mobile) {
     assert.match((await ordered())[0], /testVideo/)
     await close('recordingReviewDialog')
     // All settings remain reachable, with one visible section at a time.
-    await click('#toggleSettingsPanelBtn')
+    await clickSearchTool(page, '#toggleSettingsPanelBtn')
     assert.equal(await page.locator('.settings-section-picker select').inputValue(), 'tools', 'Settings opens on Tools')
     assert.equal(await page.locator('.settings-nav [aria-current="page"]').innerText(), 'Tools')
     assert.equal(await page.locator('.settings-content section:visible').count(), 1)

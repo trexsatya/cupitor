@@ -3,7 +3,7 @@ const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { serveFixtures } = require('./language-dialogs.cjs')
+const { serveFixtures, clickSearchTool } = require('./language-dialogs.cjs')
 const rows = require('./fixtures/compound-vocabulary.json')
 const categories = new Map()
 for (const row of rows) {
@@ -117,7 +117,7 @@ async function checkGroups(browser, mobile) {
           document.querySelectorAll('#vocabularyResult [data-vocab-group-kind="prefix"]').length === (autoPrefix ? 1 : 0), {query, autoPrefix})
         assert.deepEqual(await componentLabels(), ['tröskel', 'värd'])
         assert.equal(await page.locator('#vocabularyResult .compound-group .similar-segment-header').filter({ hasText: /skelning|tröt/ }).count(), 0)
-        const kinds = await page.locator('#vocabularyResult > .prefix-group').evaluateAll(els => els.map(el => el.dataset.vocabGroupKind))
+        const kinds = await page.locator('#vocabularyResult .prefix-group').evaluateAll(els => els.map(el => el.dataset.vocabGroupKind))
         assert.deepEqual(kinds, autoPrefix ? ['compound', 'compound', 'prefix'] : ['compound', 'compound'])
         if (autoPrefix) assert.equal(await page.locator('#vocabularyResult .prefix-group[data-vocab-group-kind="prefix"] .vocabulary-segment').count(), 1)
       }
@@ -128,8 +128,7 @@ async function checkGroups(browser, mobile) {
       $('#toggleAutoPrefixSearchCheckbox').prop('checked', false)
       window.renderVocabularyFindings(window._vocabularySearchText)
     })
-    await page.locator('#searchVocabularyByPrefixBtn').click()
-    await page.locator('#searchVocabularyMenu [data-mode="prefix"]').click()
+    await clickSearchTool(page, '#searchVocabularyMenu [data-mode="prefix"]')
     assert.deepEqual(await componentLabels(), ['tröskel', 'värd'])
     assert.equal(await page.locator('#vocabularyResult [data-vocab-group-kind="prefix"]').count(), 1)
     // Changing the setting redraws the same query, not the subtitle fallback.
@@ -148,7 +147,7 @@ async function checkGroups(browser, mobile) {
     console.error(await page.evaluate(() => ({query: $('#searchText').val(), search: window.searchText,
       library: window._librarySearchText, autoPrefix: $('#toggleAutoPrefixSearchCheckbox').is(':checked'),
       prefixMax: window._appSettings.prefixResultsMax,
-      groups: [...document.querySelectorAll('#vocabularyResult > .prefix-group')].map(el => ({kind: el.dataset.vocabGroupKind, label: el.querySelector('.prefix-group-part')?.textContent})),
+      groups: [...document.querySelectorAll('#vocabularyResult .prefix-group')].map(el => ({kind: el.dataset.vocabGroupKind, label: el.querySelector('.prefix-group-part')?.textContent})),
       loading: document.getElementById('result').textContent.includes('Loading…')})))
     throw error
   } finally { await page.close() }

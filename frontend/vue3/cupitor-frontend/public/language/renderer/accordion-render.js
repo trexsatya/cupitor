@@ -45,7 +45,7 @@ function getAccordionGroup(root) {
 // attaches a single-open click toggle. Finally, programmatically clicks
 // the first result-bearing `.l-accordion` so the search lands on a panel
 // that actually has matches.
-export function renderAccordions(root) {
+export function renderAccordions(root, { autoOpen = true } = {}) {
   root = root || document
   // Top-align table cells — search results lay out matches in a <table>.
   Array.from(root.getElementsByTagName('td')).forEach(td => {
@@ -63,18 +63,17 @@ export function renderAccordions(root) {
       for (const other of peers) {
         if (other === this) continue
         other.classList.remove('active')
+        other.querySelector('.subtitle-result-toggle')?.setAttribute('aria-expanded', 'false')
         const op = other.nextElementSibling
         if (op && op.classList && op.classList.contains('autocreated-panel')) {
           op.style.display = 'none'
         }
       }
-      this.classList.toggle('active')
       const panel = this.nextElementSibling
-      if (panel && panel.style.display === 'block') {
-        panel.style.display = 'none'
-      } else if (panel) {
-        panel.style.display = 'block'
-      }
+      const expanded = !!panel && panel.style.display !== 'block'
+      this.classList.toggle('active', expanded)
+      this.querySelector('.subtitle-result-toggle')?.setAttribute('aria-expanded', String(expanded))
+      if (panel) panel.style.display = expanded ? 'block' : 'none'
     })
   }
 
@@ -83,5 +82,5 @@ export function renderAccordions(root) {
   // want to land on.
   const candidates = Array.from(root.getElementsByClassName('l-accordion'))
     .filter(it => !it.classList.contains('no-result') && !it.classList.contains('non-srt'))
-  if (candidates.length) candidates[0].click()
+  if (autoOpen && candidates.length) candidates[0].click()
 }

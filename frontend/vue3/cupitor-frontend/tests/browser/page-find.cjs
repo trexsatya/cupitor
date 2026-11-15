@@ -1,3 +1,4 @@
+const { clickSearchTool } = require('./language-dialogs.cjs')
 // Browser regression for Find on page (web + Android WebView-sized layout).
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
@@ -86,7 +87,7 @@ async function run(browser, mobile, legacy) {
     const input = page.locator('#cupPageFindInput')
     const count = page.locator('#cupPageFindCount')
     if (!mobile) await page.keyboard.press('Control+f')
-    else await page.locator('#cupPageFindToggle').click()
+    else await clickSearchTool(page, '#cupPageFindToggle')
     assert.equal(await bar.isVisible(), true)
     assert.equal(await input.evaluate(el => document.activeElement === el), true)
     await input.fill('färgsprakande')
@@ -125,7 +126,7 @@ async function run(browser, mobile, legacy) {
       (!CSS.highlights.has('cupitor-page-find-all') && !CSS.highlights.has('cupitor-page-find-active'))), true,
       'close button removes both highlight registrations')
     assert.equal(await page.locator('mark.cup-page-find-fallback').count(), 0)
-    await page.locator('#cupPageFindToggle').click()
+    await clickSearchTool(page, '#cupPageFindToggle')
     await input.fill('not-there')
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === 'No matches')
     assert.equal(await page.locator('#cupPageFindPrevious').isDisabled(), true)
@@ -243,14 +244,14 @@ async function run(browser, mobile, legacy) {
       document.querySelector('#recPlayingSubs').style.display = 'none'
       document.querySelector('#dialogFixture').style.display = 'none'
     })
-    await page.locator('#cupPageFindToggle').click()
+    await clickSearchTool(page, '#cupPageFindToggle')
     await input.fill('färgsprakande')
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 3')
     await input.press('Escape')
     assert.equal(await bar.isVisible(), false)
     assert.equal((await status()).total, 0, 'closing clears matches')
     if (legacy) assert.equal(await page.locator('mark.cup-page-find-fallback').count(), 0)
-    await page.locator('#cupPageFindToggle').click()
+    await clickSearchTool(page, '#cupPageFindToggle')
     assert.equal(await input.evaluate(el => document.activeElement === el), true)
     console.log((mobile ? 'Mobile' : 'Desktop') + (legacy ? ' legacy' : '') +
       ': Find toolbar, Enter/reverse, count, highlights, focus and close passed')

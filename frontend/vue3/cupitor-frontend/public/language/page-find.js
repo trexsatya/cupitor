@@ -269,7 +269,9 @@ export function initPageFind(doc = document) {
     if (priorFocus?.isConnected && priorFocus !== doc.body) {
       priorFocus.focus({ preventScroll: true });
     } else {
-      toggle.focus({ preventScroll: true });
+      const opener = toggle.closest('dialog:not([open])')
+        ? doc.getElementById('mobileSearchToolsBtn') : toggle;
+      opener?.focus({ preventScroll: true });
     }
     priorFocus = null;
   }
@@ -321,7 +323,7 @@ export function initPageFind(doc = document) {
   });
 
   doc.addEventListener('keydown', e => {
-    if (e.isComposing) return;
+    if (e.isComposing || doc.querySelector('.search-sheet[open]')) return;
     const key = e.key.toLowerCase();
     const find = key === 'f' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
     if (find) {

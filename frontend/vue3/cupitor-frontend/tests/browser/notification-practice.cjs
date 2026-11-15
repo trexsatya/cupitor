@@ -1,6 +1,6 @@
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
-const { serveFixtures } = require('./language-dialogs.cjs')
+const { serveFixtures, clickSearchTool } = require('./language-dialogs.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 
@@ -69,7 +69,7 @@ async function check(browser, mobile) {
       window.__originalResume = JSON.stringify(window._recLastPlayedMap || {})
       window.__storageBefore = Object.fromEntries(Object.entries(window.cupitorUserData.exportData().values).filter(([k]) => /recLastPlayed/.test(k)))
     })
-    await page.locator('#toggleSettingsPanelBtn').click()
+    await clickSearchTool(page, '#toggleSettingsPanelBtn')
     if (mobile) await page.locator('.settings-section-picker select').selectOption('practice')
     else await page.locator('[data-settings-section="practice"]').click()
     await page.evaluate(() => {

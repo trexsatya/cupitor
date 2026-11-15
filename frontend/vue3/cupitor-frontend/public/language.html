@@ -1,9 +1,9 @@
-<html>
+<html lang="en">
 
 <head>
     <link rel="stylesheet" href="language/word-maps.css">
     <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
 
     <script src="/vendor/jquery.js"></script>
     <script></script>
@@ -51,6 +51,7 @@
     <script type="module" src="/language/page-find.js"></script>
     <script type="module" src="/language/word-maps-entry.js"></script>
     <link href="/language.css" rel="stylesheet"/>
+    <link href="/language/mobile-search.css" rel="stylesheet"/>
     <link rel="stylesheet" href="/vendor/fontawesome-all.css">
     <style>
 
@@ -237,19 +238,25 @@
     <div style="float: left; width: 59%; position: relative;" class="fl-left">
         <div id="mainControlInputs" style="clear: both">
             <div class="lang-header">
-                <!-- Primary toolbar: always visible -->
                 <div class="lang-toolbar">
+                    <div class="search-brand">
+                        <i class="fas fa-book-open" aria-hidden="true"></i>
+                        <span>Cupitor</span>
+                        <button type="button" id="searchHelpBtn" class="search-header-button" aria-label="Cupitor help" aria-haspopup="dialog" aria-controls="searchHelp">
+                            <i class="far fa-question-circle" aria-hidden="true"></i>
+                        </button>
+                    </div>
                     <!-- Previous search -->
-                    <button class="lang-tool-btn lang-tool-btn--icon" id="prevSearchBtn" title="Previous search (hold for the list)">
+                    <button class="lang-tool-btn lang-tool-btn--icon" id="prevSearchBtn" title="Previous search (hold for the list)" aria-label="Previous search">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                             <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0"/>
                         </svg>
                     </button>
                     <div id="searchSourceChips" class="search-source-chips" role="group" aria-label="Search sources">
-                        <label class="search-source-chip"><input type="checkbox" id="includeLibraryInSearchCb"><span>Books</span></label>
-                        <label class="search-source-chip"><input type="checkbox" id="includeSrtsInSearchCb" checked><span>SRTs</span></label>
-                        <label class="search-source-chip"><input type="checkbox" id="wordMapSearchIncludeCb"><span>Maps</span></label>
-                        <label class="search-source-chip"><input type="checkbox" id="manualSearchIncludeCb"><span>Cards</span></label>
+                        <label class="search-source-chip"><input type="checkbox" id="includeLibraryInSearchCb"><i class="search-source-check" aria-hidden="true"></i><span>Books</span></label>
+                        <label class="search-source-chip"><input type="checkbox" id="includeSrtsInSearchCb" checked><i class="search-source-check" aria-hidden="true"></i><span>SRTs</span></label>
+                        <label class="search-source-chip"><input type="checkbox" id="wordMapSearchIncludeCb"><i class="search-source-check" aria-hidden="true"></i><span>Maps</span></label>
+                        <label class="search-source-chip"><input type="checkbox" id="manualSearchIncludeCb"><i class="search-source-check" aria-hidden="true"></i><span>Cards</span></label>
                     </div>
                     <div class="lang-toolbar-center">
                         <!-- Settings gear button -->
@@ -301,10 +308,13 @@
                         </button>
                     </div>
                     <!-- Next search -->
-                    <button class="lang-tool-btn lang-tool-btn--icon" id="nextSearchBtn" title="Next search (hold for the list)">
+                    <button class="lang-tool-btn lang-tool-btn--icon" id="nextSearchBtn" title="Next search (hold for the list)" aria-label="Next search">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                             <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708"/>
                         </svg>
+                    </button>
+                    <button type="button" id="searchHistoryBtn" class="search-header-button" aria-label="Recent searches" aria-controls="searchHistoryPanel" aria-expanded="false">
+                        <i class="fas fa-history" aria-hidden="true"></i>
                     </button>
                     <button type="button" id="returnToMediaPlayer" class="lang-tool-btn" style="display:none;">Back to player</button>
                 </div>
@@ -317,10 +327,12 @@
                 <div id="practiceLogFrontBanner" style="display: none; margin: 6px 0 8px 0;">
                     <button type="button" id="practiceLogFrontBtn" class="lang-tool-btn practice-log-front-btn" onclick="openPracticeLogDialog()" title="Plan your week of language practice (Reading, Writing, Listening, …) and track what got done.">📋 Practice Log/Schedule</button>
                 </div>
-                <div class="lang-search-row">
+                <div class="lang-search-row" role="search" aria-label="Cupitor search">
+                    <label for="searchText" class="mobile-search-label">Search</label>
                     <div class="lang-search-top-row">
                         <span class="lang-search-input-wrap">
-                            <input type="search" id="searchText" placeholder="Search…" class="lang-search-input">
+                            <i class="fas fa-search mobile-search-icon" aria-hidden="true"></i>
+                            <input type="search" id="searchText" aria-label="Search" placeholder="Search…" class="lang-search-input">
                             <button type="button" id="searchTextClearBtn" class="lang-search-input-clear" title="Clear" aria-label="Clear" style="display:none;">×</button>
                         </span>
                         <div class="search-vocab-popover-wrap">
@@ -334,7 +346,14 @@
                     </div>
                     <div id="btns-2" class="lang-search-select-row" style="margin-bottom: 0;">
                         <div class="lang-select-with-toggle">
-                            <select id="searchedWords" style="width: 100%;"></select>
+                            <select id="searchedWords" aria-label="Vocabulary" style="width: 100%;"></select>
+                            <label class="mobile-search-language">
+                                <i class="fas fa-language" aria-hidden="true"></i>
+                                <select id="searchLanguageSelect" aria-label="Search language">
+                                    <option value="sv">Swedish</option>
+                                    <option value="en">English</option>
+                                </select>
+                            </label>
                             <input class="tgl tgl-flip lang-inline-toggle" id="toggleLangCb" type="checkbox"
                                    data-toggle="toggle" data-size="mini" data-on="EN" data-off="SV"
                                    title="Which language the search runs in"/>
@@ -343,6 +362,7 @@
                             <div id="vocabLoadingBarFill" style="width:0;height:100%;background:#4dba87;transition:width .2s ease;"></div>
                         </div>
                     </div>
+                    <div id="mobileSearchSources"></div>
                 </div>
 
                 <!-- Account banner: filled by language/account-panel.js -->
@@ -594,13 +614,11 @@
                 <div id="searchLoadingOverlay" class="search-loading-overlay" role="status" hidden>
                     <span>Loading results…</span>
                 </div>
-                <div id="vocabularyResult">
-
+                <div class="search-dictionary">
+                    <div id="vocabularyResult"></div>
+                    <div id="translationSlot" aria-live="polite"></div>
                 </div>
-                <div id="translationSlot" aria-live="polite"></div>
-                <div id="result" style="overflow: scroll; height: 85%;clear: both;
-                    border: 1px solid green; border-right: none;">
-                </div>
+                <div id="result" class="search-results"></div>
                 <div id="search-pagination" style="display: none; text-align: center;">
                     <span id="searchPrevPageButton" class="btn button" onclick="changeSearchResultsPage(-1)">‹ Prev</span>
                     <span class="info">Page <select id="searchPageSelect" onchange="loadSearchResultsPage(parseInt(this.value, 10))"></select> of <span id="searchPageCount"></span></span>
@@ -837,6 +855,56 @@
     <span
         id="currentSpeed" style="padding-left: 1em;"></span>
 </div>
+
+<nav id="mobileSearchNav" aria-label="Cupitor navigation">
+    <button type="button" id="mobileSearchHome" aria-current="page">
+        <span class="search-nav-icon"><i class="fas fa-search" aria-hidden="true"></i></span><span>Search</span>
+    </button>
+    <button type="button" data-search-action="headerPlaylistsBtn" aria-haspopup="dialog">
+        <span class="search-nav-icon"><i class="fas fa-list-ul" aria-hidden="true"></i></span><span>Playlists</span>
+    </button>
+    <button type="button" data-search-action="headerWordMapsBtn" aria-haspopup="dialog">
+        <span class="search-nav-icon"><i class="fas fa-project-diagram" aria-hidden="true"></i></span><span>Word Maps</span>
+    </button>
+    <button type="button" data-search-action="headerPracticeLogBtn" aria-haspopup="dialog">
+        <span class="search-nav-icon"><i class="fas fa-clipboard-list" aria-hidden="true"></i></span><span>Practice Log</span>
+    </button>
+    <button type="button" id="mobileSearchToolsBtn" aria-haspopup="dialog" aria-controls="mobileSearchTools">
+        <span class="search-nav-icon"><i class="fas fa-sliders-h" aria-hidden="true"></i></span><span>Tools</span>
+    </button>
+</nav>
+
+<dialog id="mobileSearchTools" class="search-sheet" aria-labelledby="mobileSearchToolsTitle">
+    <div class="search-sheet-header">
+        <h2 id="mobileSearchToolsTitle">Tools</h2>
+        <button type="button" data-search-close aria-label="Close tools" autofocus>×</button>
+    </div>
+    <h3>Study</h3>
+    <div class="search-sheet-group" id="mobileStudyActions"></div>
+    <h3>Page</h3>
+    <div class="search-sheet-group" id="mobilePageActions">
+        <details class="search-sheet-options">
+            <summary><i class="fas fa-sliders-h" aria-hidden="true"></i><span>Search options</span></summary>
+            <div id="mobileSearchOptions"></div>
+        </details>
+    </div>
+    <div class="search-sheet-group" id="mobileSettingsAction"></div>
+</dialog>
+
+<dialog id="searchHelp" class="search-sheet search-help" aria-labelledby="searchHelpTitle">
+    <div class="search-sheet-header">
+        <h2 id="searchHelpTitle">Cupitor help</h2>
+        <button type="button" data-search-close aria-label="Close help" autofocus>×</button>
+    </div>
+    <h3>Search</h3>
+    <p>Type a word or phrase, then press Enter. Choose a search language and check any sources to include. SRTs searches subtitles.</p>
+    <h3>Explore results</h3>
+    <p>Open a vocabulary match or subtitle heading to see more. Use <strong>Select clips</strong> to make a temporary playlist.</p>
+    <h3>Study tools</h3>
+    <p>Open Playlists, Word Maps, or Practice Log directly. Use <strong>Find on page</strong> under Tools to search the text already on screen.</p>
+    <h3>Keyboard shortcuts</h3>
+    <p><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>F</kbd> opens Find on page. <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>←</kbd> or <kbd>→</kbd> steps through recent searches on desktop.</p>
+</dialog>
 
 <div id="message" style="display: none"></div>
 

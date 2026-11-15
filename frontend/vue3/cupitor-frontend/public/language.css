@@ -1048,10 +1048,16 @@ mark.cup-page-find-current {
     min-height: 36px;
     font-family: monospace;
 }
+.vocab-dialog-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .vocab-dialog-actions button {
     min-height: 44px;
     padding-inline: 6px;
     font-size: 0.8em;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 #addVocabSaveCloseBtn:not(:disabled) {
     border-color: #1d5c9d;

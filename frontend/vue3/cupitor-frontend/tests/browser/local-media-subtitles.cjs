@@ -4,7 +4,7 @@ const {chromium} = require('playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const {serveFixtures} = require('./language-dialogs.cjs')
+const {serveFixtures, clickSearchTool} = require('./language-dialogs.cjs')
 
 function wav() {
   const samples = 44100 * 12
@@ -55,7 +55,7 @@ async function verify(browser, width, video = false) {
   try {
     await page.goto('http://127.0.0.1:3000/language.html', {waitUntil:'networkidle'})
     await page.waitForFunction(() => typeof window.loadLocalFiles === 'function')
-    await page.locator('#toggleMediaPanelBtn').click()
+    await clickSearchTool(page, '#toggleMediaPanelBtn')
     await page.getByText('Local file', { exact: true }).click()
     await page.locator('#localFiles').setInputFiles([
       video ? {name:'lesson.MP4',mimeType:'video/mp4',buffer:fs.readFileSync(path.join(__dirname,'fixtures/local-media.mp4'))}

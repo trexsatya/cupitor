@@ -1,6 +1,6 @@
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
-const { serveFixtures } = require('./language-dialogs.cjs')
+const { serveFixtures, clickSubtitleInfo } = require('./language-dialogs.cjs')
 
 const first = 'fullSrt0001', second = 'fullSrt0002'
 const time = seconds => new Date(seconds * 1000).toISOString().slice(11, 23).replace('.', ',')
@@ -40,7 +40,7 @@ async function check(browser, mobile) {
   const dialog = page.locator('#fullSrtDialog')
   const pre = dialog.locator('.full-srt-text')
   const open = async link => {
-    await click(page.locator(`#result .play-btn-container[data-url="${link}"] .media-info`).first())
+    await clickSubtitleInfo(page, link, click)
     await click(page.locator('#info-dialog-content').getByRole('button', { name: 'Show complete SRT' }))
     await dialog.waitFor({ state: 'visible' })
   }

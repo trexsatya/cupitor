@@ -47,6 +47,31 @@ async function serveFixtures(route) {
   return route.fulfill({ body, contentType })
 }
 
+async function clickSearchTool(page, selector) {
+  const control = page.locator(selector)
+  if (await control.evaluate(el => !!el.closest('#mobileSearchTools'))) {
+    if (!(await page.locator('#mobileSearchTools').isVisible())) {
+      await page.getByRole('button', { name: 'Tools', exact: true }).click()
+    }
+    const details = control.locator('xpath=ancestor::details[1]')
+    if (await details.count() && (await details.getAttribute('open')) === null) {
+      await details.locator('summary').click()
+    }
+  } else if (selector.startsWith('#searchVocabularyMenu')) {
+    await page.locator('#searchVocabularyByPrefixBtn').click()
+  }
+  await control.click()
+}
+
+async function clickSubtitleInfo(page, link, click) {
+  await page.locator('#searchLoadingOverlay').waitFor({ state: 'hidden' })
+  const info = page.locator(`#result .play-btn-container[data-url="${link}"] .media-info`).first()
+  const group = info.locator('xpath=ancestor::div[@class="subtitle-result-group"][1]')
+  const heading = group.locator('.subtitle-result-toggle')
+  if (await heading.getAttribute('aria-expanded') === 'false') await click(heading)
+  await click(info)
+}
+
 async function checkDialogs(browser, mobile) {
   const page = await browser.newPage({ viewport: mobile ? { width: 430, height: 900 } : { width: 1280, height: 900 },
     isMobile: mobile, hasTouch: mobile })
@@ -57,7 +82,7 @@ async function checkDialogs(browser, mobile) {
   await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
   const click = selector => mobile ? page.locator(selector).tap() : page.locator(selector).click()
   const openSearchSettings = async () => {
-    await click('#toggleSettingsPanelBtn')
+    await clickSearchTool(page, '#toggleSettingsPanelBtn')
     if (mobile) await page.locator('.settings-section-picker select').selectOption('search')
     else await click('[data-settings-section="search"]')
   }
@@ -118,7 +143,7 @@ async function checkDialogs(browser, mobile) {
         if (query === 'översittare') {
           assert.equal(await page.locator('#vocabularyResult [data-vocab-match-kind=exact]').count(), 1)
           assert.equal(await page.locator('#vocabularyResult [data-vocab-match-kind=family]').count(), 1)
-          if (autoPrefix) assert(await page.locator('#showDiffPrefixesBtn').innerText().then(t => t.includes('+1 more')))
+          if (autoPrefix) assert(await page.locator('#showDiffPrefixesBtn').textContent().then(t => t.includes('+1 more')))
         }
         if (autoPrefix && query === 'väljarkår') await screenshot('cupitor-vocabulary-general-matching')
       }
@@ -129,8 +154,7 @@ async function checkDialogs(browser, mobile) {
     await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: '(acceptable)' }).waitFor({ state: 'visible' })
     await click('#nextSearchBtn')
     await page.waitForFunction(() => window._librarySearchText === 'färgsprakande' && !document.querySelector('#result').textContent.includes('Loading…'))
-    await click('#searchVocabularyByPrefixBtn')
-    await click('#searchVocabularyMenu [data-mode=prefix]')
+    await clickSearchTool(page, '#searchVocabularyMenu [data-mode=prefix]')
     await revealVocabularyMatch('(crackle)')
     assert.equal(await page.evaluate(() => window._librarySearchText), 'färgsprakande')
     // Common words cannot be the sole match, including alternatives,
@@ -387,4 +411,4 @@ if (require.main === module) (async () => {
   }
 })().catch(error => { console.error(error); process.exitCode = 1 })
 
-module.exports = { serveFixtures, checkVocabInsertPositions }
+module.exports = { serveFixtures, checkVocabInsertPositions, clickSearchTool, clickSubtitleInfo }
