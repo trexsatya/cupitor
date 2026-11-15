@@ -4718,17 +4718,7 @@ body.rec-playing #scrollButton, body.practice-mode #scrollButton { display: none
     border-radius: 2px;
 }
 
-/* ── Practice Log / Schedule dialog ─────────────────────────────── */
-/* jQuery UI manages height + overflow:auto on the .ui-dialog-content via its
-   maxHeight option (set in openPracticeLogDialog). We only add inner padding
-   so the last row doesn't hug the scrollbar. Extra padding-bottom keeps the
-   "Add custom item" row clear of the actions bar when the content scrolls. */
-#practiceLogDialog {
-    padding-bottom: 64px;
-    -webkit-overflow-scrolling: touch; /* momentum scrolling on older iOS */
-    touch-action: pan-y;               /* allow native vertical pan/scroll */
-    overscroll-behavior: contain;      /* don't bubble scroll to body */
-}
+/* ── Practice Log ────────────────────────────────────────────────── */
 .practice-log-front-btn {
     background: #1e7e34;
     color: #fff;
@@ -4756,156 +4746,393 @@ body.rec-playing #scrollButton, body.practice-mode #scrollButton { display: none
     font-weight: 600;
 }
 
-#practiceLogDialog .practice-log-tabs {
-    display: flex;
-    gap: 4px;
-    border-bottom: 1px solid #ddd;
-    margin-bottom: 8px;
+.practice-log-window, .practice-log-editor {
+    --log-ink: #172a27;
+    --log-muted: #52665e;
+    --log-accent: #15564a;
+    --log-accent-hover: #10463b;
+    --log-mint: #def0e8;
+    --log-paper: #f7f9f5;
+    --log-line: #d7e2dc;
+    --log-control: #758d82;
+    color: var(--log-ink);
+    font-family: system-ui, sans-serif;
 }
-#practiceLogDialog .practice-log-tab {
-    background: transparent;
-    border: 1px solid transparent;
-    border-bottom: none;
-    padding: 4px 10px;
-    cursor: pointer;
-    font-size: 0.9em;
-    color: #555;
-    border-radius: 4px 4px 0 0;
-}
-#practiceLogDialog .practice-log-tab.active {
-    background: #fff;
-    border-color: #ddd;
-    color: #222;
-    font-weight: 600;
-    position: relative;
-    top: 1px;
-}
-#practiceLogDialog .practice-log-week-label {
-    font-size: 0.8em;
-    color: #888;
-    margin-bottom: 6px;
-}
-#practiceLogDialog .practice-log-item {
-    display: grid;
-    grid-template-columns: 130px 130px 1fr auto;
-    gap: 6px;
-    align-items: start;
-    padding: 6px 0;
-    border-bottom: 1px dashed #eee;
-}
-#practiceLogDialog .practice-log-item-name {
-    font-weight: 600;
-    font-size: 0.92em;
-    padding-top: 4px;
-}
-#practiceLogDialog .practice-log-item-status {
-    font-size: 0.85em;
-    padding: 3px 4px;
-}
-#practiceLogDialog .practice-log-item-notes {
-    font-family: inherit;
-    font-size: 0.85em;
-    width: 100%;
-    min-height: 2.4em;
-    resize: vertical;
-    border: 1px solid #ddd;
-    border-radius: 3px;
-    padding: 3px 5px;
-    box-sizing: border-box;
-}
-#practiceLogDialog .practice-log-item-remove {
-    background: transparent;
-    border: 1px solid #ccc;
-    color: #c33;
-    cursor: pointer;
-    border-radius: 3px;
-    width: 22px;
-    height: 22px;
-    font-size: 0.85em;
+.ui-dialog.practice-log-window {
     padding: 0;
-    line-height: 1;
+    border: 1px solid var(--log-line);
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--log-paper);
+    box-shadow: 0 8px 28px #172a2726;
 }
-#practiceLogDialog .practice-log-item-remove:hover { background: #fee; }
-#practiceLogDialog .practice-log-add-row {
-    display: flex;
-    gap: 6px;
-    margin-top: 10px;
-    margin-bottom: 12px;
-    padding-top: 8px;
-    border-top: 1px solid #eee;
-}
-#practiceLogDialog .practice-log-add-row input {
-    padding: 4px 6px;
-    border: 1px solid #ccc;
-    border-radius: 3px;
-    font-size: 0.9em;
-}
-#practiceLogDialog .practice-log-history-config {
-    font-size: 0.85em;
-    color: #555;
-    margin-bottom: 8px;
-}
-#practiceLogDialog .practice-log-history-week {
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    padding: 6px 8px;
-    margin-bottom: 6px;
-    background: #fafafa;
-}
-#practiceLogDialog .practice-log-history-week-header {
-    font-weight: 600;
-    font-size: 0.88em;
-    margin-bottom: 4px;
-    color: #333;
-}
-#practiceLogDialog .practice-log-history-item {
-    font-size: 0.82em;
-    padding: 2px 0;
-    color: #444;
-}
-#practiceLogDialog .practice-log-history-item .pl-status {
-    display: inline-block;
-    min-width: 90px;
-    font-weight: 600;
-}
-#practiceLogDialog .practice-log-notes-toggle {
-    background: transparent;
-    border: 1px solid #ccc;
-    border-radius: 3px;
-    padding: 0 4px;
-    margin-left: 6px;
-    cursor: pointer;
-    font-size: 0.85em;
-    line-height: 1.2;
-}
-#practiceLogDialog .practice-log-notes-toggle:hover { background: #f0f0f0; }
-#practiceLogDialog .practice-log-history-notes {
-    margin: 4px 0 6px 100px;
-    padding: 5px 8px;
-    background: #fff;
-    border-left: 3px solid #ffc107;
-    color: #555;
-    font-size: 0.85em;
-    white-space: pre-wrap;
-}
-#practiceLogDialog .pl-status-done       { color: #1e7e34; }
-#practiceLogDialog .pl-status-progress   { color: #b8860b; }
-#practiceLogDialog .pl-status-skipped    { color: #999; text-decoration: line-through; }
-#practiceLogDialog .pl-status-notstarted { color: #888; }
-#practiceLogDialog .practice-log-actions {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid #ddd;
+.practice-log-window .ui-dialog-titlebar {
     display: flex;
     align-items: center;
-    gap: 4px;
-    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px 8px 14px;
+    border: 0;
+    border-bottom: 1px solid var(--log-line);
+    border-radius: 0;
+    background: #fff;
+    color: var(--log-ink);
 }
-@media (max-width: 600px) {
-    #practiceLogDialog .practice-log-item {
-        grid-template-columns: 1fr;
+.practice-log-window .ui-dialog-title {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 1.27rem;
+    font-weight: 750;
+}
+.practice-log-window .ui-dialog-titlebar-close {
+    position: relative;
+    inset: auto;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+}
+.practice-log-window .ui-dialog-titlebar-close:hover { background: var(--log-mint); }
+.practice-log-window .ui-dialog-titlebar-close .ui-icon { display: none; }
+.practice-log-window .ui-dialog-titlebar-close::before {
+    content: '×';
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--log-muted);
+    font: 400 1.5rem system-ui, sans-serif;
+    text-indent: 0;
+}
+#practiceLogDialog {
+    padding: 12px 13px 0;
+    background: var(--log-paper);
+    color: var(--log-ink);
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+.practice-log-window button:not(.ui-dialog-titlebar-close), .practice-log-editor button,
+.practice-log-editor input, .practice-log-editor textarea, .practice-log-editor select {
+    font: inherit;
+}
+.practice-log-window :is(button, summary, input):focus-visible,
+.practice-log-editor :is(button, input, textarea, select):focus-visible {
+    outline: 2px solid var(--log-accent);
+    outline-offset: 2px;
+}
+.practice-log-window [hidden], .practice-log-editor [hidden] { display: none !important; }
+.practice-log-window [role="status"] span:empty { display: none; }
+.practice-log-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    padding: 4px;
+    background: #eaf0eb;
+    border: 1px solid var(--log-line);
+    border-radius: 11px;
+}
+.practice-log-tab {
+    min-height: 44px;
+    padding: 4px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--log-ink);
+    cursor: pointer;
+}
+.practice-log-window .practice-log-tab { font-weight: 650; font-size: .88rem; }
+.practice-log-tab[aria-current] { background: var(--log-accent); color: #fff; }
+.practice-log-date {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+    margin: 15px 0 4px;
+}
+.practice-log-date h2, .practice-log-history-year {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 750;
+}
+.practice-log-date span, .practice-log-summary, .practice-log-empty, .practice-log-week-id {
+    color: var(--log-muted);
+    font-size: .84rem;
+}
+.practice-log-summary { margin: 0; }
+.practice-log-summary i { color: var(--log-accent); margin-inline-end: 6px; }
+#practiceLogItems {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+    gap: 8px;
+    margin-block: 11px 8px;
+}
+.practice-log-item, .practice-log-history-week {
+    min-width: 0;
+    border: 1px solid var(--log-line);
+    border-radius: 12px;
+    background: #fff;
+}
+.practice-log-item { padding: 10px 11px; overflow-wrap: anywhere; }
+.practice-log-item-header, .practice-log-progress-row, .practice-log-item-goal {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.practice-log-activity-icon {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: #e9f3ee;
+    color: var(--log-accent);
+    font-size: .88rem;
+}
+.practice-log-item-name, .practice-log-history-item h3 { margin: 0; font-weight: 730; font-size: 1rem; }
+.pl-status { color: var(--log-muted); font-size: .77rem; }
+.pl-status-done { color: var(--log-accent); font-weight: 650; }
+.practice-log-item-header .pl-status { margin-inline-start: auto; text-align: end; }
+.practice-log-item-goal {
+    justify-content: space-between;
+    width: 100%;
+    padding: 4px 0;
+    min-height: 44px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: start;
+}
+.practice-log-item-goal span { white-space: pre-wrap; min-width: 0; }
+.practice-log-item-goal i {
+    display: grid;
+    flex: none;
+    place-items: center;
+    border-radius: 7px;
+    width: 31px;
+    height: 31px;
+    background: #f0f5f2;
+    color: var(--log-accent);
+    font-size: .74rem;
+}
+.practice-log-measure { flex: 1; min-width: 0; padding-inline-end: 5px; }
+.practice-log-progress {
+    display: block;
+    width: 100%;
+    height: 6px;
+    margin-top: 6px;
+    border: 0;
+    border-radius: 999px;
+    color: var(--log-accent);
+    background: #e5eee8;
+    overflow: hidden;
+}
+.practice-log-progress::-webkit-progress-bar { background: #e5eee8; }
+.practice-log-progress::-webkit-progress-value { background: #387760; border-radius: 999px; }
+.practice-log-progress::-moz-progress-bar { background: #387760; border-radius: 999px; }
+.practice-log-primary, .practice-log-secondary, .practice-log-update, .practice-log-add, .practice-log-ghost {
+    min-height: 44px;
+    padding: 5px 12px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    color: var(--log-accent);
+    font-weight: 680 !important;
+    cursor: pointer;
+}
+.practice-log-primary { width: 100%; background: var(--log-accent); color: #fff; }
+.practice-log-primary:hover { background: var(--log-accent-hover); }
+.practice-log-update { background: var(--log-mint); }
+.practice-log-secondary { background: #fff; border-color: var(--log-control); }
+.practice-log-ghost, .practice-log-add { background: transparent; }
+.practice-log-ghost:hover, .practice-log-secondary:hover, .practice-log-add:hover { background: var(--log-mint); }
+.practice-log-add { width: 100%; margin-block: 3px 8px; border: 1px dashed #81a89a; }
+.practice-log-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 9px;
+    margin: 4px -13px 0;
+    padding: 7px 13px;
+    border-top: 1px solid var(--log-line);
+    background: #fff;
+}
+.practice-log-save-state { display: grid; color: var(--log-muted); font-size: .8rem; }
+.practice-log-actions button:disabled { opacity: .65; cursor: default; }
+#practiceLogHistoryView { position: relative; padding-top: 8px; }
+.practice-log-history-config { margin-bottom: 4px; text-align: end; color: var(--log-accent); }
+#practiceLogHistoryView:has(.practice-log-history-year) .practice-log-history-config:not([open]) {
+    position: absolute;
+    inset-block-start: 8px;
+    inset-inline-end: 0;
+}
+.practice-log-history-config:not([open]) + #practiceLogHistoryList > .practice-log-history-year:first-child {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding-inline-end: 8.5rem;
+    margin-top: 0;
+}
+.practice-log-history-config summary {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    gap: 6px;
+    padding-inline: 8px;
+    cursor: pointer;
+    border-radius: 8px;
+    font-size: .86rem;
+    font-weight: 650;
+}
+.practice-log-history-config summary::-webkit-details-marker { display: none; }
+.practice-log-history-config label { display: flex; align-items: center; justify-content: end; gap: 8px; }
+#practiceLogHistoryWeeks { max-width: 88px; min-height: 44px; padding: 4px; }
+.practice-log-history-year { margin: 5px 0 8px; }
+.practice-log-history-week { margin-bottom: 8px; overflow: hidden; }
+.practice-log-history-week-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 14px;
+    align-items: center;
+    gap: 2px 9px;
+    min-height: 60px;
+    padding: 9px 12px;
+    cursor: pointer;
+    list-style: none;
+}
+.practice-log-history-week-header::-webkit-details-marker { display: none; }
+.practice-log-history-week-header:focus-visible { outline-offset: -3px !important; }
+.practice-log-history-week[open] .practice-log-history-week-header { background: #ebf4ef; }
+.practice-log-history-week-header i { grid-column: 3; grid-row: 1 / 3; color: var(--log-accent); font-size: .74rem; }
+.practice-log-history-week[open] .practice-log-history-week-header i { transform: rotate(180deg); }
+.practice-log-history-week-header .practice-log-summary { grid-row: 2; grid-column: 1 / 3; }
+.practice-log-history-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 7px;
+    padding: 10px 11px;
+    border-top: 1px solid var(--log-line);
+    overflow-wrap: anywhere;
+}
+.practice-log-history-item p {
+    margin: 2px 0 0;
+    color: var(--log-muted);
+    font-size: .87rem;
+    white-space: pre-wrap;
+}
+.practice-log-history-progress { display: grid; gap: 3px; text-align: end; }
+.practice-log-history-progress strong { color: var(--log-accent); font-size: .87rem; }
+.practice-log-archived-notes { color: var(--log-muted); font-size: .8rem; }
+.practice-log-archived-notes summary { cursor: pointer; padding-block: 10px; }
+.practice-log-editor {
+    box-sizing: border-box;
+    width: min(420px, calc(100% - 20px));
+    max-height: min(85vh, 680px);
+    max-height: min(85dvh, 680px);
+    padding: 13px 16px 15px;
+    border: 1px solid var(--log-line);
+    border-radius: 16px;
+    background: white;
+    overscroll-behavior: contain;
+}
+.practice-log-editor::backdrop { background: #172a2760; }
+.practice-log-editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+.practice-log-editor-header h2 { margin: 0; font-size: 1.22rem; font-weight: 750; }
+.practice-log-editor .practice-log-editor-header button { min-width: 44px; padding: 0; font-size: 1.45rem; }
+.practice-log-editor-context {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--log-muted);
+    margin: 0 0 13px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+.practice-log-editor-context > span:last-child { min-width: 0; }
+.practice-log-editor-context strong { color: var(--log-ink); }
+.practice-log-field {
+    display: grid;
+    gap: 4px;
+    margin-block: 8px;
+    color: var(--log-ink);
+    font-weight: 650;
+    font-size: .9rem;
+}
+.practice-log-editor :is(input:not([type="range"]), select, textarea) {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 7px 10px;
+    border: 1px solid var(--log-control);
+    border-radius: 8px;
+    background: white;
+    color: var(--log-ink);
+}
+.practice-log-editor textarea { resize: vertical; }
+.practice-log-editor .practice-log-summary { margin-block: 7px; }
+.practice-log-editor .practice-log-primary { margin-top: 8px; }
+.practice-log-editor .practice-log-primary + button { display: block; margin: 4px auto 0; }
+.practice-log-editor-actions { display: flex; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
+.practice-log-slider-heading, .practice-log-slider-scale, .practice-log-quantity {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 7px;
+}
+.practice-log-slider-heading label { margin: 0; font-weight: 650; }
+.practice-log-slider-heading output { color: var(--log-accent); font-size: 1.45rem; font-weight: 750; }
+#practiceLogProgressSlider {
+    display: block;
+    width: 100%;
+    height: 44px;
+    margin: 0;
+    accent-color: var(--log-accent);
+    cursor: pointer;
+    touch-action: pan-y;
+}
+.practice-log-slider-scale { font-size: .78rem; color: var(--log-muted); }
+.practice-log-quantity { justify-content: start; }
+.practice-log-quantity, .practice-log-increments { font-weight: 550; }
+.practice-log-stepper {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    max-width: 185px;
+    border: 1px solid var(--log-control);
+    border-radius: 8px;
+    background: var(--log-paper);
+}
+.practice-log-editor .practice-log-stepper input { border: 0; border-radius: 0; text-align: center; }
+.practice-log-stepper button { min-height: 44px; border: 0; color: var(--log-accent); background: var(--log-mint); }
+.practice-log-stepper button:first-child { border-radius: 7px 0 0 7px; }
+.practice-log-stepper button:last-child { border-radius: 0 7px 7px 0; }
+.practice-log-increments { display: flex; gap: 6px; }
+@media (max-width: 599px) {
+    .practice-log-editor {
+        position: fixed;
+        inset: auto 0 0;
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        border-radius: 18px 18px 0 0;
+        padding-bottom: max(15px, env(safe-area-inset-bottom));
     }
-    #practiceLogDialog .practice-log-item-name { padding-top: 0; }
+}
+@media (max-width: 345px) {
+    #practiceLogReminders span { display: none; }
+    .practice-log-history-item .practice-log-activity-icon { display: none; }
+    .practice-log-history-item { grid-template-columns: minmax(0, 1fr) auto; }
 }
 
 /* ── Library (EPUB) full-text search — the bar and results injected at the
@@ -6080,21 +6307,6 @@ body.dialog-above-practice .ui-dialog {
 }
 
 #practiceReminderSettings { margin-block: .75rem; }
-#practiceLogDialog .practice-log-item {
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    padding: .85rem;
-    border: 1px solid #8995a34d;
-    border-radius: .65rem;
-}
-#practiceLogDialog .practice-log-item-goal,
-#practiceLogDialog .practice-log-item-notes {
-    grid-column: 1 / -1;
-    min-width: 0;
-}
-#practiceLogDialog .practice-log-item-remove {
-    grid-column: 3;
-    grid-row: 1;
-}
 .practice-goal-form > label { display: grid; gap: .3rem; margin-bottom: .75rem; }
 .practice-goal-form > .practice-reminder-toggle { display: flex; align-items: center; }
 .practice-goal-form > button { margin: .35rem .4rem .35rem 0; }

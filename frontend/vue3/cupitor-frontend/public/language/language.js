@@ -68,16 +68,16 @@ import {
   highlightStemInPrefixMatch as _coreHighlightStemInPrefixMatch,
 } from './highlight.js';
 import {
-  PRACTICE_LOG_DEFAULT_ITEMS,
-  PRACTICE_LOG_STATUSES,
   PRACTICE_LOG_DEFAULT_RETAIN,
   defaultPracticeLog as _defaultPracticeLog,
   normalizePracticeLog,
   isoWeekLabel as _isoWeekLabel,
   addDays as _addDays,
   prunePracticeLogWeeks as _corePrunePracticeLogWeeks,
-  ensurePracticeLogWeek as _ensurePracticeLogWeek,
-  weekHasUntouchedItem as _practiceLogWeekHasUntouchedItem,
+  hasPracticeLogEntry,
+  practiceLogMeasure,
+  updatePracticeGoal,
+  updatePracticeProgress,
   mergePracticeLog as _mergePracticeLog,
 } from './practice-log.js';
 import {
@@ -448,6 +448,9 @@ import {
 import {
   renderPracticeLogPlan,
   renderPracticeLogHistory,
+  openPracticeLogActivityPicker,
+  openPracticeLogGoalEditor,
+  openPracticeLogProgressEditor,
 } from './renderer/practice-log-render.js';
 import {
   tierLabel as _tierLabel,
@@ -3173,24 +3176,8 @@ window.openSubtitleCacheDialog = openSubtitleCacheDialog
 // ──────────────────────────────────────────────────────────────────────
 // Practice Log / Schedule
 // ──────────────────────────────────────────────────────────────────────
-// Per-language weekly planner. User picks a set of practice items (Reading,
-// Writing, Listening, Speaking, Vocabulary, Grammar — plus custom ones),
-// assigns each a status (not_started | in_progress | done | skipped) and
-// optional notes, separately for the current and next ISO week. Older weeks
-// remain in `weeks[]` so history can be replayed.
-//
-// Storage layout (kept identical on disk and in localStorage):
-//   {
-//     customItems: ["Reading", "Writing", ...],   // default 6 + user-added (order preserved)
-//     weeks: {
-//       "2026-W24": { "Reading": { status, notes }, ... },
-//       ...
-//     }
-//   }
-// localStorage key:   cupitor:practiceLog:<lang>
-// GitHub file:        db/language/<lang>/practice-log.json
-// First-open flag:    cupitor:practiceLog:openedOnce  (global, not per-lang)
-
+// Per-language weekly goals. Records keep the goal, measurement and status
+// together so a device never merges a count into the wrong unit.
 const PRACTICE_LOG_OPENED_KEY = 'cupitor:practiceLog:openedOnce'
 
 function _practiceLogLocalKey() {
@@ -3246,93 +3233,111 @@ function _practiceLogActiveWeekLabel() {
 }
 
 function _refreshPracticeLogPendingHint() {
-  const $h = $('#practiceLogPendingHint')
-  if ($h.length) $h.toggle(!!window._practiceLogPending)
-  // Same data drives both — fold in the button-highlight refresh so every
-  // edit/save callsite that already updates the pending hint also updates
-  // the "needs planning" cue without scattering separate hooks.
+  $('#practiceLogPendingHint').text(window._practiceLogPending ? 'Saved locally · changes to sync' : 'Saved on this device')
   _refreshPracticeLogBtnHighlight()
 }
 
-// Surface a "still has items left to plan/log" cue on the entry buttons
-// whenever either the current OR the next ISO week has any item whose
-// status is still not_started. Reads straight from localStorage so it
-// works before the dialog has ever been opened.
 function _refreshPracticeLogBtnHighlight() {
-  let needs = false
-  try {
-    const data = window._practiceLog || _loadPracticeLogLocal()
-    const cur = _currentWeekLabel(), nxt = _nextWeekLabel()
-    needs = _practiceLogWeekHasUntouchedItem(data, cur) || _practiceLogWeekHasUntouchedItem(data, nxt)
-  } catch (_) { needs = true }
+  const data = window._practiceLog || _loadPracticeLogLocal()
+  const current = Object.values(data.weeks[_currentWeekLabel()] || {}).filter(hasPracticeLogEntry)
+  const next = Object.values(data.weeks[_nextWeekLabel()] || {}).some(hasPracticeLogEntry)
+  const needs = !current.length || !next || current.some(item => item.status === 'not_started')
   $('#practiceLogFrontBtn, #practiceLogSettingsBtn, #headerPracticeLogBtn').toggleClass('practice-log-needs-attention', needs)
 }
 
-// Thin shim — VM in ./renderer/practice-log-render-vm.js, DOM emit in
-// ./renderer/practice-log-render.js. The wrapper owns the data mutation
-// + persistence side-effects via the callback bag.
+function _markPracticeLogEdited(data, weekLabel) {
+  if (weekLabel === _currentWeekLabel()) {
+    data.lastWeeklyUpdate = practiceDate()
+    if (data.reminders?.enabled && window.CallBridge) {
+      const reminders = mountPracticeReminders({ $, data: () => data, language: getLangFromUrl().fullName })
+      reminders.sync().catch(() => $('#practiceLogStatus').text('Could not sync reminders')).finally(reminders.dispose)
+    }
+  }
+  window._practiceLogPending = true
+  _savePracticeLogLocal(data)
+  _refreshPracticeLogPendingHint()
+}
+
 function _renderPracticeLogPlan() {
   const data = window._practiceLog
   if (!data) return
   const weekLabel = _practiceLogActiveWeekLabel()
-  const week = _ensurePracticeLogWeek(data, weekLabel)
-  const vm = buildPracticeLogPlanVM(data.customItems, week, weekLabel)
-  const markDirty = () => {
-    if (weekLabel === _currentWeekLabel()) {
-      data.lastWeeklyUpdate = practiceDate()
-      if (data.reminders?.enabled && window.CallBridge) {
-        const reminders = mountPracticeReminders({
-          $, data: () => data, language: getLangFromUrl().fullName,
-        })
-        reminders.sync().catch(() => $('#practiceLogStatus').text('Could not sync reminders')).finally(reminders.dispose)
-      }
-    }
-    window._practiceLogPending = true
-    _savePracticeLogLocal(data)
-    _refreshPracticeLogPendingHint()
+  const week = data.weeks[weekLabel]
+  const vm = buildPracticeLogPlanVM(data.customItems, week, weekLabel, window._practiceLogActiveTab === 'next')
+  const mount = $('#practiceLogItems')[0]
+  const add = $('#practiceLogAddItemBtn')[0]
+  const editor = $('#practiceLogEditor')[0]
+
+  function restoreFocus(name, selector) {
+    editor.addEventListener('close', () => {
+      const card = Array.from(mount.children).find(card => card.dataset.itemName === name)
+      ;(card?.querySelector(selector) || add).focus()
+    }, { once: true })
   }
-  renderPracticeLogPlan(vm, $('#practiceLogItems')[0], {
-    onStatusChange: (name, value) => {
-      week[name] = { ...week[name], status: value }
-      markDirty()
-    },
-    onGoalChange: (name, goal) => {
-      week[name] = { ...week[name], goal }
-      markDirty()
-    },
-    onNotesChange: (name, notes) => {
-      week[name] = { ...week[name], notes }
-      markDirty()
-    },
-    onRemoveItem: (name) => {
-      if (!confirm(`Remove "${name}" from the practice log? Existing history for this item will be kept but the item won't show on new weeks.`)) return
-      data.customItems = data.customItems.filter(n => n !== name)
-      delete week[name]
-      markDirty()
-      _renderPracticeLogPlan()
-    },
+  function saveRecord(name, update, selector) {
+    if (window._practiceLog !== data) return false
+    const currentWeek = data.weeks[weekLabel] || {}
+    const existing = Object.hasOwn(currentWeek, name) ? currentWeek[name] : {}
+    const record = update(existing)
+    data.weeks[weekLabel] = { ...currentWeek, [name]: record }
+    _markPracticeLogEdited(data, weekLabel)
+    restoreFocus(name, selector)
+    _renderPracticeLogPlan()
+    return true
+  }
+  const editGoal = item => openPracticeLogGoalEditor(editor, item, weekLabel, goal =>
+    saveRecord(item.name, current => {
+      if (!data.customItems.includes(item.name) && !hasPracticeLogEntry(current)) {
+        data.customItems = [...data.customItems, item.name]
+        data.activityEdits = { ...data.activityEdits, [item.name]: { available: true, updatedAt: Date.now() } }
+      }
+      return updatePracticeGoal(current, goal)
+    }, '.practice-log-item-goal'), name => {
+    if (window._practiceLog !== data || !confirm(`Remove "${name}" from available activities? Its saved goals and history will be kept.`)) return false
+    data.customItems = data.customItems.filter(item => item !== name)
+    data.activityEdits = { ...data.activityEdits, [name]: { available: false, updatedAt: Date.now() } }
+    _markPracticeLogEdited(data)
+    restoreFocus(name, '.practice-log-item-goal')
+    _renderPracticeLogPlan()
+    return true
+  }, item.measure ? () => {
+    if (!confirm(`Remove the ${item.name} goal for this week?`)) return false
+    return saveRecord(item.name, () => ({ deleted: true, updatedAt: Date.now() }), '.practice-log-item-goal')
+  } : null)
+  add.onclick = () => {
+    const usedNames = [...data.customItems, ...vm.items.map(item => item.name)]
+    openPracticeLogActivityPicker(editor, vm.available, usedNames, name => editGoal({ name }))
+  }
+  renderPracticeLogPlan(vm, mount, {
+    editGoal,
+    update: item => openPracticeLogProgressEditor(editor, item, (value, skip) => {
+      const current = data.weeks[weekLabel]?.[item.name] || {}
+      if (practiceLogMeasure(current).unit !== item.measure.unit) {
+        $('#practiceLogStatus').text('The goal unit changed. Open Update again.')
+        editor.close()
+        return false
+      }
+      return saveRecord(item.name, record => updatePracticeProgress(record, value, { skip }), '.practice-log-update')
+    }),
   }, $('#practiceLogWeekLabel')[0])
 }
 
-// Thin shim — VM in ./renderer/practice-log-render-vm.js, DOM emit in
-// ./renderer/practice-log-render.js. The retention input is synced from
-// data here (not in the VM) because we skip the update while the user
-// is editing it.
 function _renderPracticeLogHistory() {
   const data = window._practiceLog
   if (!data) return
   const $ret = $('#practiceLogHistoryWeeks')
   if (!$ret.is(':focus')) $ret.val(data.historyRetainWeeks || PRACTICE_LOG_DEFAULT_RETAIN)
-  const vm = buildPracticeLogHistoryVM(data)
+  const vm = buildPracticeLogHistoryVM(data, _currentWeekLabel())
   renderPracticeLogHistory(vm, $('#practiceLogHistoryList')[0])
 }
 
 function _setPracticeLogTab(tab) {
   window._practiceLogActiveTab = tab
-  $('#practiceLogDialog .practice-log-tab').removeClass('active')
-  $(`#practiceLogDialog .practice-log-tab[data-tab="${tab}"]`).addClass('active')
+  $('#practiceLogDialog .practice-log-tab').removeAttr('aria-current')
+  $(`#practiceLogDialog .practice-log-tab[data-tab="${tab}"]`).attr('aria-current', 'page')
   $('#practiceReminderSettings').prop('hidden', true)
-  $('#practiceLogWeekLabel').toggle(tab !== 'history')
+  _practiceReminders?.dispose()
+  _practiceReminders = undefined
   if (tab === 'history') {
     $('#practiceLogPlanView').hide()
     $('#practiceLogHistoryView').show()
@@ -3351,19 +3356,16 @@ async function openPracticeLogDialog(forceCurrent = false) {
   try { localStorage.setItem(PRACTICE_LOG_OPENED_KEY, '1') } catch (_) {}
   $('#practiceLogFrontBanner').hide()
 
+  const $dlg = $('#practiceLogDialog')
+  if ($dlg.hasClass('ui-dialog-content') && $dlg.dialog('isOpen')) {
+    if (forceCurrent === true) _setPracticeLogTab('current')
+    else $dlg.dialog('close')
+    return
+  }
+
   const local = _loadPracticeLogLocal()
   window._practiceLog = local
 
-  const $dlg = $('#practiceLogDialog')
-  // Cap height so the body scrolls inside the dialog instead of running off
-  // the viewport. The global dialogopen handler pins .ui-dialog at fixed
-  // top:20px with no bottom bound — without maxHeight the content extends
-  // past the screen and the inner element can't be scrolled. Recompute on
-  // every open in case the window was resized since last time.
-  //
-  // Mobile-aware viewport read: visualViewport.height excludes the dynamic
-  // address bar / keyboard so we don't size taller than what's actually
-  // visible; falls back to window.innerHeight then jQuery on very old UAs.
   const _vh = (window.visualViewport && window.visualViewport.height)
            || window.innerHeight
            || $(window).height()
@@ -3371,7 +3373,8 @@ async function openPracticeLogDialog(forceCurrent = false) {
   if (!$dlg.hasClass('ui-dialog-content')) {
     $dlg.dialog({
       title: 'Practice Log',
-      width: Math.min(840, $(window).width() - 24),
+      width: Math.min(820, $(window).width() - 20),
+      dialogClass: 'practice-log-window',
       maxHeight: dialogMaxH,
       modal: false,
       autoOpen: false,
@@ -3380,11 +3383,20 @@ async function openPracticeLogDialog(forceCurrent = false) {
       // gesture as a drag-the-dialog operation.
       draggable: false,
       resizable: false,
-      position: { my: 'center top', at: 'center top+30', of: window }
+      position: { my: 'center top', at: 'center top+30', of: window },
+      close() {
+        const editor = $('#practiceLogEditor')[0]
+        if (editor.open) editor.close()
+        _practiceReminders?.dispose()
+      },
+    })
+    $('#practiceLogReminders').insertBefore($dlg.dialog('widget').find('.ui-dialog-titlebar-close'))
+    $('#practiceLogEditor').on('keydown', event => {
+      if (event.key === 'Escape') event.stopPropagation()
     })
     $dlg.on('click', '.practice-log-tab', function () { _setPracticeLogTab($(this).data('tab')) })
     $('#practiceLogReminders').on('click', () => {
-      $('#practiceLogPlanView, #practiceLogHistoryView, #practiceLogWeekLabel').hide()
+      $('#practiceLogPlanView, #practiceLogHistoryView').hide()
       $('#practiceReminderSettings').prop('hidden', false)
       _practiceReminders?.dispose()
       _practiceReminders = mountPracticeReminders({
@@ -3399,32 +3411,21 @@ async function openPracticeLogDialog(forceCurrent = false) {
       })
       _practiceReminders.open()
     })
-    $('#practiceLogAddItemBtn').on('click', _practiceLogAddItem)
-    $('#practiceLogNewItemName').on('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); _practiceLogAddItem() }
-    })
-    $('#practiceLogHistoryWeeks').on('input', function () {
+    $('#practiceLogHistoryWeeks').on('change', function () {
       const data = window._practiceLog
       if (!data) return
-      const n = Math.max(1, parseInt($(this).val(), 10) || PRACTICE_LOG_DEFAULT_RETAIN)
+      const n = Math.min(9999, Math.max(1, this.valueAsNumber || PRACTICE_LOG_DEFAULT_RETAIN))
+      this.value = n
       if (data.historyRetainWeeks !== n) {
-        data.historyRetainWeeks = n
-        window._practiceLogPending = true
-        _savePracticeLogLocal(data)
-        _refreshPracticeLogPendingHint()
+        data.historyRetainWeeks = Math.round(n)
+        data.historyUpdatedAt = Date.now()
+        _markPracticeLogEdited(data)
       }
       _renderPracticeLogHistory()
     })
-    $('#practiceLogCloseBtn').on('click', function () { $dlg.dialog('close') })
     $('#practiceLogSaveBtn').on('click', _commitPracticeLogToGithub)
   }
-  if ($dlg.dialog('isOpen')) {
-    if (forceCurrent === true) _setPracticeLogTab('current')
-    else $dlg.dialog('close')
-    return
-  }
-  // Refresh maxHeight in case the viewport changed since dialog construction.
-  $dlg.dialog('option', 'maxHeight', dialogMaxH)
+  $dlg.dialog('option', { width: Math.min(820, $(window).width() - 20), maxHeight: dialogMaxH })
   $dlg.dialog('open')
 
   _setPracticeLogTab(forceCurrent === true ? 'current' : window._practiceLogActiveTab)
@@ -3433,16 +3434,16 @@ async function openPracticeLogDialog(forceCurrent = false) {
   // Background-fetch latest remote and merge in. Skips silently if offline.
   const $status = $('#practiceLogStatus').text('fetching remote…')
   const remote = await _fetchPracticeLogRemote()
+  if (window._practiceLog !== local) return
   if (remote) {
-    if (window._practiceLog !== local) return
     const merged = _mergePracticeLog(remote, local)
     Object.assign(local, merged)
     _savePracticeLogLocal(local)
     if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
     else _renderPracticeLogPlan()
-    $status.text('synced ' + new Date().toLocaleTimeString())
+    $status.empty()
   } else {
-    $status.text(_dsHasSelf() ? 'offline — local only' : 'local only')
+    $status.text(_dsHasSelf() ? 'Offline' : '')
   }
 }
 window.openPracticeLogDialog = openPracticeLogDialog
@@ -3454,57 +3455,44 @@ function _openPracticeReminder(detail) {
 window.addEventListener('cupitorPracticeReminderOpened', event => _openPracticeReminder(event.detail))
 $(function () { _openPracticeReminder(window.__cupitorPracticeReminderOpened) })
 
-function _practiceLogAddItem() {
-  const $inp = $('#practiceLogNewItemName')
-  const raw = ($inp.val() || '').trim()
-  if (!raw) return
-  const data = window._practiceLog
-  if (data.customItems.indexOf(raw) !== -1) {
-    alert(`"${raw}" is already in the list.`)
-    return
-  }
-  data.customItems.push(raw)
-  $inp.val('')
-  window._practiceLogPending = true
-  _savePracticeLogLocal(data)
-  _renderPracticeLogPlan()
-  _refreshPracticeLogPendingHint()
-}
-
 async function _commitPracticeLogToGithub() {
-  if (!_requireSelf()) return
-  const $status = $('#practiceLogStatus')
+  const $button = $('#practiceLogSaveBtn')
   const data = window._practiceLog
+  if (!data || $button.prop('disabled') || !_requireSelf()) return
+  const $status = $('#practiceLogStatus').text('Syncing…')
   const filePath = _practiceLogGithubPath()
   const baseline = JSON.stringify(data)
-  $status.text('pushing…')
+  $button.prop('disabled', true)
   try {
     await _userData.flush()
-    await commitWithMerge({
+    const syncedText = await commitWithMerge({
       filePath,
-      commitMessage: 'practice-log: update goals and weekly notes',
-      merge: (remoteText) => {
-        let remote = null
-        // Unreadable text on the server is not "no log yet": writing over it would lose it.
-        if (remoteText && remoteText.trim()) remote = JSON.parse(remoteText)
-        const local = JSON.parse(baseline)
-        const merged = _prunePracticeLogWeeks(_mergePracticeLog(remote, local))
-        // Refresh in-memory state so the dialog reflects the merged result.
-        window._practiceLog = merged
-        _savePracticeLogLocal(merged)
+      commitMessage: 'practice-log: update weekly goals and progress',
+      merge: remoteText => {
+        // Invalid remote data must not be overwritten.
+        const remote = remoteText?.trim() ? normalizePracticeLog(JSON.parse(remoteText)) : null
+        if (remoteText?.trim() && !remote) throw new Error('Practice Log on GitHub is invalid.')
+        const merged = _prunePracticeLogWeeks(_mergePracticeLog(remote, JSON.parse(baseline)))
         return JSON.stringify(merged, null, 2) + '\n'
       }
     })
-    await _userData.flush()
-    window._practiceLogPending = false
+    if (window._practiceLog !== data) return
+    const changed = JSON.stringify(data) !== baseline
+    const synced = JSON.parse(syncedText)
+    const merged = changed ? _prunePracticeLogWeeks(_mergePracticeLog(synced, data)) : synced
+    Object.assign(data, merged)
+    _savePracticeLogLocal(data)
+    window._practiceLogPending = changed
     _refreshPracticeLogPendingHint()
     if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
     else _renderPracticeLogPlan()
-    $status.text('saved ' + new Date().toLocaleTimeString())
+    $status.text('Synced ' + new Date().toLocaleTimeString())
+    await _userData.flush()
   } catch (e) {
-    console.error('practice-log commit failed:', e)
-    $status.text('push failed — kept locally')
-    alert('Saved locally but GitHub push failed: ' + (e && e.message ? e.message : e))
+    console.error('practice-log sync failed:', e)
+    $status.text('Could not sync')
+  } finally {
+    $button.prop('disabled', false)
   }
 }
 

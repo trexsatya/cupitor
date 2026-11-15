@@ -10,6 +10,9 @@ import {
   ensurePracticeLogWeek,
   weekHasUntouchedItem,
   mergePracticeLog,
+  updatePracticeGoal,
+  updatePracticeProgress,
+  practiceLogMeasure,
 } from "./practice-log";
 
 describe("constants", () => {
@@ -134,7 +137,7 @@ describe("prunePracticeLogWeeks", () => {
     );
     prunePracticeLogWeeks(data, "2026-W20", "2026-W21");
     expect(new Set(Object.keys(data.weeks)))
-      .toEqual(new Set(["2026-W20", "2026-W21"]));
+      .toEqual(new Set(["2026-W02", "2026-W20", "2026-W21"]));
   });
   test("falls back to DEFAULT_RETAIN when retain is bogus", () => {
     const data = makeData({ "2026-W01": {}, "2026-W02": {} }, 0);
@@ -277,5 +280,36 @@ describe("mergePracticeLog", () => {
     }, historyRetainWeeks: 5 };
     const out = mergePracticeLog(r, l);
     expect(out.weeks.W1.Reading).toEqual({ status: "not_started", notes: "remote idea" });
+  });
+});
+
+describe("weekly progress records", () => {
+  test("tracks percentage progress and marks a goal complete at 100%", () => {
+    const goal = updatePracticeGoal({}, { goal: "Write", unit: "", target: null }, 1);
+    const partial = updatePracticeProgress(goal, 60, { updatedAt: 2 });
+    expect(practiceLogMeasure(partial).label).toBe("60%");
+    expect(partial.status).toBe("in_progress");
+    expect(updatePracticeProgress(partial, 120).status).toBe("done");
+    expect(updatePracticeProgress(partial, 120).progress).toBe(100);
+  });
+
+  test("keeps counts above the target and preserves them when the goal is edited", () => {
+    const goal = updatePracticeGoal({}, { goal: "Read", unit: "pages", target: 30 }, 1);
+    const done = updatePracticeProgress(goal, 31, { updatedAt: 2 });
+    expect(practiceLogMeasure(done).percent).toBe(100);
+    expect(practiceLogMeasure(done).label).toBe("31 / 30 pages");
+    const edited = updatePracticeGoal(done, { goal: "Read more", unit: "pages", target: 40 }, 3);
+    expect(edited.progress).toBe(31);
+    expect(edited.status).toBe("in_progress");
+  });
+
+  test("syncs the most recent whole record and allows lowering the history limit", () => {
+    const remoteGoal = updatePracticeGoal({}, { goal: "Read", unit: "pages", target: 30 }, 1);
+    const local = { weeks: { "2026-W46": { Reading: remoteGoal } }, historyRetainWeeks: 3, historyUpdatedAt: 4 };
+    const remote = { weeks: { "2026-W46": { Reading: updatePracticeProgress(remoteGoal, 12, { updatedAt: 3 }) } },
+      historyRetainWeeks: 100 };
+    const merged = mergePracticeLog(remote, local);
+    expect(merged.weeks["2026-W46"].Reading.progress).toBe(12);
+    expect(merged.historyRetainWeeks).toBe(3);
   });
 });

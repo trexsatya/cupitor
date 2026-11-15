@@ -137,6 +137,7 @@ jobs:
           node tests/browser/study-page-scroll.cjs
           node tests/browser/spotify-practice.cjs
           node tests/browser/notification-practice.cjs
+          node tests/browser/practice-log.cjs
           node tests/browser/study-calls.cjs
           node tests/browser/language-dialogs.cjs
           node tests/browser/local-file-picker.cjs
@@ -216,6 +217,7 @@ jobs:
           node tests/browser/view-switching.cjs
           node tests/browser/spotify-practice.cjs
           node tests/browser/notification-practice.cjs
+          node tests/browser/practice-log.cjs
           node tests/browser/study-calls.cjs
           node tests/browser/practice-controls.cjs
           node tests/browser/practice-manual-video.cjs
