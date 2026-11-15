@@ -102,6 +102,7 @@
       if (Math.abs(player.currentTime - time) > 1) pendingSeek = {time, until: Date.now() + 500};
     }
     const player = {
+      get metadata() { return bridge?.session?.metadata; },
       get isConnected() { return !!controls() || !!nativeMedia() || !!sessionPosition(); },
       get duration() {
         const mediaDuration = nativeMedia()?.duration;

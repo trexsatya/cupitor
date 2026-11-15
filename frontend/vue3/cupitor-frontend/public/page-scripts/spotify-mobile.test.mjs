@@ -13,9 +13,9 @@ const lines = [
   {start: 12.52, end: 14.16, text: 'Second cue'},
   {start: 14.42, end: 17.96, text: 'Third cue'},
 ];
-export function boot({session = false} = {}) {
+export function boot({session = false, url = address} = {}) {
   const dom = new JSDOM('<html><head><title>Episode</title></head><body><main><h1>Episode</h1><button data-testid="play-button" aria-label="Pausa">Pause</button></main></body></html>', {
-    url: address, runScripts: 'outside-only', pretendToBeVisual: true,
+    url, runScripts: 'outside-only', pretendToBeVisual: true,
   });
   const {window} = dom, doc = window.document;
   window.console = {log(){},warn(){},error(){}};
@@ -53,6 +53,31 @@ export function boot({session = false} = {}) {
     close(){window.close();},
   };
 }
+test('a paused mobile Spotify episode without a track URL can open a local SRT', () => {
+  const p = boot({session: true, url: 'https://open.spotify.com/'});
+  try {
+    p.doc.getElementById('cup-spotify-srt-toggle').click();
+    assert.equal(p.doc.querySelector('[data-act="open-srt"]').disabled, false);
+    assert.equal(p.import(), true);
+    p.tick();
+    assert.equal(p.rows().length, lines.length);
+    assert.ok(p.doc.body.classList.contains('cup-sub-split'), 'import leaves the subtitle panel open');
+    assert.equal(p.doc.querySelector('[data-act="pick"]').style.display, 'none', 'clips require an identified Spotify item');
+    assert.equal(p.window.sessionStorage.getItem('cupitorLocalSubtitles'), null, 'unlinked subtitles are not cached');
+
+    // Spotify can first expose the title and playback position after playback starts.
+    p.ms.metadata = {title: 'Kropp & Själ', artist: 'Sveriges Radio'};
+    p.ms.playbackState = 'playing';
+    p.ms.setPositionState({duration: 3307.76, position: 12.8, playbackRate: 1});
+    p.tick();
+    assert.ok(p.rows()[1].classList.contains('cup-active'), 'the SRT syncs once playback is available');
+
+    p.ms.metadata = {title: 'Next episode', artist: 'Sveriges Radio'};
+    p.tick();
+    assert.equal(p.rows().length, 0, 'a different item drops the unlinked transcript');
+  } finally { p.close(); }
+});
+
 test('mobile Spotify follows detached audio and seeks a cue without desktop controls', async()=>{
   const p=boot();
   try{

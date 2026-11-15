@@ -40,7 +40,7 @@
     // Version tag: bump whenever the snippet changes in a way that requires
     // tearing down the previous install (new UI, new state shape, etc).
     // The previous install's tear-down hook clears its sidebar + intervals.
-    const CAPS_VERSION = 31;
+    const CAPS_VERSION = 32;
     const prev = window.__cupCapsInstalled;
     if (prev && typeof prev === 'object' && prev.version >= CAPS_VERSION) return;
     if (prev && typeof prev === 'object' && typeof prev.teardown === 'function') {
@@ -98,6 +98,7 @@
       ? shared.createYouTubeSplitLayout(getPlayer) : null;
     const hasLocalPicker = !!(window.LocalSubtitles && typeof window.LocalSubtitles.postMessage === 'function');
     let spotifyPanelOpen = null;
+    let importedMediaKey = null;
     if (adaptedPlayer) window.__cupCaptionPlayer = adaptedPlayer;
     if (site.id === 'spotify') document.body.classList.add('cup-sub-spotify');
     const ui = createSubtitleUI({
@@ -106,6 +107,9 @@
       timeParam: timeParam,
       timeLinkOn: timeLinkOn,
       mediaUrl: site.mediaUrl,
+      canCapture: site.id === 'spotify'
+        ? () => !!importedMediaKey && importedMediaKey === site.mediaKey()
+        : undefined,
       onOpenSubtitles: hasLocalPicker ? openLocalSubtitles : null,
       onSplitChange: on => {
         if (!adaptedPlayer && site.id !== 'youtube') return;
@@ -172,10 +176,10 @@
         return;
       }
       const hasMedia = !!site.mediaKey();
-      ui.setImportAvailable(hasMedia);
       ui.showNotice(!hasLocalPicker
         ? 'Update Cupitor to the latest app build to open local SRT files.'
-        : !hasMedia ? 'Start a track or episode in Spotify, then select Open SRT.' : adaptedPlayer.statusMessage || '');
+        : !hasMedia && !ui.cueCount ? 'Open an SRT to read it alongside Spotify.'
+          : adaptedPlayer.statusMessage || (!hasMedia ? 'Open the Spotify track or episode page to save clips.' : ''));
     }
 
     function currentYouTubeId() {
@@ -187,7 +191,6 @@
       return /^[A-Za-z0-9_-]{11}$/.test(id || '') ? id : null;
     }
     const defaultSourceLanguage = ui.sourceLanguage;
-    let importedMediaKey = null;
     let pendingLocal = null;
     const localCacheKey = 'cupitorLocalSubtitles';
     function readLocalTracks() {
@@ -217,8 +220,9 @@
       importedMediaKey = pageKey();
       ui.setVideoElement(getPlayer());
       ui.replaceCues(track.lines, track.lang);
-      ui.setSplit(isWatchPage() && !!getPlayer());
-      if (remember) {
+      ui.setSplit(adaptedPlayer ? (spotifyPanelOpen ?? isWatchPage()) : isWatchPage() && !!getPlayer());
+      // Without a track URL the transcript belongs only to this visible session.
+      if (remember && (!adaptedPlayer || site.mediaKey())) {
         writeLocalTracks([...readLocalTracks().filter(t => t && t.mediaKey !== importedMediaKey),
           {...track, mediaKey: importedMediaKey}]);
         const id = currentYouTubeId();
@@ -287,7 +291,8 @@
     }
     function restoreDownload() {
       if (importedMediaKey === pageKey()) return;
-      const local = readLocalTracks().find(t => t && t.mediaKey === pageKey());
+      const local = (!adaptedPlayer || site.mediaKey()) &&
+        readLocalTracks().find(t => t && t.mediaKey === pageKey());
       if (local && installLocalTrack(local, false)) return;
       const id = currentYouTubeId();
       if (!id) return;
@@ -350,8 +355,20 @@
     } catch (e) {
       console.warn('[captions] site videoParams could not be read', e);
     }
+    let lastSpotifyMetadata = null;
+    let spotifyItemVersion = 0;
     const pageKey = () => {
-      if (typeof site.mediaKey === 'function') return site.mediaKey() || 'spotify:no-media';
+      if (typeof site.mediaKey === 'function') {
+        const mediaKey = site.mediaKey();
+        if (mediaKey) return mediaKey;
+        const metadata = adaptedPlayer?.metadata;
+        if (metadata?.title) {
+          const signature = JSON.stringify([metadata.title, metadata.artist, metadata.album]);
+          if (lastSpotifyMetadata && signature !== lastSpotifyMetadata) spotifyItemVersion++;
+          lastSpotifyMetadata = signature;
+        }
+        return 'spotify:unlinked:' + location.pathname + ':' + spotifyItemVersion;
+      }
       const key = location.origin + location.pathname;
       if (!videoParams.length) return key;
       const q = new URLSearchParams(location.search);
