@@ -89,8 +89,8 @@ test('Spotify home exposes an SRT launcher before a track has rendered', () => {
     assert.ok(toggle, 'SRT control is discoverable on Spotify home');
     toggle.click();
     assert.ok(p.doc.body.classList.contains('cup-sub-split'));
-    assert.equal(p.doc.querySelector('[data-act="open-srt"]').disabled, true);
-    assert.match(p.doc.querySelector('[data-r="notice"]').textContent, /track or episode/i);
+    assert.equal(p.doc.querySelector('[data-act="open-srt"]').disabled, false);
+    assert.match(p.doc.querySelector('[data-r="notice"]').textContent, /Open an SRT to read it/i);
     toggle.click(); p.tick();
     assert.equal(p.doc.body.classList.contains('cup-sub-split'), false);
   } finally { p.close(); }
@@ -104,11 +104,11 @@ test('an old app shows the reason local files are unavailable rather than hiding
   } finally { p.close(); }
 });
 
-test('Open SRT becomes available when the Spotify player renders after opening the panel', () => {
+test('a late Spotify track can be detected without re-opening the subtitle panel', () => {
   const p = boot({home: true});
   try {
     p.doc.getElementById('cup-spotify-srt-toggle').click();
-    assert.equal(p.doc.querySelector('[data-act="open-srt"]').disabled, true);
+    assert.equal(p.doc.querySelector('[data-act="open-srt"]').disabled, false);
     p.doc.body.insertAdjacentHTML('beforeend', `<footer data-testid="now-playing-bar"><div data-testid="now-playing-widget"><a href="${track}">Track</a></div><span data-testid="playback-position">0:00</span><span data-testid="playback-duration">2:00</span><input data-testid="playback-progressbar" type="range" min="0" max="120000" value="0"></footer>`);
     p.tick();
     assert.equal(p.doc.querySelector('[data-act="open-srt"]').disabled, false);

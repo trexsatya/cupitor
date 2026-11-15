@@ -38,7 +38,6 @@
       listEl: null,
       currentVideo: null,
       importBusy: false,
-      importAvailable: true,
       activeIdx: -1,
       autoScroll: true,
       splitActive: false,
@@ -363,7 +362,7 @@
       const openSrt = sb.querySelector('[data-act="open-srt"]');
       if (typeof opts.onOpenSubtitles === 'function') {
         openSrt.style.display = '';
-        openSrt.disabled = state.importBusy || !state.importAvailable;
+        openSrt.disabled = state.importBusy;
         openSrt.onclick = () => opts.onOpenSubtitles();
       }
       sb.querySelector('[data-act="prev"]').onclick = () => seekRelative(-1);
@@ -627,6 +626,7 @@
     // Selection is only offered inside Cupitor: without the channel there is
     // nowhere to send, so the button would be a dead control in a browser.
     function canSend() {
+      if (typeof opts.canCapture === 'function' && !opts.canCapture()) return false;
       if (typeof opts.onCapture === 'function') return true;
       try {
         return !!(window.CaptionCollector &&
@@ -1337,12 +1337,7 @@
       setImportBusy(busy) {
         state.importBusy = !!busy;
         const button = state.sidebar && state.sidebar.querySelector('[data-act="open-srt"]');
-        if (button) button.disabled = state.importBusy || !state.importAvailable;
-      },
-      setImportAvailable(available) {
-        state.importAvailable = !!available;
-        const button = state.sidebar && state.sidebar.querySelector('[data-act="open-srt"]');
-        if (button) button.disabled = state.importBusy || !state.importAvailable;
+        if (button) button.disabled = state.importBusy;
       },
       showNotice(message) {
         buildSidebar();
