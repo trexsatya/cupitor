@@ -2198,6 +2198,19 @@ async function doSearch(searchThis, el) {
   const token = (window._subtitleSearchToken || 0) + 1
   window._subtitleSearchToken = token
   window.cupitorSubtitleSearch?.cancel()
+  if (!String(query || '').trim()) {
+    window.searchText = window._librarySearchText = window._vocabularySearchText = ''
+    window.searchResult = []
+    window.wordToItemsMap = window._shownWordToItemsMap = window._lastWordToItemsMap = {}
+    window._subtitleSearchCompletion = null
+    resetSearchResultIndex()
+    _clearSearchLoading()
+    _hideStaleTranslationPanel()
+    _resetLibrarySearch()
+    $('#result, #vocabularyResult').empty()
+    $('#search-pagination').hide()
+    return false
+  }
   const searchSrts = window._appSettings?.includeSrtsInSearch !== false
   if (!window.vocabulary || (searchSrts && !window._subtitlesLoaded)) {
     console.log('[search] data not loaded yet, deferring until vocabulary + subtitles ready…')
@@ -3976,6 +3989,9 @@ $('document').ready(e => {
     else $searchTextClearBtn.hide()
   }
   $searchText1.on('input change', updateSearchTextClearBtn)
+  $searchText1.on('input', () => {
+    if (!String($searchText1.val() || '').trim()) searchTextChanged()
+  })
   $searchTextClearBtn.click(() => {
     $searchText1.val('').trigger('change')
     $searchText1.focus()
