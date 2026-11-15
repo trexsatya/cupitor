@@ -164,3 +164,15 @@ test('F is an alias for R; flip keys do not fire during text selection or editin
   expect(keyboardShortcut({ key: 'f', repeat: true }, { practice: true })).toBeNull()
   expect(KEYBOARD_SHORTCUTS.find(x => x.keys.includes('F')).label).toMatch(/flip/i)
 })
+
+test.each([
+  ['Search', 'Alt + Shift + ←', /history/],
+  ['Player', 'Space', /play or pause/i],
+  ['Word maps', 'Ctrl/Cmd + Enter', /apply node text/i],
+  ['Rich card editor', 'Ctrl/Cmd + Shift + X', /strikethrough/i],
+  ['Subtitle editor', 'Ctrl/Cmd + Enter', /save/i],
+  ['Picture viewer', 'Esc', /close/i],
+  ['Desktop app browser', 'Ctrl/Cmd + D', /bookmark/i]
+])('the shared reference includes %s shortcut %s', (scope, key, action) => {
+  expect(KEYBOARD_SHORTCUTS.find(s => s.scope === scope && s.keys.includes(key))?.label).toMatch(action)
+})

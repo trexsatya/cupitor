@@ -4031,6 +4031,7 @@ $('document').ready(e => {
     $('#searchHistoryPanel .srch-hist-row:visible').first().trigger('focus')
   })
   wireMobileSearch()
+  _renderKeyboardShortcuts($('#searchHelpShortcuts'))
 
   const $searchOptionsButton = $('#searchVocabularyByPrefixBtn')
   const setSearchOptionsOpen = open => {
@@ -24331,23 +24332,27 @@ async function _practiceCardLines(it, before, after) {
   return rows
 }
 
-// The reference and shortcuts share the same definitions. Dialogs and text
-// editing keep their own keyboard behavior, including IME composition.
-function openKeyboardShortcuts() {
-  try { autoHideSettingsPanel() } catch (_) {}
-  let $dlg = $('#keyboardShortcutsDialog')
-  if (!$dlg.length) $dlg = $('<div id="keyboardShortcutsDialog" title="Keyboard shortcuts"></div>').appendTo('body')
-  $dlg.empty()
-  for (const scope of ['General', 'Search', 'Practice']) {
-    $dlg.append($('<h3></h3>').text(scope))
-    const $table = $('<table class="keyboard-shortcuts-table"></table>').appendTo($dlg)
+function _renderKeyboardShortcuts($container) {
+  $container.empty()
+  for (const scope of [...new Set(KEYBOARD_SHORTCUTS.map(shortcut => shortcut.scope))]) {
+    $container.append($('<h4></h4>').text(scope))
+    const $table = $('<table class="keyboard-shortcuts-table"></table>').appendTo($container)
     KEYBOARD_SHORTCUTS.filter(s => s.scope === scope).forEach(s => {
       const $row = $('<tr></tr>').appendTo($table)
       $('<td></td>').append(s.keys.map(key => $('<kbd></kbd>').text(key).get(0))).appendTo($row)
       $('<td></td>').text(s.label).appendTo($row)
     })
   }
-  $dlg.append('<p>Shortcuts pause while typing or editing a dialog. In the main search field, / selects the query. If YouTube has keyboard focus, click the card first. Focused buttons keep their normal Space action.</p>')
+  $container.prepend('<p>Use Cmd on macOS and Ctrl on Windows or Linux. If YouTube has keyboard focus, click the card before using study shortcuts.</p>')
+}
+
+// The reference and shortcuts share the same definitions. Dialogs and text
+// editing keep their own keyboard behavior, including IME composition.
+function openKeyboardShortcuts() {
+  try { autoHideSettingsPanel() } catch (_) {}
+  let $dlg = $('#keyboardShortcutsDialog')
+  if (!$dlg.length) $dlg = $('<div id="keyboardShortcutsDialog" title="Keyboard shortcuts"></div>').appendTo('body')
+  _renderKeyboardShortcuts($dlg)
   const options = {
     width: Math.min(560, window.innerWidth - 24), maxHeight: window.innerHeight - 40,
     modal: true, draggable: false, resizable: false,
