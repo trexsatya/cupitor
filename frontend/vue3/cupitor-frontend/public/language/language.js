@@ -1,3 +1,4 @@
+import { wireMobileSearch } from './mobile-search.js'
 import { attributeSubtitleMatches } from './subtitle-search-engine.js';
 import { createSubtitleSearchClient, observeSubtitleCorpus } from './subtitle-search-client.js';
 import { userDataReady } from './user-data.js';
@@ -2345,6 +2346,7 @@ function _searchHistoryPanelEl() {
       e.preventDefault(); e.stopPropagation()
       const idx = parseInt(this.getAttribute('data-idx'), 10)
       _closeSearchHistoryPanel()
+      window._searchHistoryAnchor?.focus({ preventScroll: true })
       replaySearchHistoryAt(idx)
     })
   }
@@ -2395,13 +2397,20 @@ function _positionSearchHistoryPanel(btn) {
   $p.css({ left: left + 'px', top: (r.bottom + 4) + 'px', width: pw + 'px', maxHeight: maxH + 'px' })
 }
 
-function _closeSearchHistoryPanel() { $('#searchHistoryPanel').hide() }
+function _closeSearchHistoryPanel() {
+  $('#searchHistoryPanel').hide()
+  $('#searchHistoryBtn').attr('aria-expanded', 'false')
+}
 
 // The list is a picture of the history, and the history moves under it: a step
 // with the buttons moves where "here" is, and a search recorded while the list
 // is open shifts every entry along by one — which would leave a row replaying
 // its neighbour. Cheap enough to simply redraw.
 function _refreshSearchHistoryPanel() {
+  const list = window.sessionSearchHistory || []
+  const index = window.sessionHistoryIndex
+  $('#prevSearchBtn').attr('aria-disabled', String(!list.length || index === 0))
+  $('#nextSearchBtn').attr('aria-disabled', String(index < 0 || index >= list.length - 1))
   if ($('#searchHistoryPanel').is(':visible')) _renderSearchHistoryPanel()
 }
 
@@ -2411,6 +2420,7 @@ function _openSearchHistoryPanel(btn) {
   $p.show()
   _positionSearchHistoryPanel(btn)
   window._searchHistoryAnchor = btn
+  if (btn.id === 'searchHistoryBtn') $(btn).attr('aria-expanded', 'true')
   // Put where you are standing in view — with a long history the current entry
   // is otherwise somewhere below the fold, and it is the one landmark the list
   // has.
@@ -2450,11 +2460,14 @@ function _wireSearchHistoryLongPress() {
     })
   })
   $(document).on('click.srchHist', e => {
-    if ($(e.target).closest('#searchHistoryPanel, #prevSearchBtn, #nextSearchBtn').length) return
+    if ($(e.target).closest('#searchHistoryPanel, #prevSearchBtn, #nextSearchBtn, #searchHistoryBtn').length) return
     _closeSearchHistoryPanel()
   })
   $(document).on('keydown.srchHist', e => {
-    if (e.key === 'Escape' && $('#searchHistoryPanel').is(':visible')) _closeSearchHistoryPanel()
+    if (e.key === 'Escape' && $('#searchHistoryPanel').is(':visible')) {
+      _closeSearchHistoryPanel()
+      window._searchHistoryAnchor?.focus({ preventScroll: true })
+    }
   })
   $(window).on('resize.srchHist', () => _positionSearchHistoryPanel(window._searchHistoryAnchor))
 }
@@ -3600,9 +3613,11 @@ export function renderVocabularyLineByText(lineText) {
   const surroundings = getSurrounding(idx, allLines);
   const matchEntry = surroundings.find(it => it.index === idx) || { item: allLines[idx], index: idx };
   const $header = _buildVocabLine(matchEntry);
-  $header.addClass('highlighted similar-segment-header');
+  $header.addClass('highlighted similar-segment-header')
+    .attr({ role: 'button', tabindex: '0', 'aria-expanded': 'false' });
+  $header.find('.vocab-entry-search').remove();
   $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>');
-  $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}]</span>`);
+  $header.append($('<span class="search-vocabulary-category"></span>').text('[' + category + ']'));
   vocabItemContent.append($header);
   const $body = $('<div class="similar-segment-body" hidden></div>');
   // Keep the matched line at its original position inside the body so the
@@ -3614,7 +3629,7 @@ export function renderVocabularyLineByText(lineText) {
   });
   vocabItemContent.append($body);
   vocabItem.append(vocabItemContent);
-  vocab.append(vocabItem);
+  vocab.append('<h2 class="mobile-vocab-title">Vocabulary match</h2>', vocabItem);
 
   _attachAccordionDelegate(vocab);
 
@@ -3800,7 +3815,6 @@ function fixMobileView() {
 
   $('#btns-2 .select2').css({width: '210px'})
   $('#mp3ChoiceContainer .select2').css({width: '78%'})
-  $('#btns-2').css({marginBottom: '1em'})
 
   // $('#result').parent().css({marginTop: '3.8em'})
 
@@ -4010,6 +4024,12 @@ $('document').ready(e => {
     navigateSearchHistory(e.key === 'ArrowLeft' ? -1 : 1)
   })
   _wireSearchHistoryLongPress()
+  _refreshSearchHistoryPanel()
+  $('#searchHistoryBtn').on('click', function () {
+    _toggleSearchHistoryPanel(this)
+    $('#searchHistoryPanel .srch-hist-row:visible').first().trigger('focus')
+  })
+  wireMobileSearch()
 
   $('#searchVocabularyByPrefixBtn').click(e => {
     e.stopPropagation()
@@ -4074,9 +4094,9 @@ $('document').ready(e => {
       // old transport again on keyup resumes a just-paused clip or seeks a
       // newly cued card, which can start it playing.
       if (window._practiceActive || window._playingRecording || e.defaultPrevented || e.isComposing ||
-          e.ctrlKey || e.altKey || e.metaKey || $('.ui-dialog:visible').length ||
-          e.target?.isContentEditable || $(e.target).closest('input,textarea,select,audio,video,[role="textbox"],[role="combobox"],[role="slider"],.ck').length) return
-      if (e.which === 32 && !$(e.target).is('input')) { //Space
+          e.ctrlKey || e.altKey || e.metaKey || $('.ui-dialog:visible, dialog[open]').length ||
+          e.target?.isContentEditable || $(e.target).closest('button,summary,input,textarea,select,audio,video,[role="button"],[role="textbox"],[role="combobox"],[role="slider"],.ck').length) return
+      if (e.which === 32) { //Space
         togglePlay()
         e.preventDefault()
         e.stopPropagation()
@@ -4240,8 +4260,20 @@ $('document').ready(e => {
     if (on && window.searchText) librarySearch(_librarySearchTerm())
   })
 
+  const $searchLanguage = $('#searchLanguageSelect')
+  const studyLanguage = getLangFromUrl().definition
+  if (studyLanguage) {
+    const name = studyLanguage.name
+    $searchLanguage.find('option[value="sv"]').text(name[0].toUpperCase() + name.slice(1))
+  }
+  $searchLanguage.val(getSelectedLang())
+  $searchLanguage.on('change', function () {
+    _setLangToggle(this.value === 'en')
+    if (window.searchText) fetchSRTs(window.searchText)
+  })
   $('#toggleLangCb').change(e => {
-    fetchSRTs(window.searchText)
+    $searchLanguage.val(e.target.checked ? 'en' : 'sv')
+    if (window.searchText) fetchSRTs(window.searchText)
   })
 
   try {
@@ -6591,7 +6623,7 @@ function sendWordToSearchBox(word, opts = {}) {
 window.sendWordToSearchBox = sendWordToSearchBox
 
 function selectSearchedWord(event) {
-  const textToMatch = $(event.target).parent().data('text').replaceAll("\n", "")
+  const textToMatch = $(event.currentTarget).parent().data('text').replaceAll("\n", "")
   // Find the option with text containing the textToMatch string
   const $option = $('#searchedWords option').filter(function() {
     return $(this).text().toLowerCase().includes(textToMatch.toLowerCase());
@@ -7519,7 +7551,8 @@ function _renderSearchPlaylistToolbar(state, $result) {
   if (!state.groups.some(group => group.items.length)) return
   const $options = $result.children('#manualSearchBar')
   const $toolbar = $(`<form id="searchPlaylistToolbar" aria-label="Playlist from search results">
-    <button id="searchPlaylistSelectBtn" type="button" title="Select headings for a temporary playlist" aria-label="Select headings for playlist" aria-pressed="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m2 5 2 2 4-4m-6 10 2 2 4-4m2-6h12M10 13h12M2 21h20"/></svg><span id="searchPlaylistSelectedCount" aria-live="polite"></span></button>
+    <h2 class="mobile-subtitle-title">Subtitle results</h2>
+    <button id="searchPlaylistSelectBtn" type="button" title="Select headings for a temporary playlist" aria-label="Select clips for a playlist" aria-pressed="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m2 5 2 2 4-4m-6 10 2 2 4-4m2-6h12M10 13h12M2 21h20"/></svg><span class="mobile-select-clips-label">Select clips</span><span id="searchPlaylistSelectedCount" aria-live="polite"></span></button>
     <span id="searchPlaylistActions" hidden>
       <label title="Maximum clips from each selected heading; leave blank to include all">Max per heading <input id="searchPlaylistMaxClips" type="number" min="1" max="9007199254740991" step="1" inputmode="numeric" placeholder="All" aria-label="Max clips per heading"></label>
       <button id="searchPlaylistCreateBtn" type="submit" title="Create a temporary playlist and open Player with a 5-second gap" aria-label="Create playlist from selected headings">${_searchPlaylistIcon}</button>
@@ -7635,11 +7668,12 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
         // came in through the guess. Dimmed, so the eye goes to the headings that
         // answer what was actually asked.
         const viaGuessOnly = grouped && !isSweepUp && items.length > 0 && items.every(it => it && it._viaGuess)
-        const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}${viaGuessOnly ? ' srt-guess-only' : ''}"${viaGuessOnly ? ' title="No English line here contains the search word — these are lines whose ' + _.escape(getLangFromUrl().fullName || 'studied-language') + ' side uses this guess"' : ''}><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${_.escape(title)} <span class="match-count"></span></h5></div>`)
+        const wordBlock = $(`<div class="subtitle-result-group"><h5 class="l-accordion ${items.length ? '' : 'no-result'}${viaGuessOnly ? ' srt-guess-only' : ''}"${viaGuessOnly ? ' title="No English line here contains the search word — these are lines whose ' + _.escape(getLangFromUrl().fullName || 'studied-language') + ' side uses this guess"' : ''}><button type="button" class="subtitle-result-toggle" aria-expanded="false"><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> <span class="subtitle-result-word">${_.escape(title)}</span> <span class="match-count"></span></button></h5></div>`)
         const $choice = $('<label class="search-playlist-choice"><input type="checkbox" class="search-playlist-checkbox"></label>')
           .prop('hidden', !selection.selecting)
           .on('click', e => e.stopPropagation())
           .appendTo(wordBlock.find('.l-accordion'))
+        if (!isSweepUp) wordBlock.find('.subtitle-result-word').attr('lang', selection.lang === 'en' && !grouped ? 'en' : getLangFromUrl().code)
         $choice.find('input').attr('aria-label', `Select clips for ${title}`).data('word', word)
           .prop({ checked: selection.selected.has(word), disabled: !items.length })
           .on('change', e => {
@@ -7887,6 +7921,7 @@ function enablePasteForHashChange() {
 function _setLangToggle(isEn) {
   const $cb = $('#toggleLangCb')
   $cb.prop('checked', !!isEn)
+  $('#searchLanguageSelect').val(isEn ? 'en' : 'sv')
   try {
     const widget = $cb.data('bs.toggle')
     if (widget) { if (isEn) widget.on(true); else widget.off(true) }
@@ -8291,8 +8326,8 @@ function _buildVocabLine(it, highlight, searchOverride) {
   let txt = it.item
   const $line = $('<div class="vocabulary-line"></div>')
   if (txt.trim().length) {
-    $line.append('<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>')
-    $line.find('i.fa').click(selectSearchedWord)
+    $('<button type="button" class="vocab-entry-search fa-mouse-pointer" aria-label="Search this vocabulary entry"><i class="fas fa-search" aria-hidden="true"></i></button>')
+      .on('click', selectSearchedWord).appendTo($line)
   } else {
     txt = '------------------'
   }
@@ -8327,6 +8362,7 @@ function _attachAccordionDelegate($container) {
   if (!$container || !$container.length) return
   if ($container.data('accordionBound')) return
   $container.data('accordionBound', true)
+  $container.on('keydown', '.similar-segment-header', _activateVocabularyHeader)
   $container.on('click', '.similar-segment-header', function (e) {
     // The matched-line header may also contain a red `<i class="fa-mouse-pointer">`
     // arrow that re-anchors the search via selectSearchedWord — let those
@@ -8337,13 +8373,13 @@ function _attachAccordionDelegate($container) {
     const $body = $this.siblings('.similar-segment-body')
     const wasOpen = !$body.is('[hidden]')
     $container.find('.similar-segment-body').not($body).attr('hidden', '')
-    $container.find('.similar-segment-header').not(this).removeClass('is-open')
+    $container.find('.similar-segment-header').not(this).removeClass('is-open').attr('aria-expanded', 'false')
     if (wasOpen) {
       $body.attr('hidden', '')
-      $this.removeClass('is-open')
+      $this.removeClass('is-open').attr('aria-expanded', 'false')
     } else {
       $body.removeAttr('hidden')
-      $this.addClass('is-open')
+      $this.addClass('is-open').attr('aria-expanded', 'true')
     }
   })
 }
@@ -8359,6 +8395,7 @@ function _buildSimilarSegment({ lineIdx, candidate, searchWord, tier, distance, 
   const $header = collapsible
       ? $(`<div class="similar-segment-header" style="font-size:0.75em;color:#666;padding:2px 4px;"><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i><span>${headerInner}</span></div>`)
       : $(`<div style="font-size:0.75em;color:#666;padding:2px 4px;">${headerInner}</div>`)
+  if (collapsible) $header.attr({ role: 'button', tabindex: '0', 'aria-expanded': 'false' })
   vocabItemContent.append($header)
 
   // Body container: the surrounding-line context. In collapsible mode it
@@ -8511,9 +8548,11 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
   const $header = match.kind === 'exact'
     ? _buildVocabLine(entry)
     : _buildVocabLine(entry, undefined, match.matched)
+  $header.find('.vocab-entry-search').remove()
   $header.addClass('highlighted similar-segment-header')
+    .attr({ role: 'button', tabindex: '0', 'aria-expanded': 'false' })
     .prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
-    .append($('<span style="font-size:0.75em;color:#666;margin-left:6px;"></span>').text('[' + match.category + ']'))
+    .append($('<span class="search-vocabulary-category"></span>').text('[' + match.category + ']'))
   $content.append($header)
   const $body = $('<div class="similar-segment-body" hidden></div>').appendTo($content)
   surroundings.forEach(it => {
@@ -8530,13 +8569,20 @@ function _appendVocabularyGroup($target, part, matches, rows, allWords, kind, co
   const $header = $('<div class="prefix-group-header"><i class="fa fa-chevron-right prefix-group-chevron" aria-hidden="true"></i></div>')
     .append($('<span class="prefix-group-part"></span>').text(part))
     .append($('<span class="prefix-group-count"></span>').text(' (' + count + ')')).appendTo($group)
+  $header.attr({ role: 'button', tabindex: '0', 'aria-expanded': 'false' })
   const $body = $('<div class="prefix-group-body" hidden></div>').appendTo($group)
   matches.forEach(match => _appendVocabularyMatch($body, match, rows, allWords))
   $header.on('click', () => {
     const open = $header.hasClass('is-open')
     $body.prop('hidden', open)
-    $header.toggleClass('is-open', !open)
-  })
+    $header.toggleClass('is-open', !open).attr('aria-expanded', String(!open))
+  }).on('keydown', _activateVocabularyHeader)
+}
+
+function _activateVocabularyHeader(event) {
+  if (event.target !== this || (event.key !== 'Enter' && event.key !== ' ')) return
+  event.preventDefault()
+  this.click()
 }
 
 function _renderVocabularySearch(search, includePrefix) {
@@ -8549,6 +8595,7 @@ function _renderVocabularySearch(search, includePrefix) {
   const matches = matcher.search(query, { includePrefix })
   const allWords = matcher.rows.map(row => row.line)
   const direct = matches.filter(match => match.kind !== 'prefix' && match.kind !== 'compound')
+  if (matches.length) $vocab.append('<h2 class="mobile-vocab-title">Vocabulary matches</h2>')
   // Exact phrases, tokens and word families stay outside the component groups.
   direct.forEach(match => _appendVocabularyMatch($vocab, match, matcher.rows, allWords))
   const compounds = new Map()
@@ -8585,13 +8632,16 @@ function _renderVocabularySearch(search, includePrefix) {
         groups: overflowByPart, partOrder, overlapByIdx
       }
     }
-    if (shownByPart.size) $vocab.append('<div style="font-size:0.85em;color:#666;margin:8px 0 4px;">More prefix matches</div>')
+    const $related = $('<details class="search-related"><summary>Related words</summary></details>')
+      .prop('open', isDesktop()).appendTo($vocab)
+    const $prefixes = $('<div class="search-prefixes"></div>').appendTo($related)
+    if (shownByPart.size) $prefixes.append('<p class="search-prefixes-label">More prefix matches</p>')
     const byIndex = new Map(prefixMatches.map(match => [match.index, match]))
     for (const part of partOrder) {
       const head = shownByPart.get(part) || [], tail = overflowByPart.get(part) || []
       if (!head.length) continue
       const count = tail.length ? `${head.length} of ${head.length + tail.length}` : String(head.length)
-      _appendVocabularyGroup($vocab, part, head.map(idx => byIndex.get(idx)), matcher.rows, allWords, 'prefix', count)
+      _appendVocabularyGroup($prefixes, part, head.map(idx => byIndex.get(idx)), matcher.rows, allWords, 'prefix', count)
     }
     let overflowCount = 0
     for (const list of overflowByPart.values()) overflowCount += list.length
@@ -8600,7 +8650,7 @@ function _renderVocabularySearch(search, includePrefix) {
       .text('Different prefixes' + suffix + ' →').on('click', e => {
         e.preventDefault()
         _openDifferentPrefixDialog(query, getSelectedLang() === 'en' ? 'en' : getLangFromUrl().code)
-      }).appendTo($vocab)
+      }).appendTo($prefixes)
   }
   _attachAccordionDelegate($vocab)
 }
@@ -9181,7 +9231,7 @@ async function _renderTranslationPanel(token) {
   if (!terms.length) { $('#translationPanel').hide(); return }
   const $panel = _translationPanelEl()
   $panel.find('.xl-summary').html(
-    `<span class="xl-dir">${_.escape(dir.fromName)} → ${_.escape(dir.toName)}</span>` +
+    `<span class="mobile-translation-label">Translations</span><span class="xl-dir">${_.escape(dir.fromName)} → ${_.escape(dir.toName)}</span>` +
     `<span class="xl-word">${_.escape(word)}</span>` +
     `<span class="xl-n">${terms.length}</span>`)
   const confidences = _translationConfidences(terms)
@@ -9735,7 +9785,7 @@ async function fetchSRTs(searchText, requestToken) {
     const missing=expected.filter(item=>!window.allSubtitles[item.link] || window.allSubtitles[item.link]._partial)
     const complete=window._subtitleCoverageIndexReady && !missing.length
     window._subtitleSearchCompletion={complete,visited:Object.keys(window.allSubtitles).length,total:expected.length,missing:missing.map(item=>item.link)}
-    _setSubtitleSearchStatus(complete ? `Search complete · ${expected.length} subtitles` :
+    _setSubtitleSearchStatus(complete ? `Search complete · ${expected.length.toLocaleString()} subtitle files searched` :
       !window._subtitleCoverageIndexReady ? 'Search incomplete: the subtitle index could not be loaded.' :
       `Search incomplete: ${missing.length} of ${expected.length} subtitles are not downloaded.`, false)
     return myToken === window._subtitleSearchToken
@@ -9768,7 +9818,7 @@ async function fetchSRTs(searchText, requestToken) {
 // isRegExp lives in ./search-text.js.
 
 function renderAccordions(el) {
-  return _coreRenderAccordions(el)
+  return _coreRenderAccordions(el, { autoOpen: el?.id !== 'result' || isDesktop() })
 }
 
 // 2. This code loads the IFrame Player API code asynchronously.

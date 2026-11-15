@@ -4,7 +4,7 @@ const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { serveFixtures } = require('./language-dialogs.cjs')
+const { serveFixtures, clickSearchTool } = require('./language-dialogs.cjs')
 
 async function checkPracticeControls(browser) {
   for (const mobile of [false, true]) {
@@ -288,7 +288,7 @@ async function checkPracticeControls(browser) {
       assert.deepEqual(await page.locator('#searchText').evaluate(el => [el.selectionStart, el.selectionEnd]), [0, 5])
       await page.keyboard.press('?')
       assert.equal(await page.locator('#keyboardShortcutsDialog:visible').count(), 0)
-      await page.locator('#toggleSettingsPanelBtn').click()
+      await clickSearchTool(page, '#toggleSettingsPanelBtn')
       if (mobile) await page.locator('.settings-section-picker select').selectOption('search')
       else await page.locator('[data-settings-section="search"]').click()
       if (mobile) {

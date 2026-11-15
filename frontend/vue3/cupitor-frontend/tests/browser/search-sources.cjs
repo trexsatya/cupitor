@@ -2,7 +2,7 @@ const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { serveFixtures } = require('./language-dialogs.cjs')
+const { serveFixtures, clickSearchTool } = require('./language-dialogs.cjs')
 
 async function checkHeader(page, mobile) {
   const shortcuts = [
@@ -13,7 +13,66 @@ async function checkHeader(page, mobile) {
     ['headerAddToVocabBtn', 'accountDialog'],
   ]
   for (const [id] of shortcuts) assert.equal(await page.locator('#' + id).isVisible(), !mobile, id)
-  if (mobile) return
+  const help = page.getByRole('button', { name: 'Cupitor help' })
+  await help.focus()
+  await page.keyboard.press('Enter')
+  const helpDialog = page.getByRole('dialog', { name: 'Cupitor help' })
+  assert.equal(await helpDialog.isVisible(), true)
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Close help')
+  await page.keyboard.press('Escape')
+  await helpDialog.waitFor({ state: 'hidden' })
+  assert.equal(await help.evaluate(el => el === document.activeElement), true)
+
+  if (mobile) {
+    const nav = page.getByRole('navigation', { name: 'Cupitor navigation' })
+    assert.deepEqual(await nav.getByRole('button').allTextContents().then(text => text.map(s => s.trim())),
+      ['Search', 'Playlists', 'Word Maps', 'Practice Log', 'Tools'])
+    for (const [button, dialog] of shortcuts.slice(0, 3)) {
+      await nav.locator(`[data-search-action="${button}"]`).click()
+      const panel = page.locator('#' + dialog)
+      await panel.waitFor({ state: 'visible' })
+      await panel.evaluate(el => { if (el.tagName === 'DIALOG') el.close(); else window.jQuery(el).dialog('close') })
+      await panel.waitFor({ state: 'hidden' })
+    }
+
+    const tools = nav.getByRole('button', { name: 'Tools' })
+    await tools.focus()
+    await page.keyboard.press('Enter')
+    await page.getByRole('dialog', { name: 'Tools' }).waitFor({ state: 'visible' })
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Close tools')
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog', { name: 'Tools' }).waitFor({ state: 'hidden' })
+    assert.equal(await tools.evaluate(el => el === document.activeElement), true)
+
+    const header = page.locator('.subtitle-result-toggle').first()
+    assert.equal(await header.getAttribute('aria-expanded'), 'false')
+    await header.focus()
+    await page.keyboard.press('Space')
+    assert.equal(await header.getAttribute('aria-expanded'), 'true')
+    await page.keyboard.press('Enter')
+    assert.equal(await header.getAttribute('aria-expanded'), 'false')
+
+    const language = page.getByRole('combobox', { name: 'Search language' })
+    await language.selectOption('en')
+    assert.equal(await page.locator('#toggleLangCb').isChecked(), true)
+    await language.selectOption('sv')
+    await page.waitForFunction(() => window._subtitleSearchCompletion?.complete && document.querySelector('#searchLoadingOverlay').hidden)
+
+    await page.setViewportSize({ width: 320, height: 700 })
+    await page.locator('html').evaluate(el => { el.style.fontSize = '20px' })
+    try {
+      const sizes = await nav.getByRole('button').evaluateAll(buttons => buttons.map(button => {
+        const bounds = button.getBoundingClientRect()
+        return { width: bounds.width, height: bounds.height }
+      }))
+      assert.ok(sizes.every(({ width, height }) => width >= 44 && height >= 44), 'all nav buttons accommodate touch')
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320, 'large text reflows at 320px')
+    } finally {
+      await page.locator('html').evaluate(el => { el.style.fontSize = '' })
+      await page.setViewportSize({ width: 390, height: 900 })
+    }
+    return
+  }
 
   const measure = () => page.evaluate(() => {
     const bounds = selector => {
@@ -67,7 +126,7 @@ async function check(browser, mobile) {
     ]))
   })
   const openSettings = async () => {
-    await page.locator('#toggleSettingsPanelBtn').click()
+    await clickSearchTool(page, '#toggleSettingsPanelBtn')
     if (mobile) await page.locator('.settings-section-picker select').selectOption('search')
     else await page.locator('[data-settings-section="search"]').click()
   }

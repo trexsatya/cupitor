@@ -1,7 +1,7 @@
 const {chromium} = require('playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const {serveFixtures} = require('./language-dialogs.cjs')
+const {serveFixtures, clickSearchTool} = require('./language-dialogs.cjs')
 async function verify(browser, width) {
   const page = await browser.newPage({viewport:{width,height:820},isMobile:width<1000,hasTouch:width<1000})
   page.setDefaultTimeout(8000)
@@ -40,7 +40,7 @@ async function verify(browser, width) {
     await page.goto('http://127.0.0.1:3000/language.html',{waitUntil:'networkidle'})
     await page.evaluate(() => Promise.all([window._vocabularyReadyPromise,window._subtitlesReadyPromise]))
     assert.equal(await page.locator('iframe#youtubePlayer').count(), 0, 'Search does not eagerly create the player')
-    await page.locator('#toggleMediaPanelBtn').click()
+    await clickSearchTool(page, '#toggleMediaPanelBtn')
     await page.locator('#select2-mp3Choice-container').click()
     await page.locator('#select2-mp3Choice-results .select2-results__group').click()
     await page.getByRole('option', { name: /testVideo01/ }).click()
