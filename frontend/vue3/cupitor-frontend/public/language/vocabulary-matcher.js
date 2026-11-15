@@ -85,7 +85,7 @@ export function createVocabularyMatcher(vocabulary, {
     compoundCache.set(word, result)
     return result
   }
-  function constituents(word) {
+  function constituents(word, modifiers) {
     const normalizedBases = [...forms.forms(word)].filter(form => form !== word && known.has(form))
     // A recognized ending belongs to its base word before it can be mistaken
     // for a separate constituent (sprakande -> spraka, not sprak + ande).
@@ -106,7 +106,14 @@ export function createVocabularyMatcher(vocabulary, {
     // Keep the longest complete head, never a nested two-letter suffix.
     for (let i = 3; i <= word.length - 3; i++) {
       const head = word.slice(i)
-      if (recognized(head)) return [head]
+      if (recognized(head)) {
+        const left = word.slice(0, i)
+        const modifier = left.endsWith('s') ? left.slice(0, -1) : left
+        if (modifier.length >= 3 && !derivationalPrefixes.has(modifier) && !isVocabularyStopWord(modifier)) {
+          modifiers.add(modifier)
+        }
+        return [head]
+      }
     }
     return []
   }
@@ -149,13 +156,22 @@ export function createVocabularyMatcher(vocabulary, {
   const search = (query, { includePrefix = false } = {}) => {
     const terms = queryTerms(query)
     if (!terms.length) return []
+    const modifiers = new Set()
     const compounds = lang === 'sv'
-      ? [...new Set(terms.filter(t => !/\s/.test(t)).flatMap(t => constituents(t)))]
+      ? [...new Set(terms.filter(t => !/\s/.test(t)).flatMap(t => constituents(t, modifiers)))]
         .filter(t => !terms.includes(t))
       : []
     const matches = []
     for (const row of rows) {
       let detail = matchPrepared(row, terms, compounds)
+      if (!detail) {
+        for (const modifier of modifiers) {
+          const word = row.words.find(w => w.startsWith(modifier))
+          if (!word) continue
+          detail = { kind: 'compound', matched: word, constituent: modifier }
+          break
+        }
+      }
       if (!detail && includePrefix) {
         const overlap = vocabPrefixOverlapDetail(row.line, terms.join('|'), lang)
         if (overlap.len >= 3) detail = { ...overlap, kind: 'prefix' }

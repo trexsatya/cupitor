@@ -5632,8 +5632,8 @@ body.study-split-active.study-media-combined.practice-mode #practiceMode .practi
 #keyboardShortcutsDialog, #keyboardShortcutsDialog table { color: #24292f; background: #fff; }
 .keyboard-shortcuts-table { width: 100%; border-collapse: collapse; }
 .keyboard-shortcuts-table td { padding: 5px 8px; vertical-align: top; }
-.keyboard-shortcuts-table td:first-child { white-space: nowrap; width: 7em; }
-.keyboard-shortcuts-table kbd { display: inline-block; margin-right: 4px; padding: 2px 5px; border: 1px solid #bcc4cc; border-radius: 3px; background: #f6f8fa; color: #24292f; }
+.keyboard-shortcuts-table td:first-child { width: 40%; }
+.keyboard-shortcuts-table kbd { display: inline-block; margin: 0 4px 3px 0; white-space: nowrap; padding: 2px 5px; border: 1px solid #bcc4cc; border-radius: 3px; background: #f6f8fa; color: #24292f; }
 #keyboardShortcutsDialog p { font-size: .85em; color: #57606a; }
 /* Study calls and reminder dialogs: clear controls, compact mobile layout. */
 .cupitor-panel-window.ui-dialog { border:1px solid #d6dfdf; border-radius:16px; padding:0; box-shadow:0 16px 60px #102b2933; background:#fff; overflow:hidden; }

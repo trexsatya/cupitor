@@ -1,3 +1,4 @@
+import { findWordMaps } from './word-map-search.js'
 import { findManualCards, highlightMatchesHtml, matchSnippetHtml, renderManualResultsHtml } from './manual-search.js'
 
 const card = (id, source, target, extra = {}) => ({ manual: true, id, source, target, ...extra })
@@ -41,7 +42,7 @@ describe('findManualCards', () => {
   })
 
   test('caps the number of hits', () => {
-    expect(findManualCards(recordings, 'e', { limit: 1 })).toHaveLength(1)
+    expect(findManualCards(recordings, 'e', { limit: 1, match: 'partial' })).toHaveLength(1)
   })
 })
 
@@ -129,3 +130,19 @@ test('item numbers follow the complete playlist order across manual and video ca
   } } };
   expect(findManualCards(recordings, 'find')[0].itemNumber).toBe(2);
 });
+
+
+test('manual cards default to whole words and phrases, with opt-in substring matching', () => {
+  const cards = { Swedish: playlist([card('a', 'En sjö.', ''), card('b', 'En sjöstrand.', '')]) }
+  expect(findManualCards(cards, 'sjö').map(hit => hit.item.id)).toEqual(['a'])
+  expect(findManualCards(cards, 'sjö', { match: 'partial' }).map(hit => hit.item.id)).toEqual(['a', 'b'])
+  expect(findManualCards(cards, 'en sjö').map(hit => hit.item.id)).toEqual(['a'])
+})
+
+test('word maps require whole words in map titles and node fields', () => {
+  const nodes = [{ word: 'sjöstrand' }, { lookup: 'sjö' }, { note: 'En sjö.' }]
+  const hits = findWordMaps([{ name: 'Sjökort', nodes }], 'sjö')
+  expect(hits).toHaveLength(1)
+  expect(hits[0].nameMatched).toBe(false)
+  expect(hits[0].nodes).toEqual(nodes.slice(1))
+})

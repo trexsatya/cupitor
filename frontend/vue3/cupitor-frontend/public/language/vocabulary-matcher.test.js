@@ -227,3 +227,12 @@ test('matches inflected leading words in complete phrases, preserving particles 
   expect(m.search('fantiserat hop')).toEqual([]);
   expect(m.matchLine('fantisera ihop', 'fantiserade ihop')?.kind).toBe('family');
 });
+
+test('matches the full compound modifier before shorter prefixes', () => {
+  const m = matcher({
+    Words: ['(veil)|slöja|slöjor|', '(bridal couple)|brudpar|', '(use)|bruk|', '(hiss)|brus|']
+  })
+  const results = m.search('brudslöjan', { includePrefix: true })
+  expect(results.filter(row => row.kind === 'compound').map(row => row.matched).sort()).toEqual(['brudpar', 'slöja'])
+  expect(results.filter(row => row.kind === 'prefix').every(row => row.rank < results[0].rank)).toBe(true)
+})
