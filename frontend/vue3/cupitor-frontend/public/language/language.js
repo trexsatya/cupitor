@@ -2198,6 +2198,19 @@ async function doSearch(searchThis, el) {
   const token = (window._subtitleSearchToken || 0) + 1
   window._subtitleSearchToken = token
   window.cupitorSubtitleSearch?.cancel()
+  if (!String(query || '').trim()) {
+    window.searchText = window._librarySearchText = window._vocabularySearchText = ''
+    window.searchResult = []
+    window.wordToItemsMap = window._shownWordToItemsMap = window._lastWordToItemsMap = {}
+    window._subtitleSearchCompletion = null
+    resetSearchResultIndex()
+    _clearSearchLoading()
+    _hideStaleTranslationPanel()
+    _resetLibrarySearch()
+    $('#result, #vocabularyResult').empty()
+    $('#search-pagination').hide()
+    return false
+  }
   const searchSrts = window._appSettings?.includeSrtsInSearch !== false
   if (!window.vocabulary || (searchSrts && !window._subtitlesLoaded)) {
     console.log('[search] data not loaded yet, deferring until vocabulary + subtitles ready…')
@@ -3658,8 +3671,8 @@ export function renderVocabularyCategory(category) {
     let txt = line;
     const $line = $(`<div class="vocabulary-line"></div>`);
     if (txt.trim().length) {
-      $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`);
-      $line.find("i.fa").click(selectSearchedWord);
+      $('<button type="button" class="vocab-entry-search" aria-label="Search this vocabulary entry"><i class="fas fa-search" aria-hidden="true"></i></button>')
+        .on('click', selectSearchedWord).appendTo($line)
     } else {
       txt = "------------------";
     }
@@ -3976,6 +3989,9 @@ $('document').ready(e => {
     else $searchTextClearBtn.hide()
   }
   $searchText1.on('input change', updateSearchTextClearBtn)
+  $searchText1.on('input', () => {
+    if (!String($searchText1.val() || '').trim()) searchTextChanged()
+  })
   $searchTextClearBtn.click(() => {
     $searchText1.val('').trigger('change')
     $searchText1.focus()
@@ -6794,7 +6810,13 @@ const changeIndices = (id, from, to) => {
 }
 
 function collapseSubLines(evt) {
-  $(evt.target).parents('.lines-cntnr').find('.sub-lines-cntnr').slideToggle('slow')
+  const $button = $(evt.currentTarget)
+  const expanded = $button.attr('aria-expanded') !== 'true'
+  $button.attr('aria-expanded', String(expanded))
+  $button.find('i').toggleClass('fa-chevron-down', expanded).toggleClass('fa-chevron-right', !expanded)
+  const $lines = $button.closest('.lines-cntnr').find('.sub-lines-cntnr').stop(true, true)
+  if (expanded) $lines.slideDown('slow')
+  else $lines.slideUp('slow')
 }
 
 // Inline SVG/glyph for the media source. Falls back to the literal name
@@ -7340,7 +7362,7 @@ async function renderLines(id, url) {
   <span class="remove-next-btn btn"> - </span>
 
   <span class="play-btn-container" style="text-align: center;" data-id="${eId}" data-url="${eUrl}" data-source="${_.escape(subtitleFile.source || '')}" data-time-start="${timeStart}" data-time-end="${timeEnd}" data-match-line-index="${Number.isFinite(matchLineIndex) ? matchLineIndex : ''}">
-     <span class="info btn collapse-sub-lines"> 🗖 </span>
+     <button type="button" class="info btn collapse-sub-lines" aria-label="Toggle subtitle lines" aria-expanded="true" title="Show or hide subtitle lines"><i class="fas fa-chevron-down" aria-hidden="true"></i></button>
      <span class="info source-tag" data-source="${_.escape(String(subtitleFile.source || '').toLowerCase())}" title="${_.escape(subtitleFile.source || '')}">${_sourceBadgeHtml(subtitleFile.source)}</span>
      ${infoButton()}
      ${ownerTag}
@@ -8340,7 +8362,7 @@ function _buildVocabLine(it, highlight, searchOverride) {
   let txt = it.item
   const $line = $('<div class="vocabulary-line"></div>')
   if (txt.trim().length) {
-    $('<button type="button" class="vocab-entry-search fa-mouse-pointer" aria-label="Search this vocabulary entry"><i class="fas fa-search" aria-hidden="true"></i></button>')
+    $('<button type="button" class="vocab-entry-search" aria-label="Search this vocabulary entry"><i class="fas fa-search" aria-hidden="true"></i></button>')
       .on('click', selectSearchedWord).appendTo($line)
   } else {
     txt = '------------------'
@@ -8370,19 +8392,14 @@ function _buildVocabLine(it, highlight, searchOverride) {
 // Idempotently attach an accordion delegate to a container holding
 // `.similar-segment-header` / `.similar-segment-body` pairs. Single-open:
 // clicking a header collapses any other open one and toggles the clicked
-// segment. Clicks that originate on the `i.fa` arrow inside a header pass
-// through to selectSearchedWord without triggering the toggle.
+// segment. The vocabulary search button has its own click action.
 function _attachAccordionDelegate($container) {
   if (!$container || !$container.length) return
   if ($container.data('accordionBound')) return
   $container.data('accordionBound', true)
   $container.on('keydown', '.similar-segment-header', _activateVocabularyHeader)
   $container.on('click', '.similar-segment-header', function (e) {
-    // The matched-line header may also contain a red `<i class="fa-mouse-pointer">`
-    // arrow that re-anchors the search via selectSearchedWord — let those
-    // clicks pass through. Other icons inside the header (e.g. the
-    // `.similar-chevron` itself) should still toggle the accordion.
-    if ($(e.target).closest('.fa-mouse-pointer').length) return
+    if ($(e.target).closest('.vocab-entry-search').length) return
     const $this = $(this)
     const $body = $this.siblings('.similar-segment-body')
     const wasOpen = !$body.is('[hidden]')
@@ -8423,8 +8440,8 @@ function _buildSimilarSegment({ lineIdx, candidate, searchWord, tier, distance, 
     let txt = it.item
     const $line = $(`<div class="vocabulary-line"></div>`)
     if (txt.trim().length) {
-      $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`)
-      $line.find('i.fa').click(selectSearchedWord)
+      $('<button type="button" class="vocab-entry-search" aria-label="Search this vocabulary entry"><i class="fas fa-search" aria-hidden="true"></i></button>')
+        .on('click', selectSearchedWord).appendTo($line)
     } else {
       txt = '------------------'
     }

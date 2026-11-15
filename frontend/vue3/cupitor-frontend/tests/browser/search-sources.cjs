@@ -369,6 +369,19 @@ async function check(browser, mobile) {
     await search('färgsprakande')
     assert.equal(await page.locator('#wordMapResults .word-map-hit').count(), 1, 'source can be enabled again')
 
+    for (const blank of ['', '   ']) {
+      await page.locator('#manualSearchIncludeCb').check()
+      await search('färgsprakande')
+      await page.locator('#searchText').fill(blank)
+      assert.equal(await page.locator('#result').innerText(), '')
+      assert.equal(await page.locator('#vocabularyResult').innerText(), '')
+      await page.locator('#manualSearchIncludeCb').uncheck()
+      await page.locator('#manualSearchIncludeCb').check()
+      await page.locator('#wordMapSearchIncludeCb').uncheck()
+      await page.locator('#wordMapSearchIncludeCb').check()
+      assert.equal(await page.locator('#result').innerText(), '', 'source toggles cannot revive cleared results')
+    }
+
     // Errors and cancellation release the overlay too.
     await search('[ab')
     assert.match(await page.locator('#result').innerText(), /Invalid regular expression/)
