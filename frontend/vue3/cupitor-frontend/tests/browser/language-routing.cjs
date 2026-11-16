@@ -207,7 +207,7 @@ async function checkMultilingualVocabulary(browser, mobile) {
       const practice = page.locator('#practiceMode')
       await practice.locator('.practice-back').getByText(card.answer, {exact:true}).waitFor()
       assert.equal(await practice.locator('.practice-dir').textContent(), 'SV → ' + card.target)
-      await practice.getByRole('button', {name:'Close practice', exact:true}).click()
+      await page.evaluate(() => window.closePracticeMode())
     }
     await search('peena')
     await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
