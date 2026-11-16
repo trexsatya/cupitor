@@ -23680,7 +23680,7 @@ async function playPracticeClip(range = null, { retryStall = true, forceLoad = f
     if (!_practiceVideoCues.beginPlayback(videoRequest)) return
     attempt.request()
     await attempt.wait(playMediaSlice(it.id, start, clipEnd, 'YouTube', {
-      isCurrent: attempt.active, confirmSeek: true, requirePlaying: true, forceLoad,
+      isCurrent: attempt.active, confirmSeek: true, forceLoad,
       now: _playerLifecycle.now, isForeground: _playerLifecycle.isForeground,
       preparePlayer: player => attempt.preparePlayer(player),
     }))
@@ -25045,7 +25045,7 @@ function _togglePracticePlayback() {
   const player = window.ytPlayer
   let state = -1
   try { state = player?.getPlayerState() } catch (_) {}
-  if ([1, 3].includes(state) || window._practicePlayPending) {
+  if (window._practicePlayPending || (window._practicePlaybackCard === it && [1, 3].includes(state))) {
     _newPracticeVideoRequest()
     window._practicePlayPending = null
   } else if (state === 2 && window._practicePlaybackCard === it && window._practiceClipTimer) {

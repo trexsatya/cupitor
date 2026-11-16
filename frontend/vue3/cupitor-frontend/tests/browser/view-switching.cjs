@@ -178,7 +178,14 @@ async function checkViewSwitching(browser) {
         assert.equal(await page.locator(selector).isVisible(), false, selector + ' cannot show through Practice')
       }
       await page.locator('#practiceMode .practice-play').click()
-      await page.waitForFunction(() => window.__yt.state === 1 && !window._practicePlayPending)
+      try {
+        await page.waitForFunction(() => window.__yt.state === 1 && !window._practicePlayPending)
+      } catch (error) {
+        console.error(await page.evaluate(() => ({
+          video: window.__yt, seekPending: window.seekRequestProcessing, practicePending: window._practicePlayPending,
+        })))
+        throw error
+      }
       await page.waitForTimeout(1100) // exceeds external-player pause/resume grace
       assert.equal(await page.evaluate(() => window._recPlayPaused), true, 'Practice playback cannot resume the parked Player loop')
       assert.equal(await page.evaluate(() => window._recPlayIndex), 2)
