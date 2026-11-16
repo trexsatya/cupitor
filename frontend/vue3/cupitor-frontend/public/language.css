@@ -1976,6 +1976,105 @@ body.practice-mode #srtLoadingBanner {
     display: none;
 }
 
+/* Vocabulary lookup uses the study language and a separate hint language. */
+.vocab-lookup-controls {
+    display: flex;
+    gap: 8px 16px;
+    flex-wrap: wrap;
+    margin-block: 6px;
+}
+.vocab-lookup-controls label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+}
+.vocab-lookup-controls select {
+    min-height: 32px;
+    max-width: 100%;
+    padding: 3px 6px;
+    border: 1px solid #9ca9a5;
+    border-radius: 6px;
+    background: Canvas;
+    color: CanvasText;
+}
+.vocab-hint-meaning {
+    display: grid;
+    gap: 2px;
+    margin: 4px 0;
+    padding-inline: 1em;
+}
+.vocab-hint-meaning [lang] {
+    unicode-bidi: plaintext;
+}
+.vocab-hint-meaning span:first-child {
+    font-weight: 600;
+}
+.vocab-hint-edit {
+    margin: 4px 0 4px 1em;
+}
+#vocabularyMeaningEditor {
+    width: min(34rem, calc(100% - 1rem));
+    max-height: calc(100% - 1rem);
+    padding: 1rem;
+    border: 1px solid #9ca9a5;
+    border-radius: 10px;
+    background: Canvas;
+    color: CanvasText;
+}
+#vocabularyMeaningEditor::backdrop {
+    background: rgb(15 30 35 / 45%);
+}
+#vocabularyMeaningEditor h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1.24rem;
+}
+#vocabularyMeaningEditor label {
+    display: grid;
+    gap: 4px;
+    margin-block: 8px;
+}
+#vocabularyMeaningEditor fieldset {
+    margin: 8px 0 12px;
+}
+#vocabularyMeaningEditor legend {
+    font-size: 1rem;
+    font-weight: 600;
+}
+#vocabularyMeaningEditor :is(input:not([type=checkbox]), select, textarea) {
+    width: 100%;
+    min-width: 0;
+    min-height: 36px;
+    padding: 4px 6px;
+    border: 1px solid #9ca9a5;
+    border-radius: 5px;
+    font: inherit;
+    font-size: 16px;
+    color: inherit;
+    background: Canvas;
+}
+#vocabularyMeaningEditor .vocab-hint-form {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    margin-block: 4px;
+}
+#vocabularyMeaningEditor .vocab-hint-impact {
+    font-size: 0.9rem;
+}
+#vocabularyMeaningEditor .vocab-hint-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+@media (pointer: coarse) {
+    .vocab-lookup-controls select,
+    #vocabularyMeaningEditor :is(button, input, select, textarea) {
+        min-height: 44px;
+    }
+}
+
 .vocabulary-line {
     padding: 0.3em 0.3em 0.3em 1em;
 }

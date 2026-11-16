@@ -45,6 +45,46 @@ async function checkCacheSources(browser) {
     console.log('Subtitle cache: same-source reuse and repository/branch isolation passed')
   } finally {await page.close()}
 }
+async function checkMultilingualVocabulary(browser) {
+  const page = await browser.newPage({viewport:{width:390,height:844}, isMobile:true, hasTouch:true})
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.route('**/*', route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname.endsWith('/vocabulary-meanings.json')) return route.fulfill({status:404, body:''})
+    if (pathname.endsWith('/swedish/vocabulary.txt')) {
+      return route.fulfill({contentType:'text/plain', body:
+        '#Shapes, arrangements and conditions\n(opening, gap)|öppning|slits|hål|glugg|gluggar|springa|springor|\n' +
+        '#Food, Drink, kitchen, Eating\n(drink)|dricka|dricker|drack|druckit|\n'})
+    }
+    if (pathname.endsWith('/spanish/vocabulary.txt')) {
+      return route.fulfill({contentType:'text/plain', body:'#Food, Drink, kitchen, Eating\n(drink)|beber|tomar|\n'})
+    }
+    return serveFixtures(route)
+  })
+  await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
+  await page.goto('http://127.0.0.1:3000/language.html?lang=swedish', {waitUntil:'networkidle'})
+  const query = page.locator('#searchText')
+  const results = page.locator('#vocabularyResult')
+  const search = async value => { await query.fill(value); await query.press('Tab') }
+  try {
+    await search('gap')
+    await results.locator('[data-vocab-match-kind="hint"]').first().waitFor()
+    assert.match(await results.innerText(), /öppning.*hål/)
+    await page.locator('#vocabularyLookupLanguage').selectOption('hi')
+    await search('chhed')
+    await results.locator('mark').filter({hasText:'hål'}).first().waitFor()
+    await search('peena')
+    await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
+    await page.locator('#vocabularyLearningLanguage').selectOption('spanish')
+    await page.waitForURL(/lang=spanish/)
+    await results.locator('mark').filter({hasText:'beber'}).first().waitFor()
+    assert.equal(await query.inputValue(), 'peena')
+    assert.equal(await page.locator('#vocabularyLookupLanguage').inputValue(), 'hi')
+    assert.deepEqual(errors, [])
+    console.log('Vocabulary hints, romanized aliases and cross-language query handoff passed')
+  } finally { await page.close() }
+}
 ;(async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, args:['--no-sandbox']})
   try {
@@ -88,5 +128,6 @@ async function checkCacheSources(browser) {
       await page.close()
     }
     await checkCacheSources(browser)
+    await checkMultilingualVocabulary(browser)
   } finally {await browser.close()}
 })().catch(error => {console.error(error); process.exitCode=1})

@@ -25,6 +25,12 @@ import { recordingsHaveChanges } from './recordings-sync-state.js';
 import { mountPracticeReminders, practiceDate } from './practice-reminders.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
+import {
+  assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex, mergeVocabularyCatalogs,
+  normalizeHint, parseVocabularyCatalog, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
+} from './vocabulary-hints.js';
+import { vocabularyHintSeed } from './vocabulary-hint-seed.js';
+import { openVocabularyMeaningEditor } from './vocabulary-meaning-editor.js';
 import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
 import { installRichCardUnderline } from './rich-card-underline.js';
 import { installRichCardParagraphTools } from './rich-card-paragraph.js';
@@ -2200,6 +2206,7 @@ async function doSearch(searchThis, el) {
   window._requestedSearchText = query
   const token = (window._subtitleSearchToken || 0) + 1
   window._subtitleSearchToken = token
+  window._vocabularyHintQuery = String(query || '')
   window.cupitorSubtitleSearch?.cancel()
   if (!String(query || '').trim()) {
     window.searchText = window._librarySearchText = window._vocabularySearchText = ''
@@ -2213,6 +2220,11 @@ async function doSearch(searchThis, el) {
     $('#result, #vocabularyResult').empty()
     $('#search-pagination').hide()
     return false
+  }
+  if (window._renderVocabularyHintsEarly && !window.unprocessedSearchText) {
+    if (!window.vocabulary) await window._vocabularyReadyPromise
+    if (token !== window._subtitleSearchToken) return false
+    if (window._renderVocabularyHintsEarly(query)) return true
   }
   const searchSrts = window._appSettings?.includeSrtsInSearch !== false
   if (!window.vocabulary || (searchSrts && !window._subtitlesLoaded)) {
@@ -3008,6 +3020,7 @@ function loadAppSettings() {
   } catch (e) {
     console.warn('loadAppSettings: failed to read localStorage — using defaults', e)
   }
+  _refreshVocabularyLookupSelect()
   $('#contextLinesBefore').val(window._appSettings.contextLinesBefore)
   $('#contextLinesAfter').val(window._appSettings.contextLinesAfter)
   // 0 is a legitimate gap (items run straight into each other), so it must
@@ -3505,7 +3518,160 @@ function _initPracticeLogFrontBanner() {
   try { _refreshPracticeLogBtnHighlight() } catch (_) {}
 }
 
+let _vocabularyCatalogSelf = parseVocabularyCatalog(null)
+let _vocabularyCatalogOther = parseVocabularyCatalog(null)
+let _vocabularyCatalog = vocabularyHintSeed
+let _vocabularyCatalogReady
+let _vocabularyHintIndex
+
+const _vocabularyLanguageNames = typeof Intl.DisplayNames === 'function'
+  ? new Intl.DisplayNames(['en'], { type: 'language' }) : null
+function _vocabularyLanguageName(code) {
+  return _vocabularyLanguageNames?.of(code) || code
+}
+
+function _vocabularyLookupLanguages() {
+  return [...new Set(['en', 'hi', ...Object.values(_vocabularyCatalog.meanings).flatMap(meaning => Object.keys(meaning.hints))])]
+}
+
+function _vocabularyLookupLanguage() {
+  const choice = window._appSettings.vocabularyLookupLanguage
+  return _vocabularyLookupLanguages().includes(choice) ? choice : 'en'
+}
+
+function _refreshVocabularyLookupSelect() {
+  $('#vocabularyLookupLanguage').empty()
+    .append(_vocabularyLookupLanguages().map(code => new Option(_vocabularyLanguageName(code), code)))
+    .val(_vocabularyLookupLanguage())
+}
+
+function _installVocabularyCatalog() {
+  _vocabularyCatalog = mergeVocabularyCatalogs(vocabularyHintSeed, _vocabularyCatalogOther, _vocabularyCatalogSelf)
+  _refreshVocabularyLookupSelect()
+  if (window.vocabulary && window._vocabularySearchText && !window.unprocessedSearchText) {
+    renderVocabularyFindings(window._vocabularySearchText)
+  }
+}
+
+async function _loadVocabularyCatalog() {
+  const context = _dsCaptureSourceContext()
+  const cacheKey = which => _scopedKey('vocabulary-catalog:' + _dsSourceIdentity(which, 'shared'))
+  const readSaved = which => {
+    try { return parseVocabularyCatalog(localStorage.getItem(cacheKey(which))) }
+    catch (_) { return parseVocabularyCatalog(null) }
+  }
+  _vocabularyCatalogSelf = _dsHasSelf() ? readSaved('self') : parseVocabularyCatalog(null)
+  _vocabularyCatalogOther = _dsHasOther() ? readSaved('other') : parseVocabularyCatalog(null)
+  _installVocabularyCatalog()
+  try {
+    const layers = await _dsReadLayers(VOCABULARY_CATALOG_FILE, {
+      lang: 'shared', retry: { tries: 1, timeoutMs: 4000, init: { cache: 'no-cache' } },
+    })
+    context.assertCurrent()
+    for (const layer of layers) {
+      const parsed = parseVocabularyCatalog(layer.text)
+      if (layer.src === 'self') _vocabularyCatalogSelf = parsed
+      else _vocabularyCatalogOther = parsed
+      try {
+        if (layer.text == null) localStorage.removeItem(cacheKey(layer.src))
+        else localStorage.setItem(cacheKey(layer.src), layer.text)
+      } catch (_) { /* keep the in-memory revision */ }
+    }
+  } catch (error) {
+    console.warn('Vocabulary meanings unavailable; using the last loaded copy.', error)
+  }
+  try { context.assertCurrent() } catch (_) { return }
+  _installVocabularyCatalog()
+}
+
+function _getVocabularyHintIndex(matcher = _getVocabularyMatcher()) {
+  const target = getLangFromUrl().code
+  const lookup = _vocabularyLookupLanguage()
+  if (_vocabularyHintIndex?.matcher !== matcher || _vocabularyHintIndex.catalog !== _vocabularyCatalog ||
+      _vocabularyHintIndex.lookup !== lookup) {
+    _vocabularyHintIndex = { matcher, catalog: _vocabularyCatalog, lookup,
+      index: createVocabularyHintIndex(matcher.rows, target, _vocabularyCatalog, lookup) }
+  }
+  return _vocabularyHintIndex.index
+}
+
+async function _editVocabularyMatch(match) {
+  if (!_requireSelf()) return
+  const context = _dsCaptureSourceContext()
+  await _vocabularyCatalogReady
+  context.assertCurrent()
+  if (!ownLines(_ownVocabulary(), match.category).includes(match.line)) return
+  const catalogBaseline = _vocabularyCatalogSelf
+  const language = getLangFromUrl().code
+  const matcher = _getVocabularyMatcher()
+  const row = matcher.rows.find(item => item.category === match.category && item.line === match.line)
+  if (!row) return
+  const group = _getVocabularyHintIndex(matcher).groupFor(row.index)
+  const lookup = _vocabularyLookupLanguage()
+  openVocabularyMeaningEditor({
+    row, group, catalog: _vocabularyCatalog, language, lookup,
+    meaningId: match.hint?.meanings.values().next().value,
+    languages: [...new Set([..._vocabularyLookupLanguages(), ...Object.values(LANGUAGES).map(item => item.code)])],
+    categories: Object.keys(_ownVocabulary()).filter(category => category !== '__empty__' && !VOCAB_HIDDEN_CATEGORIES.has(category))
+      .sort((left, right) => left.localeCompare(right)),
+    languageName: _vocabularyLanguageName, makeId: () => window.crypto?.randomUUID?.() || uuid(),
+    async save(edit) {
+      context.assertCurrent()
+      const local = _ownVocabulary()
+      const lines = ownLines(local, row.category)
+      const at = lines.indexOf(row.line)
+      if (at < 0) throw new Error('This line changed. Reopen the editor to see the latest version.')
+      const category = edit.group.category
+      local[row.category] = [...lines]
+      if (category === row.category) local[row.category][at] = edit.line
+      else {
+        local[row.category].splice(at, 1)
+        local[category] = [...ownLines(local, category), edit.line]
+      }
+      const baseline = window._vocabularyBaselineText || ''
+      const pending = _userData.getItem(PENDING_VOCAB_KEY)
+      const filePath = _langRepoDir() + '/vocabulary.txt'
+      let nextText, nextCatalog
+      await _userData.flush()
+      context.assertCurrent()
+      const { owner, repo, branch } = _dsWriteTarget()
+      await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch, commitMessage: 'vocab: update multilingual vocabulary',
+        files: [
+          { path: filePath, getContent(remote) {
+            context.assertCurrent()
+            assertVocabularyRow(remote, baseline, row.category, row.line)
+            nextText = vocabularyToText(mergeVocabulary(baseline, local, remote || ''))
+            return nextText
+          } },
+          { path: VOCABULARY_CATALOG_PATH, getContent(remote) {
+            context.assertCurrent()
+            nextCatalog = changeVocabularyCatalog(remote, catalogBaseline, {
+              groups: { [edit.groupId]: edit.group }, meanings: edit.meanings,
+            })
+            return JSON.stringify(nextCatalog, null, 2) + '\n'
+          } },
+        ],
+      })
+      context.assertCurrent()
+      const concurrent = _userData.getItem(PENDING_VOCAB_KEY) !== pending
+      const shown = concurrent ? vocabularyToText(mergeVocabulary(baseline, _ownVocabulary(), nextText)) : nextText
+      _setVocabularyLayers(_dsMergeVocabularyLayers(shown, window._vocabularyOtherText))
+      window._vocabularyBaselineText = nextText
+      if (concurrent) _savePendingVocab()
+      else _clearPendingVocab()
+      await _userData.flush()
+      _vocabularyCatalogSelf = nextCatalog
+      try {
+        localStorage.setItem(_scopedKey('vocabulary-catalog:' + _dsSourceIdentity('self', 'shared')), JSON.stringify(nextCatalog))
+      } catch (_) { /* keep the in-memory revision */ }
+      loadWholeVocabulary()
+      _installVocabularyCatalog()
+    },
+  })
+}
+
 async function fetchVocabulary() {
+  _vocabularyCatalogReady = _loadVocabularyCatalog()
   const context = _dsCaptureSourceContext()
   try {
     let res;
@@ -4277,6 +4443,52 @@ $('document').ready(e => {
     $('#librarySearchAutoCb').prop('checked', on)
     if (on && window.searchText) librarySearch(_librarySearchTerm())
   })
+
+  const $learningLanguage = $('#vocabularyLearningLanguage')
+  $learningLanguage.append(Object.values(LANGUAGES).filter(item => item.capabilities.study)
+    .map(item => new Option(_vocabularyLanguageName(item.code), item.name)))
+    .val(getLangFromUrl().definition?.name || '')
+    .on('change', function () {
+      const url = new URL(window.location.href)
+      url.searchParams.set('lang', this.value)
+      const query = String($('#searchText').val() || '').trim()
+      if (query) {
+        url.searchParams.set('vocabQuery', query)
+        url.searchParams.set('vocabLookup', _vocabularyLookupLanguage())
+      }
+      window.location.assign(url)
+    })
+  _refreshVocabularyLookupSelect()
+  $('#vocabularyLookupLanguage').on('change', function () {
+    window._appSettings.vocabularyLookupLanguage = this.value
+    saveAppSettings()
+    const query = String($('#searchText').val() || '').trim()
+    if (query && window.vocabulary) {
+      window.unprocessedSearchText = null
+      window._vocabularyHintQuery = query
+      renderVocabularyFindings(query)
+      showResultContainer()
+    }
+  })
+  const vocabularyUrl = new URL(window.location.href)
+  if (vocabularyUrl.searchParams.has('vocabQuery') && getLangFromUrl().supported) {
+    const query = vocabularyUrl.searchParams.get('vocabQuery')
+    const lookup = vocabularyUrl.searchParams.get('vocabLookup')
+    vocabularyUrl.searchParams.delete('vocabQuery')
+    vocabularyUrl.searchParams.delete('vocabLookup')
+    window.history.replaceState(window.history.state, '', vocabularyUrl)
+    window._vocabularyReadyPromise.then(async () => {
+      await _vocabularyCatalogReady
+      if ($('#searchText').val() || !query) return
+      if (_vocabularyLookupLanguages().includes(lookup)) {
+        window._appSettings.vocabularyLookupLanguage = lookup
+        saveAppSettings()
+        _refreshVocabularyLookupSelect()
+      }
+      $('#searchText').val(query).trigger('input')
+      await searchTextChanged()
+    }).catch(error => console.warn('Vocabulary lookup could not resume', error))
+  }
 
   const $searchLanguage = $('#searchLanguageSelect')
   const studyLanguage = getLangFromUrl().definition
@@ -8346,7 +8558,7 @@ function _vocabLineFirstWord(line) {
 // _buildSimilarSegment all share the same line shape (icon + escaped text +
 // data-text). `highlight` may be a candidate word to bold-blue inside the
 // matched line.
-function _buildVocabLine(it, highlight, searchOverride) {
+function _buildVocabLine(it, highlight, searchOverride, hintForms) {
   let txt = it.item
   const $line = $('<div class="vocabulary-line"></div>')
   if (txt.trim().length) {
@@ -8354,6 +8566,16 @@ function _buildVocabLine(it, highlight, searchOverride) {
       .on('click', selectSearchedWord).appendTo($line)
   } else {
     txt = '------------------'
+  }
+  if (hintForms) {
+    const $text = $('<span></span>')
+    txt.split(SEPARATOR_PIPE).forEach((part, i) => {
+      if (i) $text.append(document.createTextNode(' | '))
+      if (hintForms.has(normalizeHint(part))) $text.append($('<mark class="vocab-hl"></mark>').text(part))
+      else $text.append(document.createTextNode(part))
+    })
+    $line.append($text).data({ text: txt })
+    return $line
   }
   let displayHtml
   if (highlight) {
@@ -8566,7 +8788,7 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
   const $content = $('<div class="vocabulary-segment-content"></div>').appendTo($item)
   const $header = match.kind === 'exact'
     ? _buildVocabLine(entry)
-    : _buildVocabLine(entry, undefined, match.matched)
+    : _buildVocabLine(entry, undefined, match.matched, match.hint?.forms)
   $header.find('.vocab-entry-search').remove()
   $header.addClass('highlighted similar-segment-header')
     .attr({ role: 'button', tabindex: '0', 'aria-expanded': 'false' })
@@ -8579,6 +8801,22 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
     if (it.index === match.index) $line.addClass('highlighted')
     $body.append($line)
   })
+  if (match.hint?.meanings.size) {
+    const lookup = _vocabularyLookupLanguage()
+    const target = getLangFromUrl().code
+    for (const id of match.hint.meanings) {
+      const meaning = _vocabularyCatalog.meanings[id]
+      const $meaning = $('<div class="vocab-hint-meaning"></div>').appendTo($content)
+      $('<span></span>').attr('lang', meaning.hints[lookup]?.length ? lookup : 'en')
+        .text(meaning.hints[lookup]?.[0] || meaning.label).appendTo($meaning)
+      if (meaning.examples?.[target]) $('<span></span>').attr('lang', target).text(meaning.examples[target]).appendTo($meaning)
+      if (lookup !== target && meaning.examples?.[lookup]) $('<span></span>').attr('lang', lookup).text(meaning.examples[lookup]).appendTo($meaning)
+    }
+  }
+  if (match.kind !== 'prefix' && match.kind !== 'compound' && _dsHasSelf() && !window._vocabularyReadOnly?.has(match.line)) {
+    $('<button type="button" class="lang-tool-btn vocab-hint-edit">Edit vocabulary</button>')
+      .on('click', () => _editVocabularyMatch(match).catch(error => alert(error.message))).appendTo($content)
+  }
   $target.append($item)
 }
 
@@ -8609,12 +8847,24 @@ function _renderVocabularySearch(search, includePrefix) {
   window._vocabularySearchText = query
   const $vocab = $('#vocabularyResult').empty()
   window._prefixOverflow = null
-  if (!query || commonWordsToIgnore.includes(query)) return
+  if (!query) return
   const matcher = _getVocabularyMatcher()
-  const matches = matcher.search(query, { includePrefix })
+  const ordinary = commonWordsToIgnore.includes(query) ? [] : matcher.search(query, { includePrefix })
+  const hints = _getVocabularyHintIndex(matcher).search(window._vocabularyHintQuery || query)
+  const hintsByRow = new Map(hints.map(hit => [hit.index, hit]))
+  const exact = ordinary.filter(match => match.kind === 'exact')
+  const exactRows = new Set(exact.map(match => match.index))
+  const matches = [
+    ...exact.map(match => ({ ...match, hint: hintsByRow.get(match.index) })),
+    ...hints.filter(match => !exactRows.has(match.index)).map(match => ({ ...match, hint: match })),
+    ...ordinary.filter(match => match.kind !== 'exact' && !hintsByRow.has(match.index)),
+  ]
   const allWords = matcher.rows.map(row => row.line)
   const direct = matches.filter(match => match.kind !== 'prefix' && match.kind !== 'compound')
   if (matches.length) $vocab.append('<h2 class="mobile-vocab-title">Vocabulary matches</h2>')
+  else if (_vocabularyLookupLanguage() !== 'en') {
+    $('<p class="vocab-hint-meaning"></p>').text('No vocabulary matches. Try another spelling or change the lookup language.').appendTo($vocab)
+  }
   // Exact phrases, tokens and word families stay outside the component groups.
   direct.forEach(match => _appendVocabularyMatch($vocab, match, matcher.rows, allWords))
   const compounds = new Map()
@@ -8683,6 +8933,25 @@ function searchVocabularyByPrefix() {
 
 export function renderVocabularyFindings(search) {
   _renderVocabularySearch(search, $('#toggleAutoPrefixSearchCheckbox').is(':checked') && _shouldAutoPrefixSearch(search))
+}
+
+window._renderVocabularyHintsEarly = query => {
+  if (!_getVocabularyHintIndex().search(query).length) return false
+  const vocabularyOnly = query.trim().length < 3
+  if (vocabularyOnly) {
+    window.searchText = query
+    window.searchResult = []
+    window.wordToItemsMap = window._shownWordToItemsMap = window._lastWordToItemsMap = {}
+    window._subtitleSearchCompletion = null
+    resetSearchResultIndex()
+    _resetLibrarySearch()
+    _hideStaleTranslationPanel()
+    $('#result').empty()
+    $('#search-pagination').hide()
+  }
+  renderVocabularyFindings(query)
+  showResultContainer()
+  return vocabularyOnly
 }
 
 // ─── Grouping an English search by the word it corresponds to ────────────
@@ -9685,6 +9954,7 @@ async function fetchSRTs(searchText, requestToken) {
     }
     const $searchText = $("#searchText");
     const txt = searchText || $searchText.val()
+    window._vocabularyHintQuery = String(txt || '')
     // $searchText.val(txt)
 
     if (txt.length < 3) return false
