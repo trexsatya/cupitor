@@ -180,12 +180,17 @@ async function checkMultilingualVocabulary(browser, mobile) {
     assert(!saved.some(([path]) => path.endsWith('.en.srt')))
     await search('stol')
     await results.locator('.similar-segment-header').filter({hasText:'stol'}).first().waitFor()
+    await resultsGroup.waitFor({state:'detached'})
     await search('dricka')
     await resultsGroup.waitFor()
+    await page.locator('#subtitleSearchStatus[data-complete="true"]').waitFor()
     if (await resultsGroup.getAttribute('aria-expanded') === 'false') await resultsGroup.click()
-    const cue = page.locator('#result .main-line').first()
-    await cue.scrollIntoViewIfNeeded()
-    await page.locator('#result .secondary-line[lang="hi"]').first().waitFor()
+    const reopened = page.locator('#result .lines-cntnr').filter({
+      has: page.locator(`.play-btn-container[data-url="${translatedVideo}"]`),
+    }).first()
+    await reopened.evaluate(element => element.scrollIntoView({block:'center'}))
+    const restored = reopened.locator('.secondary-line[lang="hi"]').getByText('पीना', {exact:true})
+    await restored.waitFor()
     for (const card of [
       {id:translatedVideo, word:'dricka', timeStart:1, timeEnd:3, lineIndex:1, answer:'पीना', target:'HI'},
       {id:translatedVideo === 'testVideo01' ? 'testVideo02' : 'testVideo01',
