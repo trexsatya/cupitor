@@ -52,10 +52,15 @@ async function checkMultilingualVocabulary(browser) {
   await page.route('**/*', route => {
     const pathname = new URL(route.request().url()).pathname
     if (pathname.endsWith('/vocabulary-meanings.json')) return route.fulfill({status:404, body:''})
+    if (pathname.endsWith('/swedish/vocabulary-hints-hi.json')) return route.fulfill({json:{
+      version:1, meanings:{ chair:{label:'Chair',hints:{hi:['कुर्सी']}} },
+      groups:{ chairs:{language:'sv',category:'Objects',line:'(chair)|stol|stolar|',forms:[],meanings:['chair']} },
+    }})
+    if (pathname.endsWith('/vocabulary-hints-hi.json')) return route.fulfill({status:404, body:''})
     if (pathname.endsWith('/swedish/vocabulary.txt')) {
       return route.fulfill({contentType:'text/plain', body:
         '#Shapes, arrangements and conditions\n(opening, gap)|öppning|slits|hål|glugg|gluggar|springa|springor|\n' +
-        '#Food, Drink, kitchen, Eating\n(drink)|dricka|dricker|drack|druckit|\n'})
+        '#Food, Drink, kitchen, Eating\n(drink)|dricka|dricker|drack|druckit|\n#Objects\n(chair)|stol|stolar|\n'})
     }
     if (pathname.endsWith('/spanish/vocabulary.txt')) {
       return route.fulfill({contentType:'text/plain', body:'#Food, Drink, kitchen, Eating\n(drink)|beber|tomar|\n'})
@@ -72,6 +77,10 @@ async function checkMultilingualVocabulary(browser) {
     await results.locator('[data-vocab-match-kind="hint"]').first().waitFor()
     assert.match(await results.innerText(), /öppning.*hål/)
     await page.locator('#vocabularyLookupLanguage').selectOption('hi')
+    await search('कुर्सी')
+    const chair = results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'stolar'})
+    await chair.first().waitFor()
+    assert.equal(await chair.locator('mark').count(), 0)
     await search('chhed')
     await results.locator('mark').filter({hasText:'hål'}).first().waitFor()
     await search('peena')

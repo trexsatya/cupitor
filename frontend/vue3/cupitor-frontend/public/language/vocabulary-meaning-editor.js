@@ -30,6 +30,7 @@ export function openVocabularyMeaningEditor({
   const form = control('form')
   const parts = vocabularyLineParts(row.line)
   const groupId = group?.id || makeId()
+  const groupMeanings = new Set(group?.meanings || [])
   const unused = [...(group?.forms || [])]
   const forms = parts.forms.map(text => {
     const index = unused.findIndex(item => normalizeHint(item.text) === normalizeHint(text))
@@ -48,6 +49,10 @@ export function openVocabularyMeaningEditor({
   const groupHints = control('input')
   groupHints.value = parts.hints.join(', ')
   const meaningSelect = control('select')
+  const linkGroup = control('input')
+  linkGroup.type = 'checkbox'
+  const linkGroupLabel = label('Apply hint to this whole group', linkGroup)
+  linkGroupLabel.className = 'vocab-hint-link-group'
   const lookupSelect = control('select')
   const hintInput = control('textarea')
   hintInput.rows = 2
@@ -77,11 +82,11 @@ export function openVocabularyMeaningEditor({
     const active = meaningSelect.value
     if (!active) { sharedImpact.textContent = ''; return }
     const targets = new Set(Object.entries(catalog.groups).filter(([id, item]) =>
-      id !== groupId && item.forms.some(entry => entry.meanings.includes(active))).map(([, item]) => item.language))
-    if (forms.some(entry => entry.meanings.includes(active))) targets.add(language)
+      id !== groupId && (item.meanings?.includes(active) || item.forms.some(entry => entry.meanings.includes(active)))).map(([, item]) => item.language))
+    if (groupMeanings.has(active) || forms.some(entry => entry.meanings.includes(active))) targets.add(language)
     sharedImpact.textContent = targets.size
       ? 'Hints apply to linked vocabulary in ' + [...targets].map(languageName).join(', ') + '.'
-      : 'Select at least one form to make these hints searchable in this group.'
+      : 'Link the group or select a form to make these hints searchable.'
   }
   function renderForms() {
     const active = meaningSelect.value
@@ -113,8 +118,16 @@ export function openVocabularyMeaningEditor({
   }
   function renderHints() {
     const selected = meanings.get(meaningSelect.value)
+    linkGroup.disabled = !selected
+    linkGroup.checked = groupMeanings.has(meaningSelect.value)
     hintInput.disabled = !selected
     hintInput.value = selected?.hints[lookupSelect.value]?.join(', ') || ''
+    showImpact()
+  }
+  linkGroup.onchange = () => {
+    const active = meaningSelect.value
+    if (linkGroup.checked) groupMeanings.add(active)
+    else groupMeanings.delete(active)
     showImpact()
   }
   hintInput.oninput = () => {
@@ -163,7 +176,7 @@ export function openVocabularyMeaningEditor({
     saving = saveButton.disabled = cancel.disabled = true
     status.textContent = 'Saving vocabulary…'
     try {
-      await save({ line, groupId, group: { language, category: categorySelect.value, line, forms: nextForms },
+      await save({ line, groupId, group: { language, category: categorySelect.value, line, forms: nextForms, meanings: [...groupMeanings] },
         meanings: Object.fromEntries(updates) })
       dialog.close()
     } catch (error) {
@@ -173,11 +186,11 @@ export function openVocabularyMeaningEditor({
     }
   }
 
-  renderMeaningOptions(meaningId || forms.flatMap(item => item.meanings)[0])
+  renderMeaningOptions(meaningId || [...groupMeanings][0] || forms.flatMap(item => item.meanings)[0])
   renderForms()
   renderHints()
   form.append(label('Category', categorySelect), label('English group hints', groupHints), fieldset,
-    label('Meaning', meaningSelect), newLabel, addMeaning, label('Hint language', lookupSelect),
+    label('Meaning', meaningSelect), linkGroupLabel, newLabel, addMeaning, label('Hint language', lookupSelect),
     label('Search hints and spellings, separated by commas', hintInput), sharedImpact, status, actions)
   dialog.append(title, form)
   document.body.append(dialog)

@@ -2060,6 +2060,11 @@ body.practice-mode #srtLoadingBanner {
     align-items: center;
     margin-block: 4px;
 }
+#vocabularyMeaningEditor .vocab-hint-link-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
 #vocabularyMeaningEditor .vocab-hint-impact {
     font-size: 0.9rem;
 }
