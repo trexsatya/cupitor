@@ -1980,6 +1980,18 @@ body.practice-mode #srtLoadingBanner {
 .search-vocab-popover-wrap #searchVocabularyMenu {
     min-width: 14rem;
 }
+@media (min-width: 1000px) {
+    .lang-search-top-row .vocab-lookup-controls {
+        display: flex;
+        align-items: center;
+        border: 0;
+        padding: 0;
+    }
+    .lang-search-top-row .vocab-lookup-controls label {
+        grid-template-columns: auto auto;
+        white-space: nowrap;
+    }
+}
 .vocab-lookup-controls {
     display: grid;
     gap: 6px;

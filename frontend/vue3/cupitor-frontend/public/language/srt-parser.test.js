@@ -12,6 +12,7 @@ import {
   detectSrtConflicts,
   upsertSrtEntry,
   applyQueuedEditsToText,
+  applyQueuedCompanionEdits,
   capturedSlotText,
 } from "./srt-parser";
 
@@ -355,3 +356,11 @@ describe("toStringSubtitle", () => {
     expect(s).toContain("...");
   });
 });
+
+test('companion translation edits replace by timestamp even when cue numbers differ', () => {
+  const current = '2\n00:00:07,000 --> 00:00:09,000\nदूसरी पंक्ति\n\n9\n00:00:01,000 --> 00:00:03,000\nपुराना पाठ\n'
+  const updated = applyQueuedCompanionEdits(current, {
+    2: {start:'00:00:01,000', end:'00:00:03,000', newText:'नया पाठ'},
+  })
+  expect(parseSrtEntries(updated).map(cue => cue.text)).toEqual(['नया पाठ', 'दूसरी पंक्ति'])
+})

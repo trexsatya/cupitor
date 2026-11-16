@@ -74,7 +74,9 @@ async function selectKnownLanguage(page, language) {
   const {control, inMobileTools} = await revealSearchTool(page, '#vocabularyLookupLanguage')
   await control.selectOption(language)
   if (inMobileTools) await page.getByRole('button', { name: 'Close tools', exact: true }).click()
-  else await page.locator('#searchVocabularyByPrefixBtn').click()
+  else if (await control.evaluate(el => !!el.closest('#searchVocabularyMenu'))) {
+    await page.locator('#searchVocabularyByPrefixBtn').click()
+  }
 }
 
 async function clickSubtitleInfo(page, link, click) {

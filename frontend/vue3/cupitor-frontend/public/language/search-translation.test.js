@@ -18,7 +18,7 @@ function fixture(query, { subtitles = true } = {}) {
     $, _, console, SEPARATOR_PIPE: '|', CORRESPONDING_TRANSLATE_MS: 2500,
     removeHintsInBrackets: text => text.replace(/\([^)]*\)/g, ''),
     _stripExpansionMarkers: text => text.replaceAll('<*', ''),
-    _haveTranslateBridge: () => true,
+    _haveTranslateBridge: () => true, _vocabularyLookupLanguage: () => 'en',
     _translationPanelDirection: () => ({ from: 'sv', to: 'en' }),
     _hideStaleTranslationPanel() {}, _dictionaryTerms: () => [], _translateDetailed: translate,
     recordSessionSearch() {}, getSelectedLang: () => 'sv', isTypedRegex: () => false,

@@ -17,6 +17,7 @@ export function wireMobileSearch() {
     ['headerAddToVocabBtn', document.getElementById('mobileStudyActions')],
     ['vocabularyEditOption', document.getElementById('mobileStudyActions')],
     ['cupPageFindToggle', pageActions, 'Find on page', pageActions.firstElementChild],
+    ['vocabularyLanguages', options],
     ['searchVocabularyMenu', options],
     ['toggleMainControl', options, 'Toggle search controls'],
     ['toggleResultContainer', options, 'Toggle results'],

@@ -143,6 +143,7 @@ import {
   detectSrtConflicts,
   upsertSrtEntry,
   applyQueuedEditsToText,
+  applyQueuedCompanionEdits,
 } from './srt-parser.js';
 import { translateLines } from './translate-lines.js';
 import { numberRows as _numberRows, plainRows as _plainRows, parseNumbered as _parseNumbered } from './translate-block.js';
@@ -3565,6 +3566,7 @@ function _installVocabularyCatalog() {
 }
 
 function _renderVocabularyForHintLanguage() {
+  $('#searchedWords').trigger('change.select2')
   if (!window.vocabulary || window.unprocessedSearchText) return
   const requested = window._requestedSearchText?.trim()
   if (requested && requested.length < 3 && window._renderVocabularyHintsEarly?.(requested)) return
@@ -4538,6 +4540,12 @@ $('document').ready(e => {
     _refreshMediaSubtitleLanguage().catch(error => console.warn('Could not update companion subtitles:', error))
     await _loadSharedHintTranslations(lookup)
     if (_vocabularyLookupLanguage() !== lookup) return
+    $('#searchedWords').trigger('change.select2')
+    _renderTranslationPanel(window._subtitleSearchToken).catch(error => console.warn('Could not refresh translations:', error))
+    if (window.unprocessedSearchText && window._vocabularySearchText) {
+      renderVocabularyFindings(window._vocabularySearchText)
+      return
+    }
     const query = String($('#searchText').val() || '').trim()
     if (query && window.vocabulary) {
       window.unprocessedSearchText = null
@@ -4745,6 +4753,7 @@ function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLa
       <button type="button" data-action="search-here">Search here</button>
       <button type="button" data-action="search-wiki">Search on wiki</button>
       <button type="button" data-action="search-so">Svensk ordbok</button>
+      <button type="button" data-action="google-translate">Google Translate</button>
       ${index !== null ? `<button type="button" id="${popoverId}-add-favorite" data-action="add-favorite"></button>` : ''}
     </div>`)
     $pop.find('[data-action="add-favorite"]').text(`Mark (${word})`)
@@ -4790,6 +4799,13 @@ function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLa
   $pop.find('[data-action="search-so"]').toggle(!!soHref).on('click.swp', e => {
     fn(e)
     if (soHref) window.open(soHref, '_blank', 'noopener,noreferrer')
+  })
+  $pop.find('[data-action="google-translate"]').on('click.swp', e => {
+    fn(e)
+    const source = wordLang === 'en' ? 'en' : getLangFromUrl().code
+    const target = source === 'en' && _vocabularyLookupLanguage() === 'en'
+      ? getLangFromUrl().code : _translationTargetLanguage(source)
+    if (word) window.open(_googleTranslateUrl(word, source, target), '_blank', 'noopener,noreferrer')
   })
   $pop.find('[data-action="add-favorite"]').on('click.swp', e => {
     fn(e)
@@ -5267,7 +5283,7 @@ $(document).ready(function () {
       // Category heading — italic grey + highlight match.
       return $(`<span style="color:#888;font-style:italic;">${_highlightMatchInText(option.text)}</span>`)
     }
-    return $('<span>').html(_highlightMatchInText(option.text))
+    return $('<span>').html(_highlightMatchInText(_displayVocabularyLine(option.text)))
   }
   // Selection (closed-state) doesn't need highlighting — the search term is gone.
   // escapeMarkup below passes strings through as HTML, so every string
@@ -5277,7 +5293,7 @@ $(document).ready(function () {
     if (typeof option.id === 'string' && option.id.indexOf('__cat__:') === 0) {
       return $('<span style="color:#888;font-style:italic;"></span>').text(option.text)
     }
-    return _escapeHtmlForVocab(option.text || '')
+    return _escapeHtmlForVocab(_displayVocabularyLine(option.text || ''))
   }
   const $sw = $('#searchedWords')
   if ($sw.length) {
@@ -5287,7 +5303,11 @@ $(document).ready(function () {
       allowClear: true,
       templateResult: _searchedWordsStyleCategory,
       templateSelection: _searchedWordsStyleSelection,
-      matcher: diacriticAwareMatcher,
+      matcher: (params, data) => {
+        if (diacriticAwareMatcher(params, data)) return data
+        if (!data?.id || data.id.startsWith('__cat__:')) return null
+        return _displayVocabularyLine(data.text).toLowerCase().includes(params.term.trim().toLowerCase()) ? data : null
+      },
       escapeMarkup: m => m
     })
   }
@@ -5998,6 +6018,24 @@ async function _fetchIndexedSrt(entry, code, who) {
 // Optional companions are fetched only on playback. Keep a small cache so
 // replaying clips from the same media doesn't issue another request.
 const _preferredSubtitleTracks = new Map()
+function _companionSubtitleKey(entry, language) {
+  const base = _dsReadUrl(entry.src || 'primary', 'srts', _dsLangFromLocation())
+  return JSON.stringify([base, entry.name, entry.bundle, entry.bundleKey, entry.bundleRevision, language])
+}
+
+function _cacheCompanionSubtitles(key, request) {
+  _preferredSubtitleTracks.set(key, request)
+  if (_preferredSubtitleTracks.size > 12) _preferredSubtitleTracks.delete(_preferredSubtitleTracks.keys().next().value)
+}
+
+function _pendingCompanionCues(link, language) {
+  const path = _srtPathFor(link, language)
+  const edits = path && _loadPendingSrtEdits()[path]
+  if (!edits) return []
+  return srtToJson(Object.entries(edits).map(([index, edit]) =>
+    `${index}\n${edit.start} --> ${edit.end}\n${edit.newText}\n\n`).join(''))
+}
+
 async function _loadPreferredSubtitleTrack(link) {
   const language = _vocabularyLookupLanguage()
   if (!link || language === 'en' || language === getLangFromUrl().code) return undefined
@@ -6014,8 +6052,7 @@ async function _loadPreferredSubtitleTrack(link) {
       }
     }
   } else if (entry && (!entry.sourceIdentity || entry.sourceIdentity === _dsSourceIdentity(entry.src || 'primary'))) {
-    const base = _dsReadUrl(entry.src || 'primary', 'srts', _dsLangFromLocation())
-    const key = JSON.stringify([base, entry.name, entry.bundle, entry.bundleKey, entry.bundleRevision, language])
+    const key = _companionSubtitleKey(entry, language)
     let request = _preferredSubtitleTracks.get(key)
     if (!request) {
       request = _withTimeout(_fetchIndexedSrt(entry, language), 3000, 'companion subtitles')
@@ -6024,14 +6061,15 @@ async function _loadPreferredSubtitleTrack(link) {
           if (error?.kind !== 'notfound' && _preferredSubtitleTracks.get(key) === request) _preferredSubtitleTracks.delete(key)
           return []
         })
-      _preferredSubtitleTracks.set(key, request)
-      if (_preferredSubtitleTracks.size > 12) _preferredSubtitleTracks.delete(_preferredSubtitleTracks.keys().next().value)
+      _cacheCompanionSubtitles(key, request)
     }
     cues = await request
   }
   context.assertCurrent()
   if (language !== _vocabularyLookupLanguage()) return _loadPreferredSubtitleTrack(link)
-  return { language, cues }
+  const byStart = new Map(cues.map(cue => [cue.start.ordinal, cue]))
+  for (const cue of _pendingCompanionCues(link, language)) byStart.set(cue.start.ordinal, cue)
+  return { language, cues: [...byStart.values()] }
 }
 
 const _subtitleRestores = new Map()
@@ -6146,7 +6184,8 @@ function _getLocalCaptionPanel() {
       _handleCaptionCapture({...payload, source:'caption', title:selection.mediaFile.name,
         url:'local:' + localSpeakOverIdentity(selection.mediaFile)})
     },
-    translateText: (text, source, target) => _requestTranslation(text, source, target),
+    translateText: (text, source, target) =>
+      _requestTranslation(text, source, target === 'en' ? _translationTargetLanguage(source) : target),
   })
   return _localCaptionPanel
 }
@@ -7037,7 +7076,7 @@ function getMainSubAndSecondarySub(file, line, pair = null) {
     mainSub = {...line};
     mainSub.text = highlightedText(mainSub.text, true)
     const found = pair || window.searchResult.find(it => it['en_subs'] && it['en_subs'].path === file.path.replaceAll(getTargetLangSrtSuffix(), ".en.srt"));
-    const counterpart = found && found.en_subs.data.find(it => it.index === line.index)
+    const counterpart = found?.en_subs?.data?.find(it => it.index === line.index)
     if (counterpart) {
       // Match parity with the other branch: wrap the secondary EN text via
       // highlightedText so every word is a clickable .link. Without this the
@@ -7172,7 +7211,7 @@ function _srtPathFor(link, langCode) {
   const srt = window.srts && window.srts.find(it => it.link === link)
   const baseName = _nfc((srt && srt.name) || (window.allSubtitles[link] && window.allSubtitles[link].fileName))
   if (!baseName) return null
-  const suffix = langCode === 'en' ? '.en.srt' : ('.' + lang.code + '.srt')
+  const suffix = '.' + (langCode || lang.code) + '.srt'
   return `${_langRepoDir()}/srts/${baseName}${suffix}`
 }
 
@@ -7213,6 +7252,11 @@ async function _saveSubtitleEdit(link, langCode, lineIndex, newText, opts = null
   if (_isReadOnlyLink(link)) throw new Error("This video is from the other user's library and is read-only.")
   const filePath = _srtPathFor(link, langCode)
   if (!filePath) throw new Error('No SRT path for ' + link)
+  if (_isCompanionSubtitleLanguage(langCode)) {
+    if (opts?.start == null || opts.end == null) throw new Error('Translated subtitle needs timestamps.')
+    _queueSubtitleEdit(filePath, lineIndex, newText, opts)
+    return true
+  }
   const key = langCode === 'en' ? 'en' : 'sv'
   const stored = await _restoreSubtitleDocument(link)
   if (!stored) throw new Error('SRT not loaded for ' + link)
@@ -7291,6 +7335,10 @@ function _queueSubtitleEdit(filePath, lineIndex, newText, opts = null) {
   // Sync button opens a Review dialog instead of pushing directly, we wait
   // for explicit user action — no silent pushes.
 }
+function _isCompanionSubtitleLanguage(language) {
+  return language !== 'en' && language !== getLangFromUrl().code
+}
+
 // Map an SRT file path back to its index.json `link` (videoId). The file
 // naming convention is `<basename>.<langCode>.srt` and `srts/index.json`
 // stores `{link, name=basename}`. Used by flushPendingSrtEdits below to
@@ -7298,7 +7346,7 @@ function _queueSubtitleEdit(filePath, lineIndex, newText, opts = null) {
 function _filePathToLink(filePath) {
   if (!filePath) return null
   try {
-    const m = String(filePath).match(/\/srts\/(.+?)\.[a-z]{2,3}\.srt$/i)
+    const m = String(filePath).match(/\/srts\/(.+?)\.[a-z]{2,3}(?:-[a-z0-9]{2,8})*\.srt$/i)
     if (!m) return null
     const baseName = _nfc(decodeURIComponent(m[1]))
     const srt = (window.srts || []).find(s => s && _nfc(s.name) === baseName)
@@ -7337,7 +7385,10 @@ async function flushPendingSrtEdits(selected = null) {
       // translation of a line the remote doesn't have yet); when there's no
       // remote file and no timestamped edits, returns null so we don't create
       // a fresh SRT from plain ✎ edits alone.
-      const updated = applyQueuedEditsToText(current || '', edits[filePath])
+      const language = filePath.match(/\.([^.]+)\.srt$/i)?.[1]
+      const apply = language && _isCompanionSubtitleLanguage(language)
+        ? applyQueuedCompanionEdits : applyQueuedEditsToText
+      const updated = apply(current || '', edits[filePath])
       if (updated == null) {
         console.warn(`flushPendingSrtEdits: ${filePath} has no committable content; skipping`)
       } else {
@@ -7373,8 +7424,14 @@ async function flushPendingSrtEdits(selected = null) {
       const filePath = textPath
       const link = _filePathToLink(filePath)
       if (!link) continue
+      const language = filePath.match(/\.([^.]+)\.srt$/i)?.[1]
+      if (language && _isCompanionSubtitleLanguage(language)) {
+        const entry = window.srts?.find(item => item.link === link)
+        if (entry) _cacheCompanionSubtitles(_companionSubtitleKey(entry, language), Promise.resolve(srtToJson(text)))
+        continue
+      }
       await _restoreSubtitleDocument(link)
-      const key = /\.en\.srt$/i.test(filePath) ? 'en' : 'sv'
+      const key = language === 'en' ? 'en' : 'sv'
       window.allSubtitles[link] = { ...(window.allSubtitles[link] || {}), [key]: text }
       // Drop stale parsed caches for the language we just rewrote.
       if (key === 'sv') delete window.allSubtitles[link]._parsedSv
@@ -7675,6 +7732,9 @@ async function renderLines(id, url) {
     return showInfoBtn;
   };
   const eId = _.escape(id), eUrl = _.escape(url)
+  const translationLanguage = _translationTargetLanguage()
+  const pendingCues = translationLanguage === 'en' ? [] : _pendingCompanionCues(url, translationLanguage)
+  const pendingTranslation = createSubtitleTranslationLookup({ preferred: pendingCues, language: translationLanguage })
 
   // A video from the other user's library is read-only: no ✎ and no 🌐
   // (both write to the subtitle files).
@@ -7697,7 +7757,7 @@ async function renderLines(id, url) {
      ${ownerTag}
   </span>
   <span class="capture-btn btn" title="Add this match to the current recording">●</span>
-  ${readOnly ? '' : `<span class="translate-lines-btn btn" data-id="${eId}" data-url="${eUrl}" title="Translate the visible lines to English">🌐</span>`}
+  ${readOnly ? '' : `<span class="translate-lines-btn btn" data-id="${eId}" data-url="${eUrl}" title="Translate the visible lines to ${_.escape(_vocabularyLanguageName(translationLanguage))}">🌐</span>`}
   <span style="float: right;">
     <span class="remove-prev-btn btn" > - </span>
     <span class="add-next-btn btn"> + </span>
@@ -7739,8 +7799,12 @@ async function renderLines(id, url) {
     const lineMain = `<div class="line main-line" data-url="${eUrl}" data-line-index="${_.escape(subIdx)}" data-lang-code="${mainLangCode}"><span class="line-text">${mainSub.text}</span>${editBtn}</div>`;
     subForLines += lineMain
     mainSubPanel.append(lineMain)
-    if (secondarySub && secondarySub.text) {
-      const lineSec = `<div class="line secondary-line" data-url="${eUrl}" data-line-index="${_.escape(subIdx)}" data-lang-code="en"><span class="line-text">${secondarySub.text}</span>${editBtn}</div>`;
+    const translated = pendingTranslation(sub)
+    if (translated || secondarySub?.text) {
+      const language = translated?.language || 'en'
+      const text = translated ? _safeSubtitleHtml(translated.text) : secondarySub.text
+      const secondaryEdit = translated ? '' : editBtn
+      const lineSec = `<div class="line secondary-line" data-url="${eUrl}" data-line-index="${_.escape(subIdx)}" data-lang-code="${language}" lang="${language}"><span class="line-text">${text}</span>${secondaryEdit}</div>`;
       subForLines += lineSec
       secondarySubPanel.append(lineSec)
     }
@@ -8682,6 +8746,22 @@ function _vocabLineFirstWord(line) {
   return parts[0] || ''
 }
 
+let _vocabularyDisplayIndex
+function _displayVocabularyLine(line, index, matches = []) {
+  if (_vocabularyLookupLanguage() === 'en' || !line) return line
+  if (!_vocabularyDisplayIndex) {
+    _vocabularyDisplayIndex = _getVocabularyHintIndex()
+    // One index lookup per render or picker query. The matcher checks the
+    // whole vocabulary for edits, so looking it up per option is expensive.
+    queueMicrotask(() => { _vocabularyDisplayIndex = null })
+  }
+  const hints = [...new Set([...matches, ..._vocabularyDisplayIndex.hintsFor(line, index)])]
+  if (!hints.length) return line
+  const parts = ['(' + hints.join(', ') + ')', ...vocabularyLineParts(line).forms]
+  if (line.trimEnd().endsWith(SEPARATOR_PIPE)) parts.push('')
+  return parts.join(SEPARATOR_PIPE)
+}
+
 // Build a single `<div class="vocabulary-line">` for a getSurrounding entry.
 // Centralised so renderVocabularyFindings, renderVocabularyLineByText, and
 // _buildSimilarSegment all share the same line shape (icon + escaped text +
@@ -8696,12 +8776,10 @@ function _buildVocabLine(it, highlight, searchOverride, hintForms, localizedHint
   } else {
     txt = '------------------'
   }
-  if (hintForms || localizedHints?.length) {
+  const displayed = _displayVocabularyLine(txt, it.index, localizedHints)
+  if (hintForms) {
     const $text = $('<span></span>')
-    const parts = localizedHints?.length
-      ? ['(' + localizedHints.join(', ') + ')', ...vocabularyLineParts(txt).forms]
-      : txt.split(SEPARATOR_PIPE)
-    if (localizedHints?.length && txt.trimEnd().endsWith(SEPARATOR_PIPE)) parts.push('')
+    const parts = displayed.split(SEPARATOR_PIPE)
     parts.forEach((part, i) => {
       if (i) $text.append(document.createTextNode(' | '))
       if (hintForms?.has(normalizeHint(part))) $text.append($('<mark class="vocab-hl"></mark>').text(part))
@@ -8713,7 +8791,7 @@ function _buildVocabLine(it, highlight, searchOverride, hintForms, localizedHint
   let displayHtml
   if (highlight) {
     // Whole-word highlight (similarity search passes the candidate here).
-    displayHtml = _highlightWordInLine(_.escape(txt).replaceAll(SEPARATOR_PIPE, ' | '), highlight)
+    displayHtml = _highlightWordInLine(_.escape(displayed).replaceAll(SEPARATOR_PIPE, ' | '), highlight)
   } else {
     // Default: highlight the prefix/suffix portion of each |-segment that
     // overlaps with the search term. searchOverride lets callers (e.g. the
@@ -8725,7 +8803,7 @@ function _buildVocabLine(it, highlight, searchOverride, hintForms, localizedHint
     // partial overlaps (e.g. "förrå" of "förråd") don't get a false hit.
     const hasOverride = (searchOverride !== undefined && searchOverride !== null)
     const searchTerm = hasOverride ? searchOverride : (window.searchText || '')
-    displayHtml = _highlightSearchInVocabLine(txt, searchTerm, { exactPrefix: hasOverride })
+    displayHtml = _highlightSearchInVocabLine(displayed, searchTerm, { exactPrefix: hasOverride })
   }
   $line.append(`<span>${displayHtml}</span>`)
   $line.data({ text: txt })
@@ -8788,7 +8866,7 @@ function _buildSimilarSegment({ lineIdx, candidate, searchWord, tier, distance, 
     } else {
       txt = '------------------'
     }
-    let displayTxt = _.escape(txt).replaceAll(SEPARATOR_PIPE, ' | ')
+    let displayTxt = _.escape(_displayVocabularyLine(txt, it.index)).replaceAll(SEPARATOR_PIPE, ' | ')
     if (it.index === lineIdx) {
       displayTxt = _highlightWordInLine(displayTxt, candidate)
     }
@@ -9510,29 +9588,29 @@ function _searchTermInLang(term, lang) {
   $('#searchText').val(w).trigger('input').trigger('change')
 }
 
-// Which way round the lookup goes. The toggle says which language the search is
-// running in; the panel translates out of that one and into the other, and a
-// term it offers is searched in the language it is written in.
-//
-// 'sv' is this page's name for the studied language whatever it actually is —
-// the same marker forceLangForNextSearch understands.
+function _translationTargetLanguage(source = getLangFromUrl().code) {
+  const familiar = _vocabularyLookupLanguage()
+  return familiar === source ? 'en' : familiar
+}
+
+function _googleTranslateUrl(text, source, target) {
+  const url = new URL('https://translate.google.com/')
+  url.search = new URLSearchParams({ sl: source, tl: target, text, op: 'translate' })
+  return url.href
+}
+
 function _translationPanelDirection() {
   const studied = getLangFromUrl()
-  if (!studied || !studied.code) return null
-  const name = studied.fullName || studied.code.toUpperCase()
-  // Read by people, in a tooltip with no styling of its own.
-  const studiedName = name.charAt(0).toUpperCase() + name.slice(1)
-  // The language the results on screen were actually found in, which is not
-  // always what the toggle says. A search can be pinned to one language for one
-  // search — "Search here" on a subtitle word, a term from this panel, a replay
-  // from the history — and by the time a settings change redraws those same
-  // results the pin is gone and the toggle can say the opposite.
+  if (!studied?.code) return null
   const lang = (window._resultsSearchLang === 'en' || window._resultsSearchLang === 'sv')
     ? window._resultsSearchLang
     : getSelectedLang()
-  return lang === 'en'
-    ? { from: 'en', to: studied.code, fromName: 'EN', toName: studiedName, searchIn: 'sv' }
-    : { from: studied.code, to: 'en', fromName: studiedName, toName: 'EN', searchIn: 'en' }
+  const from = lang === 'en' ? 'en' : studied.code
+  const familiar = _vocabularyLookupLanguage()
+  const to = from === 'en' && familiar === 'en' ? studied.code : _translationTargetLanguage(from)
+  const name = code => code === 'en' ? 'EN' : _vocabularyLanguageName(code)
+  return { from, to, fromName: name(from), toName: name(to),
+    searchIn: to === studied.code ? 'sv' : to }
 }
 
 // The word whose results are on screen.
@@ -9547,7 +9625,7 @@ function _translationPanelWord() {
     : String(window.unprocessedSearchText)
   // A vocabulary line is a pair, not a word to look up, and which half is the
   // one being searched is not knowable from the string.
-  if (raw.indexOf(SEPARATOR_PIPE) >= 0) return ''
+  if (raw.includes(SEPARATOR_PIPE)) return ''
   // Unbalanced brackets put a warning in front of the user on their way out of
   // removeHintsInBrackets, which is no business of a panel nobody asked for.
   if (raw.split('(').length !== raw.split(')').length) return ''
@@ -9577,7 +9655,7 @@ function _translationPanelWord() {
 function _hideStaleTranslationPanel() {
   const $p = $('#translationPanel')
   if (!$p.length) return
-  const dir = _haveTranslateBridge() ? _translationPanelDirection() : null
+  const dir = _translationPanelDirection()
   const word = dir ? _translationPanelWord() : ''
   if (word && $p.attr('data-word') === word && $p.attr('data-dir') === `${dir.from}>${dir.to}`) return
   $p.removeAttr('data-word').removeAttr('data-dir').hide()
@@ -9640,11 +9718,14 @@ function _repaintTranslationPanelIfCurrent(from, to, text) {
 }
 
 async function _renderTranslationPanel(token) {
-  const dir = _haveTranslateBridge() ? _translationPanelDirection() : null
+  const dir = _translationPanelDirection()
   const word = dir ? _translationPanelWord() : ''
   _hideStaleTranslationPanel()
   if (!word) return
-  const got = await _translateDetailed(word, dir.from, dir.to, CORRESPONDING_TRANSLATE_MS)
+  const useBridge = _haveTranslateBridge()
+  const googleUrl = _vocabularyLookupLanguage() !== 'en' ? _googleTranslateUrl(word, dir.from, dir.to) : ''
+  if (!useBridge && !googleUrl) return
+  const got = useBridge ? await _translateDetailed(word, dir.from, dir.to, CORRESPONDING_TRANSLATE_MS) : null
   // The search moved on while the host was answering — the same token every
   // other stage of the render checks itself against.
   if (token !== undefined && token !== window._subtitleSearchToken) return
@@ -9659,12 +9740,12 @@ async function _renderTranslationPanel(token) {
   // "sjö" is "sjö" — a chip that searches the search that is already on screen.
   const terms = _dictionaryTerms(got && { ...(got.detail || {}), text: got.text })
     .filter(t => t.word.toLowerCase() !== word.toLowerCase())
-  if (!terms.length) { $('#translationPanel').hide(); return }
+  if (!terms.length && !googleUrl) { $('#translationPanel').hide(); return }
   const $panel = _translationPanelEl()
   $panel.find('.xl-summary').html(
     `<span class="mobile-translation-label">Translations</span><span class="xl-dir">${_.escape(dir.fromName)} → ${_.escape(dir.toName)}</span>` +
     `<span class="xl-word">${_.escape(word)}</span>` +
-    `<span class="xl-n">${terms.length}</span>`)
+    (terms.length ? `<span class="xl-n">${terms.length}</span>` : ''))
   const confidences = _translationConfidences(terms)
   const chips = terms.map((t, i) => {
     // The search itself refuses anything shorter than three characters, so a
@@ -9673,14 +9754,18 @@ async function _renderTranslationPanel(token) {
     const searchable = t.word.length >= 3
     const why = t.pos ? ` · ${t.pos}` : ''
     const sure = Number.isFinite(t.score) ? `${Math.round(t.score * 100)}%` : 'no score given'
+    const domain = dir.searchIn === 'en' || dir.searchIn === 'sv' ? 'subtitles' : 'vocabulary'
     const title = searchable
-      ? `Search ${t.word} in ${dir.toName} subtitles${why} · ${sure}`
+      ? `Search ${t.word} in ${dir.toName} ${domain}${why} · ${sure}`
       : `${t.word}${why} · ${sure} · too short to search`
     return `<button type="button" class="xl-term xl-conf-${confidences[i]}"${searchable ? '' : ' disabled'}` +
       ` data-term="${_.escape(t.word)}" data-lang="${_.escape(dir.searchIn)}"` +
       ` title="${_.escape(title)}">${_.escape(t.word)}</button>`
   }).join('')
-  $panel.find('.xl-body').html(`<div class="xl-terms">${chips}</div>`)
+  const $terms = $('<div class="xl-terms"></div>').html(chips)
+  if (googleUrl) $('<a class="lang-tool-btn xl-google" target="_blank" rel="noopener noreferrer">Google Translate</a>')
+    .attr('href', googleUrl).appendTo($terms)
+  $panel.find('.xl-body').empty().append($terms)
   const open = !(window._appSettings && window._appSettings.translationPanelOpen === false)
   $panel[0].open = open
   $panel.attr('data-word', word).attr('data-dir', `${dir.from}>${dir.to}`)
@@ -13904,7 +13989,7 @@ async function _translatePlaylistPhrases($btn) {
   if (!phrases.length) { _cpBuildToast('Every word/phrase already has a translation.'); return }
 
   const source = (getLangFromUrl().code) || 'sv'
-  const target = 'en'
+  const target = _translationTargetLanguage(source)
   const labelHtml = $btn ? $btn.html() : null
   if ($btn) $btn.prop('disabled', true)
   let done = 0
@@ -15707,10 +15792,8 @@ function _requestTranslation(text, source, target, opts) {
   })
 }
 
-// Translate every source (main-language) line currently visible in window `id`
-// into English and write them into the paired .en.srt, then re-render so the
-// English shows. Overwrites all visible lines (re-translate). Creates the
-// .en.srt / individual en lines when the snippet is source-only.
+// Translate the visible source cues into the familiar language and queue
+// edits to that language's companion file.
 async function translateVisibleLines(id, url, $btn) {
   const link = url
   if (!_requireSelf()) return
@@ -15728,6 +15811,7 @@ async function translateVisibleLines(id, url, $btn) {
 
   const svByIndex = new Map((stored._parsedSv || []).map(s => [String(s.index), s]))
   const sourceLang = getLangFromUrl().code
+  const targetLang = _translationTargetLanguage(sourceLang)
   const jobs = []
   for (let i = from; i <= to; i++) {
     const sub = svByIndex.get(String(i))
@@ -15743,7 +15827,7 @@ async function translateVisibleLines(id, url, $btn) {
   let failed = 0
   try {
     const safeTranslate = async (t) => {
-      try { return await _requestTranslation(t, sourceLang, 'en') }
+      try { return await _requestTranslation(t, sourceLang, targetLang) }
       catch (e) { console.warn('translate line failed', e); return null }
     }
     const translations = await translateLines(jobs.map(j => j.text), safeTranslate)
@@ -15751,16 +15835,16 @@ async function translateVisibleLines(id, url, $btn) {
       const tr = translations[k]
       if (tr == null || !String(tr).trim()) { failed++; continue }
       try {
-        await _saveSubtitleEdit(link, 'en', jobs[k].index, String(tr).trim(), { start: jobs[k].start, end: jobs[k].end })
+        await _saveSubtitleEdit(link, targetLang, jobs[k].index, String(tr).trim(), { start: jobs[k].start, end: jobs[k].end })
       } catch (err) { console.warn('translate save failed', jobs[k].index, err); failed++ }
     }
     // A source-only snippet has no en_subs in searchResult; create it so the
     // re-render pairs each sv line with its fresh English (matched by index).
     const hit = (window.searchResult || []).find(it => it && it.url === link)
-    if (hit && !hit.en_subs && stored.en) {
+    if (targetLang === 'en' && hit && !hit.en_subs && stored.en) {
       hit.en_subs = { path: _srtPathFor(link, 'en'), data: srtToJson(stored.en, 'en') }
     }
-    renderLines('' + id, '' + url)
+    await renderLines('' + id, '' + url)
     if (typeof _syncOnWindowChange === 'function') _syncOnWindowChange()
     if (failed) alert(`Translated ${jobs.length - failed}/${jobs.length} lines; ${failed} failed.`)
   } catch (err) {
@@ -16323,13 +16407,13 @@ const CARD_TRANSLATE_BATCH_MAX = 4500
 // that is wrong hands one language to the translator labelled as the other and
 // writes the answer over the good text, so it is asked rather than assumed —
 // once per card, then remembered while the editor stays open.
-function _askTranslateDirection(studiedName, suggested) {
+function _askTranslateDirection(studiedName, suggested, familiarName) {
   return new Promise((resolve) => {
     let $a = $('#meeDirAsk')
     if (!$a.length) $a = $('<div id="meeDirAsk"></div>').appendTo('body')
     // Not escaped: jQuery UI builds each button with .text(), which escapes.
-    const sv2en = `${studiedName} → English`
-    const en2sv = `English → ${studiedName}`
+    const sv2en = `${studiedName} → ${familiarName}`
+    const en2sv = `${familiarName} → ${studiedName}`
     $a.html(`<div class="mee-dir-q">Which way round should this card be translated?</div>`
       + `<div class="mee-dir-hint">Whichever you pick is used for both boxes until you close this card.</div>`)
     let answered = null
@@ -16644,7 +16728,7 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
     const n = String((studiedLang && studiedLang.fullName) || studiedCode || '')
     return n.charAt(0).toUpperCase() + n.slice(1)
   })()
-  const langName = (code) => (code === 'en' ? 'English' : _studiedName)
+  const langName = _vocabularyLanguageName
   const sourceLocale = speechLocale(existing?.sourceTtsLocale, '')
   const targetLocale = speechLocale(existing?.targetTtsLocale, '')
   const ttsLanguages = new Map(Object.values(LANGUAGES).map(({ name, locale }) =>
@@ -17088,7 +17172,7 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
     // faces it cares about.
     const langsFor = (layout) => {
       const studiedIn = layout === 'studiedInSource' ? 'source' : 'target'
-      const langOf = (f) => (f === studiedIn ? studiedCode : 'en')
+      const langOf = (f) => (f === studiedIn ? studiedCode : _translationTargetLanguage(studiedCode))
       return { fromLang: langOf(face === 'source' ? 'target' : 'source'), toLang: langOf(face) }
     }
     // The tooltip has to follow the answer and the swap, or it ends up naming
@@ -17118,7 +17202,8 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
       // Asked once per card, then remembered. Nothing has been touched yet, so
       // backing out of the picker leaves the card exactly as it was.
       if (!cardLayout) {
-        const picked = await _askTranslateDirection(_studiedName, suggestedPick(face))
+        const picked = await _askTranslateDirection(_studiedName, suggestedPick(face),
+          _vocabularyLanguageName(_translationTargetLanguage(studiedCode)))
         // The dialog may have closed under the picker, in which case these
         // boxes belong to the next card already — check before writing.
         if (dialogClosed) return
