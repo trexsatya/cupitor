@@ -318,6 +318,8 @@ export function buildPlayingSubsVM({ parsed, lang, item, before, after, minWords
       : sec && (sec.text || sec[_secLang] || '') || ''
     rows.push({
       i,
+      start: line?.start?.ordinal,
+      stop: line?.end?.ordinal,
       mainText: String(mainText).trim(),
       secText: secText.trim(),
       mainLanguage: preferred && _lang === 'en' ? translation?.language || 'en' : undefined,

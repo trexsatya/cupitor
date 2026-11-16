@@ -44,7 +44,7 @@ import { installRichCardPasteControl } from './rich-card-paste.js';
 import { installMobileRichToolbar } from './rich-card-mobile-toolbar.js';
 import { cardCanUseTts, cardTtsText, ttsFaceSequence, speakTts } from './card-tts.js';
 import { createPracticeVideoCues } from './practice-video.js';
-import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video.js';
+import { createRecordingVideoAttempt, confirmRecordingSeek, getYoutubeVideoId, VIDEO_RECOVERY_MS, VIDEO_STALL_RETRY_MS } from './recording-video.js';
 import { createAppLifecycleClock } from './app-lifecycle.js';
 import { installStudyDivider } from './study-divider.js';
 import { installStudyChrome } from './study-chrome.js';
@@ -478,6 +478,7 @@ import {
 } from './renderer/playing-ui-vm.js';
 import {
   renderPlayingSubsList,
+  subtitleTimestampButton,
   updatePlayingBanner,
 } from './renderer/playing-ui-render.js';
 import {
@@ -6721,7 +6722,8 @@ function isNotPlaying() {
 }
 
 function markIntervalPlayDone(ct) {
-  if (window.youtubePlayInterval && window.playingYoutubeVideo) {
+  if (!window._recVideoAttempt && !window._practiceClipTimer && !window._practicePlayPending &&
+      !window.seekRequestProcessing && window.youtubePlayInterval && window.playingYoutubeVideo) {
     const s = window.youtubePlayInterval.start
     const e = window.youtubePlayInterval.end
     const want = window.youtubePlayInterval.videoId || null
@@ -10404,7 +10406,7 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 
 async function loadYoutubeVideo(videoId, {
   isCurrent = () => true, startSeconds, respectInterval = true, now = () => Date.now(), beforeLoad,
-  mainMedia = !window._playingRecording && !window._practiceActive, loadCaptions = true,
+  mainMedia = !window._playingRecording && !window._practiceActive, loadCaptions = true, loadAckMs = 10000,
 } = {}) {
   const readyDeadline = now() + VIDEO_RECOVERY_MS
   const ready = () => { try { return !!(window.ytPlayerReady && window.ytPlayer?.getIframe?.()) } catch (_) { return false } }
@@ -10466,15 +10468,10 @@ async function loadYoutubeVideo(videoId, {
       // the new id. Bounded deliberately: waitUntil never gives up, and a
       // video that turns out to be unplayable must not leave every caller
       // awaiting a promise that can no longer settle.
-      const deadline = now() + 10000
+      const deadline = now() + loadAckMs
       const tick = () => {
         if (!isCurrent()) { resolve(); return }
-        let loaded = false
-        try {
-          const d = window.ytPlayer.getVideoData && window.ytPlayer.getVideoData()
-          loaded = !!(d && d.video_id === videoId)
-        } catch (_) {}
-        if (loaded || now() > deadline) { settle(); return }
+        if (getYoutubeVideoId(window.ytPlayer) === videoId || now() >= deadline) { settle(); return }
         setTimeout(tick, 100)
       }
       tick()
@@ -12340,15 +12337,15 @@ async function playMediaSlice(url, start, end, source, { isCurrent = () => true,
   if (source === 'YouTube') {
     showMediaContainer()
     if (!confirmSeek) showMediaRelatedContainer()
-    let needsLoad = true
-    try { needsLoad = forceLoad || !window.ytPlayer || !window.ytPlayer.getVideoUrl().includes(url) } catch (_) {}
+    let needsLoad = forceLoad || !window.ytPlayerReady || getYoutubeVideoId(window.ytPlayer) !== url
     while (isCurrent()) {
       if (needsLoad) {
         window.mediaSelected = {link: url, source: 'link'}
         window.playingYoutubeVideo = true
         window.syncSubtitle = false
         await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: start,
-          respectInterval: false, forceLoad, now, beforeLoad: preparePlayer })
+          respectInterval: false, forceLoad: true, now, beforeLoad: preparePlayer,
+          loadAckMs: confirmSeek ? 3000 : undefined })
       }
       if (!isCurrent()) return
       try {
@@ -12364,7 +12361,6 @@ async function playMediaSlice(url, start, end, source, { isCurrent = () => true,
         // with startSeconds and verify again; never play video zero as a
         // fallback. The owning attempt still enforces its total 20s budget.
         needsLoad = true
-        forceLoad = true
       }
     }
     return
@@ -18989,7 +18985,7 @@ window.copySpotifyPlaybackLog = async () => {
   }
 }
 
-function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt) {
+function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt, recover) {
   const itemToken = window._recPlayItemToken
   const start = Number(timeStart)
   let end = Number(timeEnd)
@@ -19007,8 +19003,9 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt) {
       }
     }, 50)
   }
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     let observedBelowEnd = false
+    let lastPosition = start, lastProgress = _playerLifecycle.now(), retried = false
     const tick = () => {
       if (!current()) return resolve()
       // A host-paused iframe is not a headset pause or a stalled clip while
@@ -19025,25 +19022,40 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt) {
       })
       if (action === 'pause') _applyRecPlayPause(true, false)
       else if (action === 'resume') _applyRecPlayPause(false, false)
-      if (window._recPlayPaused) return setTimeout(tick, 100)
+      if (window._recPlayPaused) {
+        lastProgress = _playerLifecycle.now()
+        return setTimeout(tick, 100)
+      }
       try {
         const player = window.ytPlayer
-        const loadedId = player?.getVideoData?.().video_id || null
+        const loadedId = getYoutubeVideoId(player)
         const ct = Number(player?.getCurrentTime?.())
         const idOk = loadedId === expectedVideoId
         if (idOk) {
           const duration = player.getDuration?.()
-          if (Number.isFinite(duration) && duration > start && end > duration + 1) end = duration
+          if (Number.isFinite(duration) && duration > start && end > duration) end = duration
         }
         const inWindow = idOk && Number.isFinite(ct) && ct >= start - 1.5 && ct <= end + 5
-        if (inWindow && ct < end - 0.05) observedBelowEnd = true
+        if (inWindow && ct < end) observedBelowEnd = true
         if (inWindow && observedBelowEnd && ct >= end) {
           try { player.seekTo(end, true) } catch (_) {}
           hardPause()
           return resolve()
         }
+        if (inWindow && playerState === 1 && ct > lastPosition + 0.05) {
+          lastPosition = ct
+          lastProgress = _playerLifecycle.now()
+        }
         attempt.observe(inWindow ? ct : NaN, playerState, loadedId)
       } catch (_) {}
+      // An iframe can report PLAYING and the right timestamp while its clock
+      // stays frozen. Reload once, still inside this clip's recovery budget.
+      if (recover && !retried && _playerLifecycle.now() - lastProgress >= VIDEO_STALL_RETRY_MS) {
+        retried = true
+        observedBelowEnd = false
+        Promise.resolve().then(() => recover(lastPosition)).then(tick, reject)
+        return
+      }
       if (typeof onTick === 'function') { try { onTick() } catch (_) {} }
       // The attempt's watchdog covers readiness, load and seek too. Unlike
       // the old buffering exclusions, it guarantees a 20s recovery bound.
@@ -19495,7 +19507,9 @@ async function _renderPlayingSubtitles(item, { isCurrent = () => true } = {}) {
     $sub.html('<div class="rec-ps-err">Matched line not found in subtitle file.</div>')
     return null
   }
-  renderPlayingSubsList(vm, $sub[0])
+  renderPlayingSubsList(vm, $sub[0], range => {
+    if (isCurrent() && !window._practiceActive) replayCurrentRecordingItem(range)
+  })
   setTimeout(_scrollActiveSubIntoView, 0)
   return { primary: vm.primary, from: vm.from, to: vm.to }
 }
@@ -21676,6 +21690,9 @@ async function playRecording(opts) {
       !window._practiceActive && !window._recPlayPaused && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)
     window._recPlayQueueLen = queue.length
     const it = queue[i]
+    const cueRange = _recRequestedCue?.item === it && _recRequestedCue.session === sessionToken
+      ? _recRequestedCue.range : null
+    _recRequestedCue = null
     spotifyPlayer.stop({ hide: !spotifyClips(it).length })
     const restoredRate = window._recReplaySpeed && (window._recReplaySpeed.item !== it || window._recReplaySpeed.index !== i)
       ? _restoreRecordingReplaySpeed() : null
@@ -21935,6 +21952,11 @@ async function playRecording(opts) {
         }
       }
 
+      if (cueRange) {
+        _playStart = cueRange.start
+        _playEnd = cueRange.stop
+      }
+
       // Validate before loading or restoring sound, so an unrepaired range
       // cannot start media even briefly before the end-watcher rejects it.
       if (!Number.isFinite(Number(_playStart)) || Number(_playStart) < 0 ||
@@ -21970,30 +21992,24 @@ async function playRecording(opts) {
       attempt.request()
       const forceLoad = !!window._recPlayForceVideoReload
       window._recPlayForceVideoReload = false
-      await attempt.wait(playMediaSlice(it.id, _playStart, _playEnd, _src, {
-        isCurrent: () => attempt.active() && ownsVideo(), forceLoad, now: _playerLifecycle.now,
-        confirmSeek: true, isForeground: _playerLifecycle.isForeground,
-        preparePlayer: player => attempt.preparePlayer(player) }))
-      if (!sessionPlaying()) break
-      if (Number.isInteger(window._recNavGotoIndex)) continue
-      if (!ownsVideo()) continue
-      // _waitYTUntilEnd pauses the player when ct >= timeEnd, so when the next
-      // item reuses the same video, playMediaSlice short-circuits to just a
-      // seek — leaving the player paused and the clip never starts. Kick it
-      // back into play explicitly here so consecutive same-video items work.
-      // Backward navigation slows one listen. Replay retains 0.75x for this
-      // item, including subsequent replays, until the selected item changes.
-      if (slowedThisRound || window._recReplaySpeed) {
-        try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(0.75) } catch (_) {}
-      } else {
-        try { window.ytPlayer?.setPlaybackRate(_recordingVideoRate()) } catch (_) {}
+      const playAt = async (start, reload) => {
+        await attempt.wait(playMediaSlice(it.id, start, _playEnd, _src, {
+          isCurrent: () => attempt.active() && ownsVideo(), forceLoad: reload, now: _playerLifecycle.now,
+          confirmSeek: true, requirePlaying: true, isForeground: _playerLifecycle.isForeground,
+          preparePlayer: player => attempt.preparePlayer(player) }))
+        if (!attempt.active() || !ownsVideo()) return
+        const rate = slowedThisRound || window._recReplaySpeed ? 0.75 : _recordingVideoRate()
+        try { window.ytPlayer?.setPlaybackRate(rate) } catch (_) {}
+        attempt.releaseMute()
+        try { window.ytPlayer?.playVideo() } catch (_) {}
       }
-      attempt.releaseMute()
-      try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
+      await playAt(_playStart, forceLoad)
+      if (!sessionPlaying()) break
+      if (!ownsVideo()) continue
       await attempt.wait(_waitYTUntilEnd(_playStart, _playEnd, () => {
         _updatePlayingProgress(_playStart, _playEnd, it.id)
         _refreshPlayingSubtitles(subHolder.ctx)
-      }, it.id, attempt))
+      }, it.id, attempt, start => playAt(start, true)))
     } catch (e) {
       videoFailure = e
     } finally {
@@ -22183,6 +22199,7 @@ function _recPlayToast(msg) {
 function navigateRecordingPlayback(direction) {
   if (!window._playingRecording) return false
   if (direction !== 'prev' && direction !== 'next') return false
+  _recRequestedCue = null
   window._recPlayForceVideoReload = false
   window._recNavRequest = direction
   window._recNavGotoIndex = null
@@ -22192,16 +22209,18 @@ function navigateRecordingPlayback(direction) {
   return true
 }
 
-function replayCurrentRecordingItem() {
+let _recRequestedCue = null
+function replayCurrentRecordingItem(range = null) {
   if (!window._playingRecording || !window._recPlayCurrentItem) return false
   const index = window._recPlayIndex
   if (!Number.isInteger(index) || !window._recPlayQueue?.[index]) return false
-  if (!window._recReplaySpeed) {
+  _recRequestedCue = range ? { item: window._recPlayQueue[index], session: window._recPlaySessionToken, range } : null
+  if (!range && !window._recReplaySpeed) {
     let rate = 1
     try { rate = window.ytPlayer.getPlaybackRate() || 1 } catch (_) {}
     window._recReplaySpeed = { item: window._recPlayQueue[index], index, rate }
   }
-  try { window.ytPlayer?.setPlaybackRate(0.75) } catch (_) {}
+  if (!range) { try { window.ytPlayer?.setPlaybackRate(0.75) } catch (_) {} }
   // A silent/error screen must be loaded again, not merely seeked.
   window._recPlayForceVideoReload = !!window._recVideoAttempt && !window._recVideoAttempt.played
   window._recNavRequest = null
@@ -22680,7 +22699,9 @@ const _practiceVideoCues = createPracticeVideoCues({
   waitUntil
 })
 let _practiceRenderToken = 0
+let _practiceSeekAttempt = null
 function _newPracticeVideoRequest({ mute = false, keepSpotify = false, keepTts = false } = {}) {
+  _practiceSeekAttempt?.cancel()
   if (!keepTts) _stopPracticeTts()
   if (!keepSpotify) spotifyPlayer.stop()
   window._manualCueToken = (window._manualCueToken || 0) + 1
@@ -23590,28 +23611,47 @@ async function _practiceClipRange(it, before, after) {
 // with syncSubtitle=false, so the global ontimeupdate interval-stopper is
 // inactive — this is the practice-specific equivalent. Cancelled when a newer
 // clip starts, the card changes, or practice closes (via the token).
-function _watchPracticeClipEnd(stop, token) {
-  if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
-  window._practiceClipTimer = setInterval(() => {
-    if (!window._practiceActive || token !== window._practiceClipToken) {
-      clearInterval(window._practiceClipTimer); window._practiceClipTimer = null
-      return
-    }
-    let ct = 0
-    try { ct = (window.ytPlayer && window.ytPlayer.getCurrentTime && window.ytPlayer.getCurrentTime()) || 0 } catch (_) {}
-    if (ct >= stop) {
-      try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
-      clearInterval(window._practiceClipTimer); window._practiceClipTimer = null
-    }
+function _watchPracticeClipEnd(stop, token, { videoId, start, recover } = {}) {
+  clearInterval(window._practiceClipTimer)
+  let lastPosition = start, lastProgress = _playerLifecycle.now()
+  const clear = () => {
+    clearInterval(timer)
+    if (window._practiceClipTimer === timer) window._practiceClipTimer = null
+  }
+  const timer = window._practiceClipTimer = setInterval(() => {
+    if (!window._practiceActive || token !== window._practiceClipToken) { clear(); return }
+    if (!_playerLifecycle.isForeground()) return
+    try {
+      const player = window.ytPlayer
+      if (!player || (videoId && getYoutubeVideoId(player) !== videoId)) return
+      const time = player.getCurrentTime()
+      const duration = player.getDuration?.()
+      const end = duration > 0 ? Math.min(stop, duration) : stop
+      if (time >= end) {
+        player.pauseVideo()
+        clear()
+        return
+      }
+      if (!recover) return
+      const state = player.getPlayerState()
+      if (state === 2 || (state === 1 && time > lastPosition + 0.05)) {
+        if (state === 1) lastPosition = time
+        lastProgress = _playerLifecycle.now()
+      }
+      if ([1, 3].includes(state) && _playerLifecycle.now() - lastProgress >= VIDEO_STALL_RETRY_MS) {
+        clear()
+        recover(lastPosition)
+      }
+    } catch (_) {}
   }, 50)
 }
 
-async function playPracticeClip() {
+async function playPracticeClip(range = null, { retryStall = true, forceLoad = false } = {}) {
   const idx = window._practiceIdx
   const it = window._practiceCards && window._practiceCards[idx]
   if (!it) return
   if (_pracRec?.loop && _pracRec.key === _pracRecKey(it)) {
-    _pracRecLoopSeek(_pracRec)
+    _pracRecLoopSeek(_pracRec, range ? { start: range.start } : undefined)
     return
   }
   // The visible Play button uses this entry point. Dispatch before creating
@@ -23624,9 +23664,11 @@ async function playPracticeClip() {
   const token = (window._practiceClipToken = (window._practiceClipToken || 0) + 1)
   const isCurrent = () => _practiceVideoCues.isCurrent(videoRequest) && window._practiceIdx === idx && token === window._practiceClipToken
   window._practicePlayPending = token
+  const attempt = createRecordingVideoAttempt({ videoId: it.id, isCurrent, now: _playerLifecycle.now })
+  _practiceSeekAttempt = attempt
   try {
-    const { start, stop } = await _practiceClipRange(
-      it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0)
+    const { start, stop } = range || await attempt.wait(_practiceClipRange(
+      it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0))
     if (!isCurrent()) return
     // Speaking over runs on the same clip: its first rewind lands here, and
     // the pass after a take stops where the card's lines end.
@@ -23636,17 +23678,14 @@ async function playPracticeClip() {
     }
     // A take spoken after the card's lines still has to be reached.
     const clipEnd = _pracRecClipEnd(stop)
-    // The cue normally already loaded the right video; reload only if needed.
     if (!_practiceVideoCues.beginPlayback(videoRequest)) return
-    let needLoad = true
-    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
-    if (needLoad) {
-      window.mediaSelected = { link: it.id, source: 'link' }
-      await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: start, respectInterval: false })
-    }
-    if (!isCurrent()) return
-    await seekToYoutubeTime(start, { isCurrent })
-    if (!isCurrent()) return
+    attempt.request()
+    await attempt.wait(playMediaSlice(it.id, start, clipEnd, 'YouTube', {
+      isCurrent: attempt.active, confirmSeek: true, requirePlaying: true, forceLoad,
+      now: _playerLifecycle.now, isForeground: _playerLifecycle.isForeground,
+      preparePlayer: player => attempt.preparePlayer(player),
+    }))
+    if (!attempt.active()) return
     // Playing the clip again is a fresh listen, so every take sounds at its
     // mark — including any the pass after a recording was holding back. The
     // watcher also lets go on a big enough jump, but starting from near the
@@ -23669,11 +23708,23 @@ async function playPracticeClip() {
     const rate = _practiceVideoRate()
     _updatePracticeSpeedBtn()
     try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(rate) } catch (_) {}
-    try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
+    attempt.releaseMute()
+    try { window.ytPlayer?.playVideo() } catch (_) {}
     window._practicePlaybackCard = it
-    _watchPracticeClipEnd(clipEnd, token)
-  } catch (e) { console.warn('practice: play failed', e) }
-  finally { if (window._practicePlayPending === token) window._practicePlayPending = null }
+    _watchPracticeClipEnd(clipEnd, token, {
+      videoId: it.id, start,
+      recover: retryStall ? resume => playPracticeClip({ start: resume, stop }, { retryStall: false, forceLoad: true }) : null,
+    })
+  } catch (e) {
+    if (e.kind !== 'cancelled' && isCurrent()) {
+      console.warn('practice: play failed', e)
+      _cpBuildToast('Could not play this clip. Tap Play to retry.')
+    }
+  } finally {
+    attempt.dispose()
+    if (_practiceSeekAttempt === attempt) _practiceSeekAttempt = null
+    if (window._practicePlayPending === token) window._practicePlayPending = null
+  }
 }
 
 // ─── Shadowing takes in Practice ──────────────────────────────────────────
@@ -24141,7 +24192,7 @@ function _pracRecLoopClearAudio(st) {
   }
 }
 
-function _pracRecLoopSeek(st, { preserveAudio = false } = {}) {
+function _pracRecLoopSeek(st, { preserveAudio = false, start = Number(st.clipStart) || 0 } = {}) {
   if (_pracRec !== st || !st.loop || window._practiceMinimized || !window._practiceActive) return
   _pracRecTakeOverPlayhead()
   // A take can be longer than a single loop. Keep that recording audible
@@ -24152,7 +24203,6 @@ function _pracRecLoopSeek(st, { preserveAudio = false } = {}) {
   st.loopSeeking = true
   st.loopPlayed = !!speaking
   st.watchPos = null
-  const start = Number(st.clipStart) || 0
   if (spotifyClips(st.item).length) {
     try {
       if (!spotifyPlayer.seekPractice(st.item, start)) {
@@ -24497,6 +24547,10 @@ function _practiceRenderLines($container, rows, langKey, highlightWord) {
     } else {
       $text.text(text || '(empty)')
     }
+    const timestamp = subtitleTimestampButton(r, range => {
+      if (window._practiceActive && window._practiceCards?.[window._practiceIdx] === practiceItem) playPracticeClip(range)
+    })
+    if (timestamp) $row.append(timestamp)
     $row.append($text)
     if (!readOnly) $row.append($(`<button type="button" class="practice-line-edit" title="Edit this line" data-lang="${langKey === 'source' ? 'src' : 'en'}" data-line-index="${r.lineIndex}">✎</button>`))
     $container.append($row)
@@ -24664,7 +24718,7 @@ async function _playPracticeManualVideo(it) {
     try { window.ytPlayer?.setPlaybackRate(_practiceVideoRate()) } catch (_) {}
     _practiceVideoCues.beginPlayback(request)
     window._practicePlaybackCard = it
-    _watchPracticeClipEnd(video.timeEnd, clipToken)
+    _watchPracticeClipEnd(video.timeEnd, clipToken, { videoId: video.id })
   } catch (e) {
     if (ownsRequest()) {
       try { window.ytPlayer.pauseVideo() } catch (_) {}
@@ -24901,6 +24955,8 @@ async function _practiceCardLines(it, before, after) {
     const translation = lookup(line) || (sec?.text?.trim() ? { text: sec.text.trim(), language: 'en' } : null)
     rows.push({
       lineIndex: li,
+      start: line.start?.ordinal,
+      stop: line.end?.ordinal,
       isMatch: i === matchPos,
       source: String(line.text || '').trim(),
       target: translation?.text || '',
