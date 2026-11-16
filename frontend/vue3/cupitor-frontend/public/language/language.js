@@ -22949,7 +22949,7 @@ function openPracticeMode(opts) {
       if (isPracticeTouchDoubleTap(e.originalEvent, matchMedia('(pointer: coarse)').matches)) revealPracticeCard()
     })
     $p.on('click', '.practice-dir', togglePracticeDir)
-    $p.on('click', '.practice-play', playPracticeClip)
+    $p.on('click', '.practice-play', () => playPracticeClip())
     $p.on('click', '.practice-speed', cyclePracticePlaybackRate)
     $p.on('click', '.practice-speeds-save', _savePracticeSpeeds)
     $p.on('click', '.practice-ctx-before', () => { window._practiceCtxBefore++; _renderPracticeCard() })
