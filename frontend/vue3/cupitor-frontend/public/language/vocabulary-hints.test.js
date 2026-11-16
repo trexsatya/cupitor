@@ -2,13 +2,13 @@ import { parseVocabularyFile } from './vocab-merge.js'
 import { createVocabularyMatcher } from './vocabulary-matcher.js'
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js'
 import { assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex,
-  mergeVocabularyCatalogs, parseVocabularyCatalog, vocabularyLineParts } from './vocabulary-hints.js'
+  mergeVocabularyCatalogs, parseVocabularyCatalog, parseVocabularyHintLanguages, parseVocabularyHintTranslations, vocabularyLineParts } from './vocabulary-hints.js'
 
 const openings = vocabularyHintSeed.groups['swedish-openings']
 const eats = vocabularyHintSeed.groups['swedish-eat']
 const eatsEs = vocabularyHintSeed.groups['spanish-eat']
-const indexFor = (vocab, target, source, catalog = vocabularyHintSeed) =>
-  createVocabularyHintIndex(createVocabularyMatcher(vocab, { lang: target }).rows, target, catalog, source)
+const indexFor = (vocab, target, source, catalog = vocabularyHintSeed, translations) =>
+  createVocabularyHintIndex(createVocabularyMatcher(vocab, { lang: target }).rows, target, catalog, source, translations)
 const indexed = (group, source, catalog = vocabularyHintSeed) =>
   indexFor({ [group.category]: [group.line] }, group.language, source, catalog)
 
@@ -28,7 +28,9 @@ test('indexes whole English cues as one complete vocabulary group per search', (
 test('links native phrases and romanized spellings only to the intended forms and group', () => {
   const vocab = { [openings.category]: [openings.line], Verbs: ['(run)|springa|sprang|'] }
   const index = indexFor(vocab, 'sv', 'hi')
-  expect(index.search('छेद')).toEqual(index.search('CHHED'))
+  expect(index.search('छेद')[0].localizedHints).toEqual(['छेद', 'chhed'])
+  expect(index.search('CHHED')[0].localizedHints).toEqual(['chhed', 'छेद'])
+  expect(index.search('छेद')[0].line).toBe(index.search('CHHED')[0].line)
   expect([...index.search('छेद')[0].forms]).toEqual(['hål'])
   const hits = index.search('  पतली   दरार  ')
   expect(hits).toHaveLength(1)
@@ -111,4 +113,47 @@ test('a whole-group Hindi hint finds the row without inventing specific word mat
   const updated = indexed(revision.groups.chairs,'hi',revision)
   expect(updated.search('कुर्सी')).toEqual([])
   expect(updated.search('बैठने की कुर्सी')[0].line).toContain('stolen')
+})
+
+test('parses separate pipe files with commas, aliases and stable English keys', () => {
+  const hindi = parseVocabularyHintTranslations('# Hindi\nDRINK = पीना | peena\ndrink = पीना | pina\nyes, of course = हाँ, ज़रूर\n', 'hi')
+  const french = parseVocabularyHintTranslations('drink = boire', 'fr')
+  expect([...hindi]).toEqual([['drink', ['पीना', 'peena', 'pina']], ['yes, of course', ['हाँ, ज़रूर']]])
+  expect([...french]).toEqual([['drink', ['boire']]])
+  expect(parseVocabularyHintLanguages('hi\n# comment\nfr\n../../fr\nfr\n')).toEqual(['hi', 'fr'])
+})
+
+test('new lines in any study language inherit translations from the same English cue', () => {
+  const hints = parseVocabularyHintTranslations('Drink = पीना | peena\ndrink water = पानी पीना', 'hi')
+  const noMeanings = mergeVocabularyCatalogs()
+  const sv = { Food: ['(drink)|dricka|drack|', '(drink water)|dricka vatten|'] }
+  sv.Food.push('( drink )|klunka|')
+  const swedish = indexFor(sv, 'sv', 'hi', noMeanings, hints)
+  const spanish = indexFor({ Food: ['(drink)|beber|tomar|'] }, 'es', 'hi', noMeanings, hints)
+  expect(swedish.search('peena').map(result => result.line)).toEqual([sv.Food[0], sv.Food[2]])
+  expect(swedish.search('पानी पीना').map(result => result.line)).toEqual([sv.Food[1]])
+  expect(spanish.search('peena')[0]).toMatchObject({ line: '(drink)|beber|tomar|', localizedHints: ['peena','पीना'] })
+  expect(spanish.search('पीना')[0].localizedHints).toEqual(['पीना','peena'])
+  expect(spanish.groupFor(0)).toBeUndefined()
+})
+
+test('a localized whole-group override keeps an ambiguous English cue precise', () => {
+  const line = '(gap)|löneskillnad|'
+  const catalog = parseVocabularyCatalog(JSON.stringify({ version:1,
+    meanings:{ pay:{ label:'Pay gap', hints:{ hi:['वेतन में अंतर'] } } },
+    groups:{ wages:{ language:'sv', category:'Wages', line, forms:[], meanings:['pay'] } },
+  }))
+  const hints = parseVocabularyHintTranslations('gap = खाली जगह', 'hi')
+  const index = indexFor({ Wages:[line], Physical:['(gap)|mellanrum|'] }, 'sv','hi',catalog,hints)
+  expect(index.search('खाली जगह').map(result => result.line)).toEqual(['(gap)|mellanrum|'])
+  expect(index.search('वेतन में अंतर').map(result => result.line)).toEqual([line])
+})
+
+test('displays the shared spellings when a curated form also matches', () => {
+  const group = vocabularyHintSeed.groups['swedish-drink']
+  const hints = parseVocabularyHintTranslations('drink = पीना | peena', 'hi')
+  const index = indexFor({ [group.category]: [group.line] }, 'sv', 'hi', vocabularyHintSeed, hints)
+  expect(index.search('peena')[0].localizedHints).toEqual(['peena','पीना'])
+  expect([...index.search('peena')[0].forms]).toContain('dricka')
+  expect(index.search('पानी पीना')[0].localizedHints[0]).toBe('पानी पीना')
 })
