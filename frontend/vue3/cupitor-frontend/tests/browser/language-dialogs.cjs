@@ -47,20 +47,34 @@ async function serveFixtures(route) {
   return route.fulfill({ body, contentType })
 }
 
-async function clickSearchTool(page, selector) {
+async function revealSearchTool(page, selector) {
   const control = page.locator(selector)
-  if (await control.evaluate(el => !!el.closest('#mobileSearchTools'))) {
-    if (!(await page.locator('#mobileSearchTools').isVisible())) {
+  const tools = page.locator('#mobileSearchTools')
+  const inMobileTools = await control.evaluate(el => !!el.closest('#mobileSearchTools'))
+  if (inMobileTools) {
+    if (!await tools.isVisible()) {
       await page.getByRole('button', { name: 'Tools', exact: true }).click()
     }
     const details = control.locator('xpath=ancestor::details[1]')
     if (await details.count() && (await details.getAttribute('open')) === null) {
       await details.locator('summary').click()
     }
-  } else if (selector.startsWith('#searchVocabularyMenu')) {
+  } else if (await control.evaluate(el => !!el.closest('#searchVocabularyMenu')) && !await control.isVisible()) {
     await page.locator('#searchVocabularyByPrefixBtn').click()
   }
+  return {control, inMobileTools}
+}
+
+async function clickSearchTool(page, selector) {
+  const {control} = await revealSearchTool(page, selector)
   await control.click()
+}
+
+async function selectKnownLanguage(page, language) {
+  const {control, inMobileTools} = await revealSearchTool(page, '#vocabularyLookupLanguage')
+  await control.selectOption(language)
+  if (inMobileTools) await page.getByRole('button', { name: 'Close tools', exact: true }).click()
+  else await page.locator('#searchVocabularyByPrefixBtn').click()
 }
 
 async function clickSubtitleInfo(page, link, click) {
@@ -411,4 +425,4 @@ if (require.main === module) (async () => {
   }
 })().catch(error => { console.error(error); process.exitCode = 1 })
 
-module.exports = { serveFixtures, checkVocabInsertPositions, clickSearchTool, clickSubtitleInfo }
+module.exports = { serveFixtures, checkVocabInsertPositions, clickSearchTool, clickSubtitleInfo, selectKnownLanguage }
