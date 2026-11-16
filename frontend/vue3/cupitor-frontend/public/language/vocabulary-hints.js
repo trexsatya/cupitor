@@ -2,6 +2,7 @@ import { stripBracketHints, stripExpansionMarkers } from './vocab-search.js'
 import { isProperlyBracketed, ownLines, parseVocabularyFile } from './vocab-merge.js'
 
 export const VOCABULARY_CATALOG_FILE = 'vocabulary-meanings.json'
+export const GENERATED_HINDI_HINTS_FILE = 'vocabulary-hints-hi.json'
 export const VOCABULARY_CATALOG_PATH = 'db/language/shared/' + VOCABULARY_CATALOG_FILE
 
 export function normalizeHint(value, language) {
@@ -61,6 +62,7 @@ export function parseVocabularyCatalog(raw) {
       validLanguage(language) && typeof text === 'string'))
   const validGroup = (id, item) => validId(id) && record(item) &&
     validLanguage(item.language) && typeof item.category === 'string' && typeof item.line === 'string' &&
+    (item.meanings === undefined || (Array.isArray(item.meanings) && item.meanings.every(validId))) &&
     Array.isArray(item.forms) && new Set(item.forms.map(form => form?.id)).size === item.forms.length &&
     item.forms.every(form => record(form) && validId(form.id) && typeof form.text === 'string' &&
       Array.isArray(form.meanings) && form.meanings.every(validId))
@@ -134,7 +136,8 @@ export function createVocabularyHintIndex(rows, target, catalog, source) {
       const hintKey = phraseKey(hints)
       const formSignature = texts => JSON.stringify(texts.map(formKey).sort())
       const previousForms = formSignature(forms)
-      const linkedForms = new Set(group.forms.filter(form => form.meanings.length).map(form => formKey(form.text)))
+      const linkTexts = group.meanings?.length ? forms : group.forms.filter(form => form.meanings.length).map(form => form.text)
+      const linkedForms = new Set(linkTexts.map(formKey).filter(Boolean))
       const candidates = (rowsByCategory.get(group.category) || []).filter(entry =>
         formSignature(entry.forms) === previousForms ||
         (hints.length && phraseKey(entry.hints) === hintKey && entry.forms.some(form => linkedForms.has(formKey(form)))))
@@ -143,6 +146,7 @@ export function createVocabularyHintIndex(rows, target, catalog, source) {
     if (row) byRow.set(row.index, { id, ...group, row })
   }
   for (const group of byRow.values()) {
+    for (const meaning of group.meanings || []) put(byMeaning, meaning, { row: group.row })
     const available = new Set(vocabularyLineParts(group.row.line).forms.map(text => normalizeHint(text)))
     for (const form of group.forms) {
       const key = normalizeHint(form.text)

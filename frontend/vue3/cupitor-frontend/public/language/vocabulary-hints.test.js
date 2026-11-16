@@ -97,3 +97,18 @@ test('rejects conflicting updates to a meaning or vocabulary row', () => {
   })).toThrow(/changed/)
   expect(() => assertVocabularyRow('#Nouns\n(hole)|new|', '#Nouns\n(hole)|old|', 'Nouns', '(hole)|old|')).toThrow(/changed/)
 })
+
+test('a whole-group Hindi hint finds the row without inventing specific word matches', () => {
+  const line = '(chair)|stol|stolar|'
+  const group = { language:'sv', category:'Objects', line, forms:[], meanings:['chair'] }
+  const base = parseVocabularyCatalog(JSON.stringify({ version:1,
+    meanings:{ chair:{ label:'Chair', hints:{ hi:['कुर्सी'] } } }, groups:{ chairs:group } }))
+  const hit = indexed(group,'hi',base).search('कुर्सी')[0]
+  expect(hit.line).toBe(line)
+  expect([...hit.forms]).toEqual([])
+  const revision = mergeVocabularyCatalogs(base, { meanings:{ chair:{ label:'Chair', hints:{ hi:['बैठने की कुर्सी'] } } },
+    groups:{ chairs:{ ...group, line:'(chair)|stol|stolar|stolen|' } } })
+  const updated = indexed(revision.groups.chairs,'hi',revision)
+  expect(updated.search('कुर्सी')).toEqual([])
+  expect(updated.search('बैठने की कुर्सी')[0].line).toContain('stolen')
+})

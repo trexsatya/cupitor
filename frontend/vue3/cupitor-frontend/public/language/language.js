@@ -27,7 +27,7 @@ import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import {
   assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex, mergeVocabularyCatalogs,
-  normalizeHint, parseVocabularyCatalog, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
+  GENERATED_HINDI_HINTS_FILE, normalizeHint, parseVocabularyCatalog, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
 } from './vocabulary-hints.js';
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js';
 import { openVocabularyMeaningEditor } from './vocabulary-meaning-editor.js';
@@ -3520,7 +3520,9 @@ function _initPracticeLogFrontBanner() {
 
 let _vocabularyCatalogSelf = parseVocabularyCatalog(null)
 let _vocabularyCatalogOther = parseVocabularyCatalog(null)
+let _generatedVocabularyHints = parseVocabularyCatalog(null)
 let _vocabularyCatalog = vocabularyHintSeed
+let _vocabularyLookupChoices = ['en', 'hi']
 let _vocabularyCatalogReady
 let _vocabularyHintIndex
 
@@ -3530,27 +3532,26 @@ function _vocabularyLanguageName(code) {
   return _vocabularyLanguageNames?.of(code) || code
 }
 
-function _vocabularyLookupLanguages() {
-  return [...new Set(['en', 'hi', ...Object.values(_vocabularyCatalog.meanings).flatMap(meaning => Object.keys(meaning.hints))])]
-}
-
 function _vocabularyLookupLanguage() {
   const choice = window._appSettings.vocabularyLookupLanguage
-  return _vocabularyLookupLanguages().includes(choice) ? choice : 'en'
+  return _vocabularyLookupChoices.includes(choice) ? choice : 'en'
 }
 
 function _refreshVocabularyLookupSelect() {
   $('#vocabularyLookupLanguage').empty()
-    .append(_vocabularyLookupLanguages().map(code => new Option(_vocabularyLanguageName(code), code)))
+    .append(_vocabularyLookupChoices.map(code => new Option(_vocabularyLanguageName(code), code)))
     .val(_vocabularyLookupLanguage())
 }
 
 function _installVocabularyCatalog() {
-  _vocabularyCatalog = mergeVocabularyCatalogs(vocabularyHintSeed, _vocabularyCatalogOther, _vocabularyCatalogSelf)
+  _vocabularyCatalog = mergeVocabularyCatalogs(_generatedVocabularyHints, vocabularyHintSeed, _vocabularyCatalogOther, _vocabularyCatalogSelf)
+  _vocabularyLookupChoices = [...new Set(['en', 'hi',
+    ...Object.values(_vocabularyCatalog.meanings).flatMap(meaning => Object.keys(meaning.hints))])]
   _refreshVocabularyLookupSelect()
-  if (window.vocabulary && window._vocabularySearchText && !window.unprocessedSearchText) {
-    renderVocabularyFindings(window._vocabularySearchText)
-  }
+  if (!window.vocabulary || window.unprocessedSearchText) return
+  const requested = window._requestedSearchText?.trim()
+  if (requested && requested.length < 3 && window._renderVocabularyHintsEarly?.(requested)) return
+  if (window._vocabularySearchText) renderVocabularyFindings(window._vocabularySearchText)
 }
 
 async function _loadVocabularyCatalog() {
@@ -3563,6 +3564,17 @@ async function _loadVocabularyCatalog() {
   _vocabularyCatalogSelf = _dsHasSelf() ? readSaved('self') : parseVocabularyCatalog(null)
   _vocabularyCatalogOther = _dsHasOther() ? readSaved('other') : parseVocabularyCatalog(null)
   _installVocabularyCatalog()
+  const generatedReady = _dsReadLayers(GENERATED_HINDI_HINTS_FILE, {
+    lang: _dsLangFromLocation(), retry: { tries: 1, timeoutMs: 12000 },
+  }).then(layers => {
+    context.assertCurrent()
+    const catalogs = []
+    for (const layer of [...layers].reverse()) {
+      try { catalogs.push(parseVocabularyCatalog(layer.text)) }
+      catch (error) { console.warn('Ignoring an invalid Hindi vocabulary pack:', error) }
+    }
+    _generatedVocabularyHints = mergeVocabularyCatalogs(...catalogs)
+  }).catch(error => console.warn('Generated Hindi vocabulary hints unavailable:', error))
   try {
     const layers = await _dsReadLayers(VOCABULARY_CATALOG_FILE, {
       lang: 'shared', retry: { tries: 1, timeoutMs: 4000, init: { cache: 'no-cache' } },
@@ -3580,6 +3592,7 @@ async function _loadVocabularyCatalog() {
   } catch (error) {
     console.warn('Vocabulary meanings unavailable; using the last loaded copy.', error)
   }
+  await generatedReady
   try { context.assertCurrent() } catch (_) { return }
   _installVocabularyCatalog()
 }
@@ -3611,7 +3624,7 @@ async function _editVocabularyMatch(match) {
   openVocabularyMeaningEditor({
     row, group, catalog: _vocabularyCatalog, language, lookup,
     meaningId: match.hint?.meanings.values().next().value,
-    languages: [...new Set([..._vocabularyLookupLanguages(), ...Object.values(LANGUAGES).map(item => item.code)])],
+    languages: [...new Set([..._vocabularyLookupChoices, ...Object.values(LANGUAGES).map(item => item.code)])],
     categories: Object.keys(_ownVocabulary()).filter(category => category !== '__empty__' && !VOCAB_HIDDEN_CATEGORIES.has(category))
       .sort((left, right) => left.localeCompare(right)),
     languageName: _vocabularyLanguageName, makeId: () => window.crypto?.randomUUID?.() || uuid(),
@@ -4480,7 +4493,7 @@ $('document').ready(e => {
     window._vocabularyReadyPromise.then(async () => {
       await _vocabularyCatalogReady
       if ($('#searchText').val() || !query) return
-      if (_vocabularyLookupLanguages().includes(lookup)) {
+      if (_vocabularyLookupChoices.includes(lookup)) {
         window._appSettings.vocabularyLookupLanguage = lookup
         saveAppSettings()
         _refreshVocabularyLookupSelect()
