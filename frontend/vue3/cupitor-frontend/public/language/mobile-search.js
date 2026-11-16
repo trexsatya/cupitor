@@ -15,6 +15,7 @@ export function wireMobileSearch() {
   const placements = [
     ['searchSourceChips', document.getElementById('mobileSearchSources')],
     ['headerAddToVocabBtn', document.getElementById('mobileStudyActions')],
+    ['vocabularyEditOption', document.getElementById('mobileStudyActions')],
     ['cupPageFindToggle', pageActions, 'Find on page', pageActions.firstElementChild],
     ['searchVocabularyMenu', options],
     ['toggleMainControl', options, 'Toggle search controls'],

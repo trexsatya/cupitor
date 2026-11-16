@@ -45,8 +45,9 @@ async function checkCacheSources(browser) {
     console.log('Subtitle cache: same-source reuse and repository/branch isolation passed')
   } finally {await page.close()}
 }
-async function checkMultilingualVocabulary(browser) {
-  const page = await browser.newPage({viewport:{width:390,height:844}, isMobile:true, hasTouch:true})
+async function checkMultilingualVocabulary(browser, mobile) {
+  const viewport = mobile ? {width:390,height:844} : {width:1280,height:900}
+  const page = await browser.newPage({viewport, isMobile:mobile, hasTouch:mobile})
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/*', route => {
@@ -71,12 +72,52 @@ async function checkMultilingualVocabulary(browser) {
   await page.goto('http://127.0.0.1:3000/language.html?lang=swedish', {waitUntil:'networkidle'})
   const query = page.locator('#searchText')
   const results = page.locator('#vocabularyResult')
+  const tools = page.locator('#mobileSearchTools')
+  const openTools = async () => {
+    if (mobile && !await tools.isVisible()) await page.locator('#mobileSearchToolsBtn').click()
+  }
+  const optionsButton = page.locator('#searchVocabularyByPrefixBtn')
+  const openSearchOptions = async () => {
+    if (mobile) {
+      await openTools()
+      const details = tools.locator('.search-sheet-options')
+      if (await details.getAttribute('open') === null) await details.locator('summary').click()
+    } else if (!await page.locator('#searchVocabularyMenu').isVisible()) {
+      await optionsButton.click()
+    }
+  }
+  const closeOptions = async () => {
+    if (mobile) await tools.getByRole('button', {name:'Close tools'}).click()
+    else await optionsButton.click()
+  }
+  const openEditPreference = mobile ? openTools : openSearchOptions
   const search = async value => { await query.fill(value); await query.press('Tab') }
   try {
+    assert.equal(await page.locator('#vocabularyLookupLanguage').isVisible(), false)
+    assert.equal(await page.locator('#vocabularyLearningLanguage').isVisible(), false)
     await search('gap')
-    await results.locator('[data-vocab-match-kind="hint"]').first().waitFor()
+    const match = results.locator('[data-vocab-match-kind="hint"]').first()
+    await match.waitFor()
     assert.match(await results.innerText(), /öppning.*hål/)
-    await page.locator('#vocabularyLookupLanguage').selectOption('hi')
+    const edit = match.locator('.vocab-hint-edit')
+    assert.equal(await edit.count(), 1)
+    assert.equal(await edit.isVisible(), false)
+    assert.equal(await page.getByRole('checkbox', {name:'Show Edit vocabulary'}).count(), 0)
+    await openEditPreference()
+    const editPreference = page.getByRole('checkbox', {name:'Show Edit vocabulary'})
+    await editPreference.check()
+    await closeOptions()
+    await edit.waitFor({state:'visible'})
+    await edit.click()
+    const editor = page.getByRole('dialog', {name:'Edit vocabulary'})
+    await editor.getByRole('button', {name:'Cancel'}).click()
+    await openEditPreference()
+    await editPreference.uncheck()
+    await closeOptions()
+    assert.equal(await edit.isVisible(), false)
+    await openSearchOptions()
+    await page.getByRole('combobox', {name:'I know well', exact:true}).selectOption('hi')
+    await closeOptions()
     await search('कुर्सी')
     const chair = results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'stolar'})
     await chair.first().waitFor()
@@ -85,13 +126,14 @@ async function checkMultilingualVocabulary(browser) {
     await results.locator('mark').filter({hasText:'hål'}).first().waitFor()
     await search('peena')
     await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
+    await openSearchOptions()
     await page.locator('#vocabularyLearningLanguage').selectOption('spanish')
     await page.waitForURL(/lang=spanish/)
     await results.locator('mark').filter({hasText:'beber'}).first().waitFor()
     assert.equal(await query.inputValue(), 'peena')
     assert.equal(await page.locator('#vocabularyLookupLanguage').inputValue(), 'hi')
     assert.deepEqual(errors, [])
-    console.log('Vocabulary hints, romanized aliases and cross-language query handoff passed')
+    console.log((mobile ? 'Mobile' : 'Desktop') + ': optional vocabulary controls and cross-language lookup passed')
   } finally { await page.close() }
 }
 ;(async () => {
@@ -137,6 +179,7 @@ async function checkMultilingualVocabulary(browser) {
       await page.close()
     }
     await checkCacheSources(browser)
-    await checkMultilingualVocabulary(browser)
+    await checkMultilingualVocabulary(browser, true)
+    await checkMultilingualVocabulary(browser, false)
   } finally {await browser.close()}
 })().catch(error => {console.error(error); process.exitCode=1})

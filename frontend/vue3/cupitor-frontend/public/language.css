@@ -1977,21 +1977,25 @@ body.practice-mode #srtLoadingBanner {
 }
 
 /* Vocabulary lookup uses the study language and a separate hint language. */
+.search-vocab-popover-wrap #searchVocabularyMenu {
+    min-width: 14rem;
+}
 .vocab-lookup-controls {
-    display: flex;
-    gap: 8px 16px;
-    flex-wrap: wrap;
-    margin-block: 6px;
+    display: grid;
+    gap: 6px;
+    border-block-start: 1px solid var(--search-divider, #ced4da);
+    padding: 8px 10px;
 }
 .vocab-lookup-controls label {
-    display: inline-flex;
+    display: grid;
+    grid-template-columns: 5rem minmax(0, 1fr);
     align-items: center;
     gap: 6px;
     margin: 0;
 }
 .vocab-lookup-controls select {
     min-height: 32px;
-    max-width: 100%;
+    width: 100%;
     padding: 3px 6px;
     border: 1px solid #9ca9a5;
     border-radius: 6px;
@@ -2010,8 +2014,24 @@ body.practice-mode #srtLoadingBanner {
 .vocab-hint-meaning span:first-child {
     font-weight: 600;
 }
+.vocab-edit-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 8px 10px;
+    cursor: pointer;
+}
+#mobileStudyActions .vocab-edit-option {
+    min-height: 48px;
+    padding-inline: 12px;
+    border-block-start: 1px solid var(--search-divider);
+}
 .vocab-hint-edit {
     margin: 4px 0 4px 1em;
+}
+#vocabularyResult:not(.show-vocab-edit) .vocab-hint-edit {
+    display: none;
 }
 #vocabularyMeaningEditor {
     width: min(34rem, calc(100% - 1rem));
