@@ -1,0 +1,99 @@
+import { parseVocabularyFile } from './vocab-merge.js'
+import { createVocabularyMatcher } from './vocabulary-matcher.js'
+import { vocabularyHintSeed } from './vocabulary-hint-seed.js'
+import { assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex,
+  mergeVocabularyCatalogs, parseVocabularyCatalog, vocabularyLineParts } from './vocabulary-hints.js'
+
+const openings = vocabularyHintSeed.groups['swedish-openings']
+const eats = vocabularyHintSeed.groups['swedish-eat']
+const eatsEs = vocabularyHintSeed.groups['spanish-eat']
+const indexFor = (vocab, target, source, catalog = vocabularyHintSeed) =>
+  createVocabularyHintIndex(createVocabularyMatcher(vocab, { lang: target }).rows, target, catalog, source)
+const indexed = (group, source, catalog = vocabularyHintSeed) =>
+  indexFor({ [group.category]: [group.line] }, group.language, source, catalog)
+
+test('indexes whole English cues as one complete vocabulary group per search', () => {
+  const index = indexed(openings, 'en')
+  expect(index.search(' opening | GAP | opening ').map(r => r.line)).toEqual([openings.line])
+  expect([...index.search('opening')[0].forms]).toEqual([])
+  expect(index.search('gaping')).toEqual([])
+  expect(index.search(' |  ')).toEqual([])
+  expect(vocabularyLineParts('(a narrow gap, think (opinion, belief))|springa')).toEqual({
+    hints: ['a narrow gap', 'think (opinion, belief)'], forms: ['springa'],
+  })
+  expect(indexed(openings, 'hi').search('gap')).toEqual([])
+  expect(indexFor({ Verbs: ['hacer (do,make)'] }, 'es', 'en').search('make')).toHaveLength(1)
+})
+
+test('links native phrases and romanized spellings only to the intended forms and group', () => {
+  const vocab = { [openings.category]: [openings.line], Verbs: ['(run)|springa|sprang|'] }
+  const index = indexFor(vocab, 'sv', 'hi')
+  expect(index.search('छेद')).toEqual(index.search('CHHED'))
+  expect([...index.search('छेद')[0].forms]).toEqual(['hål'])
+  const hits = index.search('  पतली   दरार  ')
+  expect(hits).toHaveLength(1)
+  expect(hits[0].line).toBe(openings.line)
+  expect([...hits[0].forms]).toEqual(['slits', 'springa', 'springor'])
+  expect(index.search('दरार')).toEqual([])
+  expect(createVocabularyMatcher(vocab).search('hål')[0].line).toBe(openings.line)
+})
+
+test('a shared hint change reaches the linked target languages without changing their groups', () => {
+  const before = parseVocabularyCatalog(null)
+  const meaning = vocabularyHintSeed.meanings['eat-food']
+  const updated = changeVocabularyCatalog(null, before, {
+    groups: {}, meanings: { 'eat-food': { ...meaning, hints: { ...meaning.hints, hi: ['भोजन करना'] } } },
+  })
+  const catalog = mergeVocabularyCatalogs(vocabularyHintSeed, updated)
+  for (const [group, form] of [[eats, 'äta'], [eatsEs, 'comer']]) {
+    const index = indexed(group, 'hi', catalog)
+    expect(index.search('खाना')).toEqual([])
+    expect(index.search('भोजन करना')[0].forms.has(form)).toBe(true)
+  }
+})
+
+test('retains a renamed form ID, drops removed forms and hides links for a removed group', () => {
+  const group = {
+    ...openings,
+    line: '(opening, gap)|öppning|borrhål|',
+    forms: openings.forms.filter(form => ['öppning', 'hål'].includes(form.text))
+      .map(form => form.text === 'hål' ? { ...form, text: 'borrhål' } : form),
+  }
+  const parsed = parseVocabularyCatalog(JSON.stringify({
+    version: 1, groups: { 'swedish-openings': group }, meanings: {},
+  }))
+  const catalog = mergeVocabularyCatalogs(vocabularyHintSeed, parsed)
+  const index = indexed(group, 'hi', catalog)
+  expect([...index.search('chhed')[0].forms]).toEqual(['borrhål'])
+  expect(index.groupFor(0).forms[1].id).toBe(openings.forms.find(form => form.text === 'hål').id)
+  expect(index.search('पतली दरार')).toEqual([])
+  expect(indexFor({}, 'sv', 'hi', catalog).search('chhed')).toEqual([])
+})
+
+test('live vocabulary changes are re-indexed and an ambiguous modified row gets no seeded link', () => {
+  const vocab = parseVocabularyFile('#' + openings.category + '\n' + openings.line.replace('springor', 'springor|spalt'))
+  expect(indexFor(vocab, 'sv', 'hi').search('chhed')).toHaveLength(1)
+  expect(indexFor(vocab, 'sv', 'en').search('gap')).toHaveLength(1)
+  vocab[openings.category].push('(opening, gap)|hål|other|')
+  expect(indexFor(vocab, 'sv', 'hi').search('chhed')).toHaveLength(0)
+  expect(indexFor(vocab, 'sv', 'en').search('gap')).toHaveLength(2)
+})
+
+test('changes to a legacy cue do not erase a unique native-language link', () => {
+  const revised = openings.line.replace('opening, gap', 'physical opening')
+  const vocab = { [openings.category]: [revised] }
+  expect(indexFor(vocab, 'sv', 'en').search('opening')).toEqual([])
+  expect(indexFor(vocab, 'sv', 'en').search('physical opening')[0].line).toBe(revised)
+  expect([...indexFor(vocab, 'sv', 'hi').search('chhed')[0].forms]).toEqual(['hål'])
+})
+
+test('rejects conflicting updates to a meaning or vocabulary row', () => {
+  const baseline = parseVocabularyCatalog(null)
+  const first = changeVocabularyCatalog(null, baseline, {
+    groups: {}, meanings: { test: { label: 'First edit', hints: {} } },
+  })
+  expect(() => changeVocabularyCatalog(JSON.stringify(first), baseline, {
+    groups: {}, meanings: { test: { label: 'Second edit', hints: {} } },
+  })).toThrow(/changed/)
+  expect(() => assertVocabularyRow('#Nouns\n(hole)|new|', '#Nouns\n(hole)|old|', 'Nouns', '(hole)|old|')).toThrow(/changed/)
+})
