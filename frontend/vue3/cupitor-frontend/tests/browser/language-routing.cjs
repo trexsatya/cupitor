@@ -116,7 +116,7 @@ async function checkMultilingualVocabulary(browser, mobile) {
     await closeOptions()
     assert.equal(await edit.isVisible(), false)
     await openSearchOptions()
-    await page.locator('#vocabularyLookupLanguage').selectOption('hi')
+    await page.getByRole('combobox', {name:'I know well', exact:true}).selectOption('hi')
     await closeOptions()
     await search('कुर्सी')
     const chair = results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'stolar'})
