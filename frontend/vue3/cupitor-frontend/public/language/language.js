@@ -21690,9 +21690,9 @@ async function playRecording(opts) {
       !window._practiceActive && !window._recPlayPaused && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)
     window._recPlayQueueLen = queue.length
     const it = queue[i]
-    const cueRange = _recRequestedCue?.item === it && _recRequestedCue.session === sessionToken
-      ? _recRequestedCue.range : null
-    _recRequestedCue = null
+    const cueRange = window._recPlayRequestedCue?.item === it && window._recPlayRequestedCue.session === sessionToken
+      ? window._recPlayRequestedCue.range : null
+    window._recPlayRequestedCue = null
     spotifyPlayer.stop({ hide: !spotifyClips(it).length })
     const restoredRate = window._recReplaySpeed && (window._recReplaySpeed.item !== it || window._recReplaySpeed.index !== i)
       ? _restoreRecordingReplaySpeed() : null
@@ -22199,7 +22199,7 @@ function _recPlayToast(msg) {
 function navigateRecordingPlayback(direction) {
   if (!window._playingRecording) return false
   if (direction !== 'prev' && direction !== 'next') return false
-  _recRequestedCue = null
+  window._recPlayRequestedCue = null
   window._recPlayForceVideoReload = false
   window._recNavRequest = direction
   window._recNavGotoIndex = null
@@ -22209,12 +22209,11 @@ function navigateRecordingPlayback(direction) {
   return true
 }
 
-let _recRequestedCue = null
 function replayCurrentRecordingItem(range = null) {
   if (!window._playingRecording || !window._recPlayCurrentItem) return false
   const index = window._recPlayIndex
   if (!Number.isInteger(index) || !window._recPlayQueue?.[index]) return false
-  _recRequestedCue = range ? { item: window._recPlayQueue[index], session: window._recPlaySessionToken, range } : null
+  window._recPlayRequestedCue = range ? { item: window._recPlayQueue[index], session: window._recPlaySessionToken, range } : null
   if (!range && !window._recReplaySpeed) {
     let rate = 1
     try { rate = window.ytPlayer.getPlaybackRate() || 1 } catch (_) {}
