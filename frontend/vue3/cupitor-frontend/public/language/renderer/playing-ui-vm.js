@@ -11,6 +11,7 @@ import { cardPlainText } from '../card-html.js'
 import { contiguousClipWindow } from '../random-playlist.js'
 import { wordContextLineWindow } from '../practice-clip.js'
 import { fromSeconds } from '../time-format.js'
+import { createSubtitleTranslationLookup } from '../subtitle-translation.js'
 
 // Build a Unicode-bounded regex from `pattern` (already a regex source —
 // caller is responsible for escaping). Falls back to unbounded for old
@@ -269,9 +270,9 @@ export function buildPlayingBannerVM(it, idx, total, gapSeconds, reversed = fals
 //   { state: 'no-primary' }
 //   { state: 'no-match' }
 //   { state: 'ok', from, to, matchIdx, primary, rows: [{ i, mainText, secText, active, highlightHtml? }] }
-export function buildPlayingSubsVM({ parsed, lang, item, before, after, minWordsAround = 0, gapThreshold }) {
+export function buildPlayingSubsVM({ parsed, lang, item, before, after, minWordsAround = 0, gapThreshold, preferred }) {
   if (!parsed) return { state: 'no-primary' }
-  const _lang = lang === 'sv' ? 'sv' : 'en'
+  const _lang = lang === 'sv' || (preferred && !parsed.en?.length) ? 'sv' : 'en'
   const _secLang = _lang === 'sv' ? 'en' : 'sv'
   const primary = _lang === 'sv' ? parsed.sv : parsed.en
   const secondary = _lang === 'sv' ? parsed.en : parsed.sv
@@ -292,10 +293,17 @@ export function buildPlayingSubsVM({ parsed, lang, item, before, after, minWords
   const secById = new Map()
   if (secondary) secondary.forEach(s => { if (s && s.index != null) secById.set(s.index + '', s) })
 
+  const translate = preferred && createSubtitleTranslationLookup({
+    preferred: preferred.cues, language: preferred.language, english: parsed.en,
+  })
+  const translations = []
   const mainTexts = []
   for (let i = from; i <= to; i++) {
     const line = primary[i]
-    mainTexts.push((line && (line.text || line[_lang] || '')) || '')
+    const translation = translate ? translate(line) : null
+    translations.push(translation)
+    const original = (line && (line.text || line[_lang] || '')) || ''
+    mainTexts.push(_lang === 'en' && translation ? translation.text : original)
   }
   const allowTokens = !!(item && item.word) && !phraseFoundInTexts(mainTexts, item.word)
 
@@ -304,11 +312,16 @@ export function buildPlayingSubsVM({ parsed, lang, item, before, after, minWords
     const line = primary[i]
     const sec = line && line.index != null ? secById.get(line.index + '') : null
     const mainText = mainTexts[i - from]
-    const secText = sec && (sec.text || sec[_secLang] || '') || ''
+    const translation = translations[i - from]
+    const secText = translate && _lang === 'sv'
+      ? translation?.text || ''
+      : sec && (sec.text || sec[_secLang] || '') || ''
     rows.push({
       i,
       mainText: String(mainText).trim(),
       secText: secText.trim(),
+      mainLanguage: preferred && _lang === 'en' ? translation?.language || 'en' : undefined,
+      secLanguage: preferred && _lang === 'sv' ? translation?.language : undefined,
       active: i === matchIdx,
       highlightHtml: (item && item.word)
         ? highlightWordHtml(mainText, item.word, { allowTokens })

@@ -7,10 +7,11 @@ import { LANGUAGES, languageFromLocation, requireStudyLanguage, speechLocale } f
 import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
 import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js';
 import { retainCaptionEnds } from './caption-capture.js';
-import { openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
+import { matchingCompanionSubtitle, openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
 import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.js';
 import { browserRecordingAvailable, createBrowserSpeakOverRecorder } from './browser-speakover.js';
 import { createMediaCaptionPanel } from './media-caption-panel.js';
+import { createSubtitleTranslationLookup } from './subtitle-translation.js';
 import { createYoutubeMediaAdapter } from './youtube-media-adapter.js';
 import { playLocalMedia } from './local-playback.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
@@ -27,10 +28,11 @@ import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import {
   assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex, mergeVocabularyCatalogs,
-  GENERATED_HINDI_HINTS_FILE, normalizeHint, parseVocabularyCatalog, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
+  GENERATED_HINDI_HINTS_FILE, normalizeHint, parseVocabularyCatalog, parseVocabularyHintLanguages,
+  parseVocabularyHintTranslations, reviseVocabularyGroup, SHARED_HINTS_DIRECTORY, vocabularyLineParts, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
 } from './vocabulary-hints.js';
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js';
-import { openVocabularyMeaningEditor } from './vocabulary-meaning-editor.js';
+import { openVocabularyEditor } from './vocabulary-meaning-editor.js';
 import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
 import { installRichCardUnderline } from './rich-card-underline.js';
 import { installRichCardParagraphTools } from './rich-card-paragraph.js';
@@ -3523,6 +3525,9 @@ let _vocabularyCatalogOther = parseVocabularyCatalog(null)
 let _generatedVocabularyHints = parseVocabularyCatalog(null)
 let _vocabularyCatalog = vocabularyHintSeed
 let _vocabularyLookupChoices = ['en', 'hi']
+let _sharedHintLanguages = ['hi']
+const _sharedHintTranslations = new Map()
+const _sharedHintLoads = new Map()
 let _vocabularyCatalogReady
 let _vocabularyHintIndex
 
@@ -3545,13 +3550,34 @@ function _refreshVocabularyLookupSelect() {
 
 function _installVocabularyCatalog() {
   _vocabularyCatalog = mergeVocabularyCatalogs(_generatedVocabularyHints, vocabularyHintSeed, _vocabularyCatalogOther, _vocabularyCatalogSelf)
-  _vocabularyLookupChoices = [...new Set(['en', 'hi',
+  _vocabularyLookupChoices = [...new Set(['en', ..._sharedHintLanguages,
     ...Object.values(_vocabularyCatalog.meanings).flatMap(meaning => Object.keys(meaning.hints))])]
   _refreshVocabularyLookupSelect()
+  _renderVocabularyForHintLanguage()
+}
+
+function _renderVocabularyForHintLanguage() {
   if (!window.vocabulary || window.unprocessedSearchText) return
   const requested = window._requestedSearchText?.trim()
   if (requested && requested.length < 3 && window._renderVocabularyHintsEarly?.(requested)) return
   if (window._vocabularySearchText) renderVocabularyFindings(window._vocabularySearchText)
+}
+
+function _loadSharedHintTranslations(language) {
+  if (!_sharedHintLanguages.includes(language) || _sharedHintTranslations.has(language)) return Promise.resolve()
+  if (_sharedHintLoads.has(language)) return _sharedHintLoads.get(language)
+  const context = _dsCaptureSourceContext()
+  const request = _dsReadLayers(SHARED_HINTS_DIRECTORY + '/' + language + '.txt', {
+    lang: 'shared', retry: { tries: 1, timeoutMs: 8000 },
+  }).then(layers => {
+    context.assertCurrent()
+    const entries = [...layers].reverse().flatMap(layer =>
+      [...parseVocabularyHintTranslations(layer.text || '', language)])
+    _sharedHintTranslations.set(language, new Map(entries))
+  }).catch(error => console.warn('Shared vocabulary translations unavailable:', error))
+    .finally(() => _sharedHintLoads.delete(language))
+  _sharedHintLoads.set(language, request)
+  return request
 }
 
 async function _loadVocabularyCatalog() {
@@ -3564,6 +3590,13 @@ async function _loadVocabularyCatalog() {
   _vocabularyCatalogSelf = _dsHasSelf() ? readSaved('self') : parseVocabularyCatalog(null)
   _vocabularyCatalogOther = _dsHasOther() ? readSaved('other') : parseVocabularyCatalog(null)
   _installVocabularyCatalog()
+  const languagesReady = _dsReadLayers(SHARED_HINTS_DIRECTORY + '/languages.txt', {
+    lang: 'shared', retry: { tries: 1, timeoutMs: 4000 },
+  }).then(layers => {
+    context.assertCurrent()
+    _sharedHintLanguages = [...new Set(['hi', ...layers.flatMap(layer => parseVocabularyHintLanguages(layer.text || ''))])]
+      .filter(language => language !== 'en')
+  }).catch(error => console.warn('Shared vocabulary languages unavailable:', error))
   const generatedReady = _dsReadLayers(GENERATED_HINDI_HINTS_FILE, {
     lang: _dsLangFromLocation(), retry: { tries: 1, timeoutMs: 12000 },
   }).then(layers => {
@@ -3592,18 +3625,22 @@ async function _loadVocabularyCatalog() {
   } catch (error) {
     console.warn('Vocabulary meanings unavailable; using the last loaded copy.', error)
   }
-  await generatedReady
+  await Promise.all([generatedReady, languagesReady])
   try { context.assertCurrent() } catch (_) { return }
   _installVocabularyCatalog()
+  await _loadSharedHintTranslations(_vocabularyLookupLanguage())
+  try { context.assertCurrent() } catch (_) { return }
+  _renderVocabularyForHintLanguage()
 }
 
 function _getVocabularyHintIndex(matcher = _getVocabularyMatcher()) {
   const target = getLangFromUrl().code
   const lookup = _vocabularyLookupLanguage()
+  const translations = _sharedHintTranslations.get(lookup)
   if (_vocabularyHintIndex?.matcher !== matcher || _vocabularyHintIndex.catalog !== _vocabularyCatalog ||
-      _vocabularyHintIndex.lookup !== lookup) {
-    _vocabularyHintIndex = { matcher, catalog: _vocabularyCatalog, lookup,
-      index: createVocabularyHintIndex(matcher.rows, target, _vocabularyCatalog, lookup) }
+      _vocabularyHintIndex.lookup !== lookup || _vocabularyHintIndex.translations !== translations) {
+    _vocabularyHintIndex = { matcher, catalog: _vocabularyCatalog, lookup, translations,
+      index: createVocabularyHintIndex(matcher.rows, target, _vocabularyCatalog, lookup, translations) }
   }
   return _vocabularyHintIndex.index
 }
@@ -3612,59 +3649,65 @@ async function _editVocabularyMatch(match) {
   if (!_requireSelf()) return
   const context = _dsCaptureSourceContext()
   await _vocabularyCatalogReady
+  const lookup = _vocabularyLookupLanguage()
+  await _loadSharedHintTranslations(lookup)
   context.assertCurrent()
   if (!ownLines(_ownVocabulary(), match.category).includes(match.line)) return
   const catalogBaseline = _vocabularyCatalogSelf
-  const language = getLangFromUrl().code
   const matcher = _getVocabularyMatcher()
   const row = matcher.rows.find(item => item.category === match.category && item.line === match.line)
   if (!row) return
   const group = _getVocabularyHintIndex(matcher).groupFor(row.index)
-  const lookup = _vocabularyLookupLanguage()
-  openVocabularyMeaningEditor({
-    row, group, catalog: _vocabularyCatalog, language, lookup,
-    meaningId: match.hint?.meanings.values().next().value,
-    languages: [...new Set([..._vocabularyLookupChoices, ...Object.values(LANGUAGES).map(item => item.code)])],
+  const groupHints = group?.meanings?.map(id => _vocabularyCatalog.meanings[id]?.hints[lookup]).filter(Boolean) || []
+  openVocabularyEditor({
+    row, language: getLangFromUrl().code, lookup,
+    translations: _sharedHintTranslations.get(lookup),
+    groupHintOverride: groupHints.length ? [...new Set(groupHints.flat())] : undefined,
     categories: Object.keys(_ownVocabulary()).filter(category => category !== '__empty__' && !VOCAB_HIDDEN_CATEGORIES.has(category))
       .sort((left, right) => left.localeCompare(right)),
-    languageName: _vocabularyLanguageName, makeId: () => window.crypto?.randomUUID?.() || uuid(),
-    async save(edit) {
+    languageName: _vocabularyLanguageName,
+    async save({ category, line }) {
       context.assertCurrent()
       const local = _ownVocabulary()
       const lines = ownLines(local, row.category)
       const at = lines.indexOf(row.line)
       if (at < 0) throw new Error('This line changed. Reopen the editor to see the latest version.')
-      const category = edit.group.category
+      if (category === row.category && line === row.line) return
       local[row.category] = [...lines]
-      if (category === row.category) local[row.category][at] = edit.line
+      if (category === row.category) local[row.category][at] = line
       else {
         local[row.category].splice(at, 1)
-        local[category] = [...ownLines(local, category), edit.line]
+        local[category] = [...ownLines(local, category), line]
       }
       const baseline = window._vocabularyBaselineText || ''
       const pending = _userData.getItem(PENDING_VOCAB_KEY)
-      const filePath = _langRepoDir() + '/vocabulary.txt'
       let nextText, nextCatalog
+      const files = [{
+        path: _langRepoDir() + '/vocabulary.txt',
+        getContent(remote) {
+          context.assertCurrent()
+          assertVocabularyRow(remote, baseline, row.category, row.line)
+          nextText = vocabularyToText(mergeVocabulary(baseline, local, remote || ''))
+          return nextText
+        },
+      }]
+      if (group) {
+        const updated = reviseVocabularyGroup(group, row.line, { category, line })
+        files.push({
+          path: VOCABULARY_CATALOG_PATH,
+          getContent(remote) {
+            context.assertCurrent()
+            nextCatalog = changeVocabularyCatalog(remote, catalogBaseline, {
+              groups: { [group.id]: updated }, meanings: {},
+            })
+            return JSON.stringify(nextCatalog, null, 2) + '\n'
+          },
+        })
+      }
       await _userData.flush()
       context.assertCurrent()
       const { owner, repo, branch } = _dsWriteTarget()
-      await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch, commitMessage: 'vocab: update multilingual vocabulary',
-        files: [
-          { path: filePath, getContent(remote) {
-            context.assertCurrent()
-            assertVocabularyRow(remote, baseline, row.category, row.line)
-            nextText = vocabularyToText(mergeVocabulary(baseline, local, remote || ''))
-            return nextText
-          } },
-          { path: VOCABULARY_CATALOG_PATH, getContent(remote) {
-            context.assertCurrent()
-            nextCatalog = changeVocabularyCatalog(remote, catalogBaseline, {
-              groups: { [edit.groupId]: edit.group }, meanings: edit.meanings,
-            })
-            return JSON.stringify(nextCatalog, null, 2) + '\n'
-          } },
-        ],
-      })
+      await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch, commitMessage: 'vocab: edit vocabulary line', files })
       context.assertCurrent()
       const concurrent = _userData.getItem(PENDING_VOCAB_KEY) !== pending
       const shown = concurrent ? vocabularyToText(mergeVocabulary(baseline, _ownVocabulary(), nextText)) : nextText
@@ -3673,10 +3716,12 @@ async function _editVocabularyMatch(match) {
       if (concurrent) _savePendingVocab()
       else _clearPendingVocab()
       await _userData.flush()
-      _vocabularyCatalogSelf = nextCatalog
-      try {
-        localStorage.setItem(_scopedKey('vocabulary-catalog:' + _dsSourceIdentity('self', 'shared')), JSON.stringify(nextCatalog))
-      } catch (_) { /* keep the in-memory revision */ }
+      if (nextCatalog) {
+        _vocabularyCatalogSelf = nextCatalog
+        try {
+          localStorage.setItem(_scopedKey('vocabulary-catalog:' + _dsSourceIdentity('self', 'shared')), JSON.stringify(nextCatalog))
+        } catch (_) { /* keep the in-memory revision */ }
+      }
       loadWholeVocabulary()
       _installVocabularyCatalog()
     },
@@ -4472,9 +4517,13 @@ $('document').ready(e => {
       window.location.assign(url)
     })
   _refreshVocabularyLookupSelect()
-  $('#vocabularyLookupLanguage').on('change', function () {
-    window._appSettings.vocabularyLookupLanguage = this.value
+  $('#vocabularyLookupLanguage').on('change', async function () {
+    const lookup = this.value
+    window._appSettings.vocabularyLookupLanguage = lookup
     saveAppSettings()
+    _refreshMediaSubtitleLanguage().catch(error => console.warn('Could not update companion subtitles:', error))
+    await _loadSharedHintTranslations(lookup)
+    if (_vocabularyLookupLanguage() !== lookup) return
     const query = String($('#searchText').val() || '').trim()
     if (query && window.vocabulary) {
       window.unprocessedSearchText = null
@@ -4497,6 +4546,8 @@ $('document').ready(e => {
         window._appSettings.vocabularyLookupLanguage = lookup
         saveAppSettings()
         _refreshVocabularyLookupSelect()
+        await _loadSharedHintTranslations(lookup)
+        if ($('#searchText').val()) return
       }
       $('#searchText').val(query).trigger('input')
       await searchTextChanged()
@@ -5001,7 +5052,10 @@ const renderSubtitles = () => {
     populateWikiLinks(currentSub.sv, $('#sv-sub'), currentSub.index);
     populateSearchWords(currentSub, $('#sv-sub-mirror'));
 
-    $('#en-sub').html(_safeSubtitleHtml(currentSub.en))
+    const translation = currentSub.translation
+    $('#en-sub').html(_safeSubtitleHtml(currentSub.showTranslationLanguage ? translation?.text : currentSub.en))
+      .attr('lang', translation?.language || (currentSub.showTranslationLanguage ? null : 'en'))
+      .attr('data-subtitle-language', currentSub.showTranslationLanguage && translation ? translation.language.toUpperCase() : null)
     $('#currentTime').text(currentSub.index)
     // Show the subtitle's start-end timestamp above the line so the
     // user can see where in the media they are without checking the player.
@@ -5927,6 +5981,45 @@ async function _fetchIndexedSrt(entry, code, who) {
   return _fetchSrtFile(`${base}/${encodeURIComponent(_nfc(entry.name) + '.' + code + '.srt')}`)
 }
 
+// Optional companions are fetched only on playback. Keep a small cache so
+// replaying clips from the same media doesn't issue another request.
+const _preferredSubtitleTracks = new Map()
+async function _loadPreferredSubtitleTrack(link) {
+  const language = _vocabularyLookupLanguage()
+  if (!link || language === 'en' || language === getLangFromUrl().code) return undefined
+  const entry = window.srts?.find(item => item.link === link)
+  const context = _dsCaptureSourceContext()
+  let cues = []
+  if (link.startsWith('local:')) {
+    const local = _localMediaSelection
+    if ('local:' + local?.mediaFile.name === link) {
+      const track = matchingCompanionSubtitle(local.mediaFile.name, local.files, local.subtitleFile, language)
+      if (track) {
+        try { cues = srtToJson(await readLocalSubtitleText(track)) }
+        catch (error) { console.warn('Could not read companion subtitles:', error) }
+      }
+    }
+  } else if (entry && (!entry.sourceIdentity || entry.sourceIdentity === _dsSourceIdentity(entry.src || 'primary'))) {
+    const base = _dsReadUrl(entry.src || 'primary', 'srts', _dsLangFromLocation())
+    const key = JSON.stringify([base, entry.name, entry.bundle, entry.bundleKey, entry.bundleRevision, language])
+    let request = _preferredSubtitleTracks.get(key)
+    if (!request) {
+      request = _withTimeout(_fetchIndexedSrt(entry, language), 3000, 'companion subtitles')
+        .then(text => srtToJson(text))
+        .catch(error => {
+          if (error?.kind !== 'notfound' && _preferredSubtitleTracks.get(key) === request) _preferredSubtitleTracks.delete(key)
+          return []
+        })
+      _preferredSubtitleTracks.set(key, request)
+      if (_preferredSubtitleTracks.size > 12) _preferredSubtitleTracks.delete(_preferredSubtitleTracks.keys().next().value)
+    }
+    cues = await request
+  }
+  context.assertCurrent()
+  if (language !== _vocabularyLookupLanguage()) return _loadPreferredSubtitleTrack(link)
+  return { language, cues }
+}
+
 const _subtitleRestores = new Map()
 async function _restoreSubtitleDocument(id) {
   if (!window.allSubtitles[id]?._evicted) return window.allSubtitles[id]
@@ -6044,6 +6137,17 @@ function _getLocalCaptionPanel() {
   return _localCaptionPanel
 }
 
+async function _refreshMediaSubtitleLanguage() {
+  const media = window.mediaBeingPlayed
+  if (!_localCaptionPanel || !['link', 'local'].includes(media?.source)) return
+  const [pair, preferred] = await Promise.all([
+    getSubtitlesForLink(media.link, media.source), _loadPreferredSubtitleTrack(media.link),
+  ])
+  if (window.mediaBeingPlayed === media) {
+    _localCaptionPanel.load(pair?.sv, pair?.en, getLangFromUrl().code, preferred)
+  }
+}
+
 const _youtubeCaptionMedia = createYoutubeMediaAdapter(() => window.ytPlayer, () => { window.youtubePlayInterval = null })
 
 function _updateMediaReturnButton() {
@@ -6102,7 +6206,7 @@ function _localMediaLayout(local) {
   _updateMediaReturnButton()
 }
 
-function _renderLocalSubtitleStatus() {
+function _renderLocalSubtitleStatus(preferred) {
   const selection = _localMediaSelection
   if (!selection) return
   $('#localMediaName').text(selection.mediaFile.name)
@@ -6111,7 +6215,7 @@ function _renderLocalSubtitleStatus() {
     ? selection.subtitleFile.name + ' · ' + count + ' subtitle' + (count === 1 ? '' : 's')
     : 'No subtitles attached. Add an SRT file to see captions.')
   const pair = window.allSubtitles['local:' + selection.mediaFile.name]
-  _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
+  _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code, preferred)
   if (window.playingAudio) showAudioPlayer()
   else if (window.playingVideo) showVideoPlayer()
 }
@@ -6131,7 +6235,7 @@ async function _chooseLocalSubtitles(files, mediaFile) {
     files: available, mediaFile,
     targetLanguage: getLangFromUrl().code,
     attachOnly: sameMedia,
-    onPlay: async ({ mediaFile, subtitleFile, englishFile }) => {
+    onPlay: async ({ mediaFile, subtitleFile, englishFile, files }) => {
       const baseName = mediaFile.name.replace(/\.(mp3|wav|mp4)$/i, '')
       const link = 'local:' + mediaFile.name
       let sv = '', en = ''
@@ -6142,16 +6246,17 @@ async function _chooseLocalSubtitles(files, mediaFile) {
       }
       if (sv) window.allSubtitles[link] = {sv, en, source:'local', fileName:baseName}
       else delete window.allSubtitles[link]
-      _localMediaSelection = {mediaFile, subtitleFile, englishFile, files:available}
+      _localMediaSelection = {mediaFile, subtitleFile, englishFile, files}
       if (sameMedia && window.mediaBeingPlayed?.source === 'local' && window.mediaBeingPlayed.link === link) {
+        const preferred = await _loadPreferredSubtitleTrack(link)
         clearSubtitles()
         window.syncSubtitle = true
         if (sv) {
-          await loadSubtitlesForLink(sv, en)
+          loadSubtitlesForLink(sv, en, preferred)
           setCurrentSub(getCurrentTime() || 0)
           renderSubtitles()
         }
-        _renderLocalSubtitleStatus()
+        _renderLocalSubtitleStatus(preferred)
       } else {
         await playNewMedia(link, 'local', mediaFile)
       }
@@ -6192,29 +6297,24 @@ $(document).on('change', '#localSubtitleFiles', async function () {
   if (files.length && _localMediaSelection) await _chooseLocalSubtitles(files, _localMediaSelection.mediaFile)
 })
 
-async function loadSubtitlesForLink(sv, en) {
+function loadSubtitlesForLink(sv, en, preferred) {
   if (!sv) {
     alert("SV subtitle not found")
     return
   }
 
-  if (!en) {
-    en = sv
-  }
-
   window.srtLoaded = sv
-  sv = srtToJson(sv, 'sv')
-
-  en = srtToJson(en, 'en')
-  const combined = sv.map(svItem => {
-    const enItem = en.find(eni => eni.ts === svItem.ts)
-    const combinedItem = {...svItem, ...enItem};
-    combinedItem['id'] = svItem.id //Give priority to SV subtitle
-    return combinedItem
+  const source = srtToJson(sv, 'sv')
+  const english = srtToJson(en || sv)
+  const translate = createSubtitleTranslationLookup({
+    preferred: preferred?.cues, language: preferred?.language,
+    english: !preferred || (en && en !== sv) ? english : [],
   })
-  // console.log(sv)
-  // console.log(en)
-  console.log(combined)
+  const combined = source.map(cue => {
+    const translation = translate(cue)
+    return { ...cue, en: translation?.language === 'en' ? translation.text : undefined,
+      translation, showTranslationLanguage: !!preferred }
+  })
   storeSubtitles(combined)
   lastSub = null
   renderSubtitles()
@@ -6328,7 +6428,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   async function _playMedia() {
     if (source === 'link') {
       window.youtubePlayInterval = null
-      await loadYoutubeVideo(link, {isCurrent, mainMedia: true})
+      await loadYoutubeVideo(link, {isCurrent, mainMedia: true, loadCaptions: false})
       if (!isCurrent()) return
       if (!autoPlay) _suppressYoutubeAutoplay()
     } else if (source === 'local') {
@@ -6350,6 +6450,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
       }
       window.mediaBeingPlayed = {link, source}
       _localMediaLayout(true)
+      _getLocalCaptionPanel().load(null, null, getLangFromUrl().code)
       if (window.playingAudio) showAudioPlayer()
       else if (window.playingVideo) showVideoPlayer()
       // The existing local <audio>/<video> is the source of truth for the
@@ -6378,19 +6479,20 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   // (missing file / rate-limited / network). Degrade gracefully so playback
   // isn't aborted by an unavailable subtitle; a transient miss will be topped
   // up by the background retry and the next selection will pick it up.
-  let sv = '', en = ''
+  let pair, preferred
   try {
-    ({sv = '', en = ''} = (await getSubtitlesForLink(link, source)) || {})
+    [pair, preferred] = await Promise.all([getSubtitlesForLink(link, source), _loadPreferredSubtitleTrack(link)])
   } catch (e) {
     console.warn('subtitles unavailable for', link, e && e.message)
   }
   if (!isCurrent()) return
   // A local media file can be played without an SRT. Do not show the remote
   // missing-subtitle alert for that deliberate choice.
-  if (sv || $('#onlySubsCheckbox').is(':checked')) await loadSubtitlesForLink(sv, en);
-  if (source === 'local') _renderLocalSubtitleStatus()
-  else if (document.body.classList.contains('youtube-media-mode')) {
-    _getLocalCaptionPanel().load(sv, en, getLangFromUrl().code)
+  const { sv = '', en = '' } = pair || {}
+  if (sv || $('#onlySubsCheckbox').is(':checked')) loadSubtitlesForLink(sv, en, preferred)
+  if (source === 'local') _renderLocalSubtitleStatus(preferred)
+  else if (window.mediaBeingPlayed?.link === link && source === 'link') {
+    _getLocalCaptionPanel().load(sv, en, getLangFromUrl().code, preferred)
     $('#youtubeMediaName').text(window.srts?.find(it => it.link === link)?.name || link)
   }
 
@@ -8571,7 +8673,7 @@ function _vocabLineFirstWord(line) {
 // _buildSimilarSegment all share the same line shape (icon + escaped text +
 // data-text). `highlight` may be a candidate word to bold-blue inside the
 // matched line.
-function _buildVocabLine(it, highlight, searchOverride, hintForms) {
+function _buildVocabLine(it, highlight, searchOverride, hintForms, localizedHints) {
   let txt = it.item
   const $line = $('<div class="vocabulary-line"></div>')
   if (txt.trim().length) {
@@ -8580,11 +8682,15 @@ function _buildVocabLine(it, highlight, searchOverride, hintForms) {
   } else {
     txt = '------------------'
   }
-  if (hintForms) {
+  if (hintForms || localizedHints?.length) {
     const $text = $('<span></span>')
-    txt.split(SEPARATOR_PIPE).forEach((part, i) => {
+    const parts = localizedHints?.length
+      ? ['(' + localizedHints.join(', ') + ')', ...vocabularyLineParts(txt).forms]
+      : txt.split(SEPARATOR_PIPE)
+    if (localizedHints?.length && txt.trimEnd().endsWith(SEPARATOR_PIPE)) parts.push('')
+    parts.forEach((part, i) => {
       if (i) $text.append(document.createTextNode(' | '))
-      if (hintForms.has(normalizeHint(part))) $text.append($('<mark class="vocab-hl"></mark>').text(part))
+      if (hintForms?.has(normalizeHint(part))) $text.append($('<mark class="vocab-hl"></mark>').text(part))
       else $text.append(document.createTextNode(part))
     })
     $line.append($text).data({ text: txt })
@@ -8799,9 +8905,11 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
   const entry = surroundings.find(it => it.index === match.index) || { item: match.line, index: match.index }
   const $item = $('<div class="vocabulary-segment"></div>').attr('data-vocab-match-kind', match.kind)
   const $content = $('<div class="vocabulary-segment-content"></div>').appendTo($item)
-  const $header = match.kind === 'exact'
+  const hintForms = match.hint?.forms
+  const localizedHints = match.hint?.localizedHints
+  const $header = match.kind === 'exact' && !localizedHints?.length
     ? _buildVocabLine(entry)
-    : _buildVocabLine(entry, undefined, match.matched, match.hint?.forms)
+    : _buildVocabLine(entry, undefined, match.matched, hintForms, localizedHints)
   $header.find('.vocab-entry-search').remove()
   $header.addClass('highlighted similar-segment-header')
     .attr({ role: 'button', tabindex: '0', 'aria-expanded': 'false' })
@@ -8810,8 +8918,11 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
   $content.append($header)
   const $body = $('<div class="similar-segment-body" hidden></div>').appendTo($content)
   surroundings.forEach(it => {
-    const $line = _buildVocabLine(it)
-    if (it.index === match.index) $line.addClass('highlighted')
+    const isMatch = it.index === match.index
+    const $line = isMatch && localizedHints?.length
+      ? _buildVocabLine(it, undefined, undefined, hintForms, localizedHints)
+      : _buildVocabLine(it)
+    if (isMatch) $line.addClass('highlighted')
     $body.append($line)
   })
   if (match.hint?.meanings.size) {
@@ -8819,11 +8930,16 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
     const target = getLangFromUrl().code
     for (const id of match.hint.meanings) {
       const meaning = _vocabularyCatalog.meanings[id]
+      const targetExample = meaning.examples?.[target]
+      const lookupExample = lookup !== target && meaning.examples?.[lookup]
+      if (localizedHints?.length && !targetExample && !lookupExample) continue
       const $meaning = $('<div class="vocab-hint-meaning"></div>').appendTo($content)
-      $('<span></span>').attr('lang', meaning.hints[lookup]?.length ? lookup : 'en')
-        .text(meaning.hints[lookup]?.[0] || meaning.label).appendTo($meaning)
-      if (meaning.examples?.[target]) $('<span></span>').attr('lang', target).text(meaning.examples[target]).appendTo($meaning)
-      if (lookup !== target && meaning.examples?.[lookup]) $('<span></span>').attr('lang', lookup).text(meaning.examples[lookup]).appendTo($meaning)
+      if (!localizedHints?.length) {
+        $('<span></span>').attr('lang', meaning.hints[lookup]?.length ? lookup : 'en')
+          .text(meaning.hints[lookup]?.[0] || meaning.label).appendTo($meaning)
+      }
+      if (targetExample) $('<span></span>').attr('lang', target).text(targetExample).appendTo($meaning)
+      if (lookupExample) $('<span></span>').attr('lang', lookup).text(lookupExample).appendTo($meaning)
     }
   }
   if (match.kind !== 'prefix' && match.kind !== 'compound' && _dsHasSelf() && !window._vocabularyReadOnly?.has(match.line)) {
@@ -10129,7 +10245,7 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 
 async function loadYoutubeVideo(videoId, {
   isCurrent = () => true, startSeconds, respectInterval = true, now = () => Date.now(), beforeLoad,
-  mainMedia = !window._playingRecording && !window._practiceActive,
+  mainMedia = !window._playingRecording && !window._practiceActive, loadCaptions = true,
 } = {}) {
   const readyDeadline = now() + VIDEO_RECOVERY_MS
   const ready = () => { try { return !!(window.ytPlayerReady && window.ytPlayer?.getIframe?.()) } catch (_) { return false } }
@@ -10150,13 +10266,15 @@ async function loadYoutubeVideo(videoId, {
     _youtubeMediaLayout(true)
     hideMediaRelatedContainer()
     $('#youtubeMediaName').text(window.srts?.find(it => it.link === videoId)?.name || videoId)
-    const pair = window.allSubtitles[videoId]
-    _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
-    getSubtitlesForLink(videoId, 'link').then(pair => {
-      if (isCurrent() && document.body.classList.contains('youtube-media-mode') && window.mediaBeingPlayed?.link === videoId) {
-        _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
-      }
-    }).catch(e => console.warn('subtitles unavailable for', videoId, e?.message))
+    _getLocalCaptionPanel().load(null, null, getLangFromUrl().code)
+    if (loadCaptions) {
+      Promise.all([getSubtitlesForLink(videoId, 'link'), _loadPreferredSubtitleTrack(videoId)])
+        .then(([pair, preferred]) => {
+          if (isCurrent() && window.mediaBeingPlayed?.link === videoId) {
+            _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code, preferred)
+          }
+        }).catch(error => console.warn('subtitles unavailable for', videoId, error?.message))
+    }
   }
   return new Promise((resolve, reject) => {
     // Finish the way a reload used to.
@@ -19198,7 +19316,7 @@ async function _renderPlayingSubtitles(item, { isCurrent = () => true } = {}) {
   if (!$sub.length) $sub = $('<div id="recPlayingSubs"></div>').appendTo('body')
   $sub.html('<div class="rec-ps-loading">Loading subtitles…</div>')
 
-  const parsed = await _loadSubtitlesForItem(item)
+  const [parsed, preferred] = await Promise.all([_loadSubtitlesForItem(item), _loadPreferredSubtitleTrack(item.id)])
   if (!isCurrent() || !document.body.contains($sub[0])) return null
   if (!parsed || (!parsed.sv.length && !parsed.en.length)) {
     $sub.html('<div class="rec-ps-err">Subtitles unavailable for this video.</div>')
@@ -19208,7 +19326,7 @@ async function _renderPlayingSubtitles(item, { isCurrent = () => true } = {}) {
   const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
   const before = (window._appSettings && window._appSettings.contextLinesBefore) || 0
   const after  = (window._appSettings && window._appSettings.contextLinesAfter)  || 0
-  const vm = buildPlayingSubsVM({ parsed, lang, item, before, after,
+  const vm = buildPlayingSubsVM({ parsed, lang, item, before, after, preferred,
     minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
 
   if (vm.state === 'no-primary') {

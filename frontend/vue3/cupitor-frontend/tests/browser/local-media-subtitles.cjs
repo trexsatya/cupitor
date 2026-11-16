@@ -55,12 +55,14 @@ async function verify(browser, width, video = false) {
   try {
     await page.goto('http://127.0.0.1:3000/language.html', {waitUntil:'networkidle'})
     await page.waitForFunction(() => typeof window.loadLocalFiles === 'function')
+    await page.locator('#vocabularyLookupLanguage').selectOption('hi')
     await clickSearchTool(page, '#toggleMediaPanelBtn')
     await page.getByText('Local file', { exact: true }).click()
     await page.locator('#localFiles').setInputFiles([
       video ? {name:'lesson.MP4',mimeType:'video/mp4',buffer:fs.readFileSync(path.join(__dirname,'fixtures/local-media.mp4'))}
         : {name:'lesson.WAV', mimeType:'audio/wav', buffer:wav()},
       file('lesson.srt', srt()), file('lesson.en.srt', srt('First line', 'Second line', 'Last line')),
+      file('lesson.hi.srt', '41\n00:00:00,000 --> 00:00:02,000\nपहली पंक्ति\n'),
     ])
     await page.getByRole('button', {name:'Use subtitle & play',exact:true}).click()
     await page.locator('#localCaptionPanel .cup-sub-cue').first().waitFor()
@@ -73,6 +75,8 @@ async function verify(browser, width, video = false) {
     assert.match(await page.locator('#localSubtitleStatus').innerText(), /lesson.srt · 3 subtitles/)
     assert.match(await page.locator('#localCaptionPanel .cup-sub-cue').first().innerText(), /Första meningen/)
     assert.match(await page.locator('#localCaptionPanel .cup-sub-cue').last().innerText(), /Last line/)
+    assert.equal(await page.locator('#localCaptionPanel .cup-sub-tr[lang="hi"]').textContent(), 'पहली पंक्ति')
+    assert.deepEqual(await page.locator('#localCaptionPanel .cup-sub-tr[lang="en"]').allTextContents(), ['Second line', 'Last line'])
 
     // Final cue and a backward seek follow the native media clock while paused.
     for (const [time, text] of [[4.5,'Sista meningen'],[0.5,'Första meningen'],[2.5,'Andra meningen']]) {

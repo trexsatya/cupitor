@@ -2,6 +2,7 @@
 // The injected page bundle consumes this same caption-sidebar.js source.
 import './caption-sidebar.js';
 import { srtToJson } from './srt-parser.js';
+import { createSubtitleTranslationLookup } from './subtitle-translation.js';
 
 export function createMediaCaptionPanel({onOpenSubtitles, onClearCues, onWord, onCapture, translateText, onSplitChange}) {
   const ui = window.__cupShared.createSubtitleUI({
@@ -27,12 +28,18 @@ export function createMediaCaptionPanel({onOpenSubtitles, onClearCues, onWord, o
     const bar = document.getElementById('localSpeakOverBar');
     if (bar) { bar.style.display = youtube ? 'none' : bar.style.display; ui.element.insertBefore(bar, ui.element.querySelector('.cup-sub-list')); }
   }
-  function load(sv, en, language) {
-    const translations = srtToJson(en || '');
-    const cues = srtToJson(sv || '').map(cue => {
-      const translation = translations.find(t => t.start.ordinal === cue.start.ordinal);
-      return {start:cue.start.ordinal, end:cue.end.ordinal, text:cue.text.trim(),
-        ...(translation && en !== sv ? {translation:translation.text.trim()} : {})};
+  function load(sv, en, language, preferred) {
+    const translate = createSubtitleTranslationLookup({
+      preferred: preferred?.cues, language: preferred?.language,
+      english: en === sv ? [] : srtToJson(en),
+    });
+    const cues = srtToJson(sv).map(cue => {
+      const translation = translate(cue);
+      return {
+        start: cue.start.ordinal, end: cue.end.ordinal, text: cue.text.trim(),
+        translation: translation?.text, translationLanguage: translation?.language,
+        showTranslationLanguage: preferred?.language !== undefined,
+      };
     });
     ui.replaceCues(cues, language);
     ui.showNotice(cues.length ? '' : (ui.element.id === 'youtubeCaptionPanel'

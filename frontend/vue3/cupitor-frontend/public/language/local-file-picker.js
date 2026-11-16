@@ -55,14 +55,17 @@ export function rankLocalSubtitles(mediaName, files, targetLanguage = 'sv') {
       normalised(a.file.name).localeCompare(normalised(b.file.name)) || a.index - b.index);
 }
 
-export function matchingEnglishSubtitle(mediaName, files, primary) {
+export function matchingCompanionSubtitle(mediaName, files, primary, language) {
   // An unrelated user-chosen SRT may have different timing; do not silently
-  // attach a same-named English track to it.
+  // attach a same-named companion track to it.
   if (!primary || localSubtitleRank(mediaName, primary.name, 'sv') >= 4 ||
       localSubtitleRank(mediaName, primary.name, 'sv') === null) return null;
-  return (files || []).find(file => file !== primary &&
-    /\.en\.srt$/i.test(file.name || '') &&
-    localSubtitleRank(mediaName, file.name, 'sv') === 2) || null;
+  const name = normalised(localMediaStem(mediaName)) + '.' + normalised(language) + '.srt';
+  return (files || []).find(file => file !== primary && normalised(file.name) === name) || null;
+}
+
+export function matchingEnglishSubtitle(mediaName, files, primary) {
+  return matchingCompanionSubtitle(mediaName, files, primary, 'en');
 }
 
 // UI integration. onPlay owns player state, while this module owns only the
@@ -170,7 +173,7 @@ export function openLocalSubtitlePicker({files, mediaFile: currentMedia, targetL
     render();
     try {
       await onPlay({
-        mediaFile,
+        mediaFile, files: subtitleFiles,
         subtitleFile: withSubtitles ? selected : null,
         englishFile: withSubtitles
           ? matchingEnglishSubtitle(mediaFile.name, subtitleFiles, selected) : null,
