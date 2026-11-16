@@ -2610,6 +2610,7 @@ const _fetchWithRetry = fetchWithRetry
 window._appSettings = {
   contextLinesBefore: 2,
   contextLinesAfter: 2,
+  showEditVocabulary: false,
   // Channel names whose subtitles are demoted to fallback — shown ONLY when
   // a word has no match from a non-blocked channel.
   blockedChannels: [],
@@ -3005,6 +3006,12 @@ function appSettingsLocalKey() {
   return _scopedKey(`cupitor:appSettings:${lang.fullName}`)
 }
 
+function _applyVocabularyEditVisibility() {
+  const visible = window._appSettings.showEditVocabulary === true
+  $('#showEditVocabulary').prop('checked', visible)
+  $('#vocabularyResult').toggleClass('show-vocab-edit', visible)
+}
+
 function loadAppSettings() {
   // Settings are personal preferences — no cross-device sync. Live entirely
   // in localStorage so changes don't generate a commit-per-keystroke on the
@@ -3021,6 +3028,7 @@ function loadAppSettings() {
     console.warn('loadAppSettings: failed to read localStorage — using defaults', e)
   }
   _refreshVocabularyLookupSelect()
+  _applyVocabularyEditVisibility()
   $('#contextLinesBefore').val(window._appSettings.contextLinesBefore)
   $('#contextLinesAfter').val(window._appSettings.contextLinesAfter)
   // 0 is a legitimate gap (items run straight into each other), so it must
@@ -4215,6 +4223,12 @@ $('document').ready(e => {
   })
   wireMobileSearch()
   _renderKeyboardShortcuts($('#searchHelpShortcuts'))
+
+  $('#showEditVocabulary').on('change', function () {
+    window._appSettings.showEditVocabulary = this.checked
+    _applyVocabularyEditVisibility()
+    saveAppSettings()
+  })
 
   const $searchOptionsButton = $('#searchVocabularyByPrefixBtn')
   const setSearchOptionsOpen = open => {
