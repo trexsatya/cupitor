@@ -249,8 +249,11 @@
   var id = cupitorFilmotCaptureId;
   window.__cupitorReadFilmotCapture = function(requestId, offset) {
     if (requestId !== id) return null;
-    var chunk = result.slice(offset, offset + 4096);
-    if (offset + chunk.length >= result.length) delete window.__cupitorReadFilmotCapture;
+    var end = Math.min(offset + 4096, result.length);
+    var last = result.charCodeAt(end - 1);
+    if (end < result.length && last >= 0xd800 && last <= 0xdbff) end--;
+    var chunk = result.slice(offset, end);
+    if (end === result.length) delete window.__cupitorReadFilmotCapture;
     return JSON.stringify({chunk: chunk});
   };
   return JSON.stringify({length: result.length, cues: lines.length, diagnostics: diagnostics});
