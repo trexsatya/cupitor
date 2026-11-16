@@ -53,9 +53,9 @@
       // Translation state
       translationEnabled: false,
       translationSource: opts.translationSource || 'sv',
-      translationTarget: opts.translationTarget || 'en',
+      translationTarget: opts.translationTarget || '',
       nextTrId: 1,
-      pendingTr: Object.create(null), // id → cue index
+      pendingTr: Object.create(null), // id → cue, index and requested language
       // Strategies:
       //   1 = play through, translate as cues arrive
       //   2 = pause until current cue is translated
@@ -129,7 +129,10 @@
       if (typeof saved.strategy === 'number') state.strategy = saved.strategy;
       if (typeof saved.linesPerChunk === 'number') state.linesPerChunk = saved.linesPerChunk;
       if (typeof saved.translationSource === 'string') state.translationSource = saved.translationSource;
-      if (typeof saved.translationTarget === 'string') state.translationTarget = saved.translationTarget;
+      if (typeof saved.translationTarget === 'string' &&
+          (saved.translationTarget !== 'en' || saved.translationTargetExplicit)) {
+        state.translationTarget = saved.translationTarget;
+      }
       if (typeof saved.repeatCount === 'number') state.repeatCount = saved.repeatCount;
       if (typeof saved.replaySchedule === 'string') state.replaySchedule = saved.replaySchedule;
       if (typeof saved.replayGap === 'number') state.replayGap = saved.replayGap;
@@ -144,6 +147,7 @@
           linesPerChunk: state.linesPerChunk,
           translationSource: state.translationSource,
           translationTarget: state.translationTarget,
+          translationTargetExplicit: !!state.translationTarget,
           repeatCount: state.repeatCount,
           replaySchedule: state.replaySchedule,
           replayGap: state.replayGap,
@@ -350,9 +354,8 @@
         e.currentTarget.classList.toggle('cup-on', state.translationEnabled);
         persistPrefs();
         if (state.translationEnabled) {
-          // Backfill: request translation for every cue that doesn't yet have one.
           for (let i = 0; i < state.cues.length; i++) {
-            if (!state.cues[i].translation) requestTranslation(i);
+            requestTranslation(i);
           }
         }
       };
@@ -598,12 +601,9 @@
       state.cues.splice(i, 0, cue);
       // Keep pendingTr's indices in sync — inserting at position i bumps
       // every later index by one.
-      const newPending = Object.create(null);
-      for (const id in state.pendingTr) {
-        const oldIdx = state.pendingTr[id];
-        newPending[id] = oldIdx >= i ? oldIdx + 1 : oldIdx;
+      for (const job of Object.values(state.pendingTr)) {
+        if (job.idx >= i) job.idx++;
       }
-      state.pendingTr = newPending;
       // activeIdx is recomputed every syncHighlight, so we don't bump it. But
       // chunkStartIdx is a stored anchor — shift it if we inserted before it
       // so it keeps pointing at the same cue.
@@ -844,17 +844,23 @@
     }
 
     // -------- translation bridge --------
+    function defaultTranslationTarget() {
+      const target = opts.familiarLanguage?.(state.translationSource) || window.__cupitorFamiliarLanguage || 'en';
+      return target === state.translationSource ? 'en' : target;
+    }
     function requestTranslation(idx) {
       const cue = state.cues[idx];
-      if (!cue || cue.translation || cue.trPending) return;
+      const target = state.translationTarget || defaultTranslationTarget();
+      if (!cue || cue.trPending ||
+          (cue.translation && (!cue.translationLanguage || cue.translationLanguage === target))) return;
       if (typeof opts.translateText !== 'function' &&
           (!window.TranslateRequest || typeof window.TranslateRequest.postMessage !== 'function')) return;
       const id = state.nextTrId++;
-      state.pendingTr[id] = idx;
+      state.pendingTr[id] = {idx, cue, target};
       cue.trPending = true;
       rerenderCue(idx);
       if (typeof opts.translateText === 'function') {
-        Promise.resolve().then(() => opts.translateText(cue.text, state.translationSource, state.translationTarget))
+        Promise.resolve().then(() => opts.translateText(cue.text, state.translationSource, target))
           .then(result => receiveTranslation(id, result), error => receiveTranslation(id, null, String(error)));
         return;
       }
@@ -863,7 +869,7 @@
           id,
           text: cue.text,
           source: state.translationSource,
-          target: state.translationTarget,
+          target,
         }));
       } catch (_) {
         delete state.pendingTr[id];
@@ -873,14 +879,17 @@
 
     // Flutter calls this back. (Optional 3rd arg is an error message.)
     function receiveTranslation(id, result, err) {
-      const idx = state.pendingTr[id];
+      const job = state.pendingTr[id];
       delete state.pendingTr[id];
-      if (idx == null) return;
-      const cue = state.cues[idx];
-      if (!cue) return;
+      if (!job || state.cues[job.idx] !== job.cue) return;
+      const {idx, cue, target} = job;
       cue.trPending = false;
-      if (err) { cue.translation = '(err)'; }
-      else cue.translation = String(result || '');
+      if (err && !cue.translation) cue.translation = '(err)';
+      if (result) {
+        cue.translation = String(result);
+        cue.translationLanguage = target;
+        cue.showTranslationLanguage = target !== 'en';
+      }
       rerenderCue(idx);
       onTranslationDone(idx);
     }
@@ -1134,7 +1143,7 @@
         node('h3', {}, ['Subtitles · settings']),
         field('Translation', 'enabled', 'checkbox', state.translationEnabled),
         field('Source language', 'source', 'text', state.translationSource, {placeholder: 'sv'}),
-        field('Target language', 'target', 'text', state.translationTarget, {placeholder: 'en'}),
+        field('Target language', 'target', 'text', state.translationTarget, {placeholder: defaultTranslationTarget()}),
         node('label', {}, ['Strategy', node('select', {'data-f': 'strategy'},
           strategies.map((label, i) => node('option', {value: i + 1, selected: state.strategy === i + 1},
             [(i + 1) + ' · ' + label])))]),
@@ -1172,7 +1181,7 @@
         const get = sel => wrap.querySelector('[data-f="' + sel + '"]');
         state.translationEnabled = get('enabled').checked;
         state.translationSource  = (get('source').value || 'sv').trim();
-        state.translationTarget  = (get('target').value || 'en').trim();
+        state.translationTarget  = get('target').value.trim();
         state.strategy           = parseInt(get('strategy').value, 10) || 1;
         state.linesPerChunk      = Math.max(1, Math.min(50, parseInt(get('lines').value, 10) || 5));
         state.repeatCount        = Math.max(0, Math.min(10, parseInt(get('repeatCount').value, 10) || 1));
@@ -1192,7 +1201,7 @@
         if (btn) btn.classList.toggle('cup-on', state.translationEnabled);
         if (state.translationEnabled) {
           for (let i = 0; i < state.cues.length; i++) {
-            if (!state.cues[i].translation) requestTranslation(i);
+            requestTranslation(i);
           }
         }
       };

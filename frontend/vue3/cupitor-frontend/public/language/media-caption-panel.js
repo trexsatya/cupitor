@@ -4,11 +4,11 @@ import './caption-sidebar.js';
 import { srtToJson } from './srt-parser.js';
 import { createSubtitleTranslationLookup } from './subtitle-translation.js';
 
-export function createMediaCaptionPanel({onOpenSubtitles, onClearCues, onWord, onCapture, translateText, onSplitChange}) {
+export function createMediaCaptionPanel({onOpenSubtitles, onClearCues, onWord, onCapture, translateText, onSplitChange, familiarLanguage}) {
   const ui = window.__cupShared.createSubtitleUI({
     bodyClass: 'cup-local-sub-split',
     shrinkSelectors: [],
-    onOpenSubtitles, onClearCues, onWord, onCapture, translateText, onSplitChange,
+    onOpenSubtitles, onClearCues, onWord, onCapture, translateText, onSplitChange, familiarLanguage,
   });
   function open(media, youtube = false) {
     ui.buildSidebar();
