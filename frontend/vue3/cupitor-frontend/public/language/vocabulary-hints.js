@@ -229,8 +229,24 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
       if (key) for (const link of links) put(byPhrase, key, { ...link, meaning: id, aliases })
     }
   }
+  const indexedRows = new Map(rows.map(row => [row.index, row.line]))
+  const groupsByLine = new Map()
+  for (const group of byRow.values()) put(groupsByLine, group.row.line, group)
+  const linkedHints = ids => (ids || []).flatMap(id => catalog.meanings[id]?.hints[source] || [])
+  function hintsFor(line, index) {
+    if (source === 'en') return []
+    const groups = groupsByLine.get(line)
+    const group = indexedRows.get(index) === line ? byRow.get(index) : groups?.length === 1 ? groups[0] : undefined
+    const own = linkedHints(group?.meanings)
+    const { hints, forms } = vocabularyLineParts(line)
+    const shared = hints.flatMap(hint => translations.get(normalizeHint(hint, 'en')) || [])
+    const names = new Set(forms.map(form => normalizeHint(form)))
+    const linked = group?.forms.filter(form => names.has(normalizeHint(form.text))).flatMap(form => linkedHints(form.meanings))
+    return [...new Set(own.length ? own : shared.length ? shared : linked || [])]
+  }
   return {
     groupFor: index => byRow.get(index),
+    hintsFor,
     search(query) {
       const results = new Map()
       for (const term of query.split('|')) {

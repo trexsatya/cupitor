@@ -52,6 +52,12 @@ async function checkMultilingualVocabulary(browser, mobile) {
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/*', route => {
     const pathname = new URL(route.request().url()).pathname
+    if (pathname.endsWith('/vocabulary-hints/hi.txt')) return route.fulfill({
+      contentType:'text/plain', body:'drink = पीना | peena\nsip = घूँट लेना'
+    })
+    if (pathname.endsWith('.sv.srt')) return route.fulfill({
+      contentType:'text/plain', body:'1\n00:00:01,000 --> 00:00:03,000\ndricka\n'
+    })
     if (pathname.endsWith('/vocabulary-meanings.json')) return route.fulfill({status:404, body:''})
     if (pathname.endsWith('/swedish/vocabulary-hints-hi.json')) return route.fulfill({json:{
       version:1, meanings:{ chair:{label:'Chair',hints:{hi:['कुर्सी']}} },
@@ -61,14 +67,21 @@ async function checkMultilingualVocabulary(browser, mobile) {
     if (pathname.endsWith('/swedish/vocabulary.txt')) {
       return route.fulfill({contentType:'text/plain', body:
         '#Shapes, arrangements and conditions\n(opening, gap)|öppning|slits|hål|glugg|gluggar|springa|springor|\n' +
-        '#Food, Drink, kitchen, Eating\n(drink)|dricka|dricker|drack|druckit|\n#Objects\n(chair)|stol|stolar|\n'})
+        '#Food, Drink, kitchen, Eating\n(drink)|dricka|dricker|drack|druckit|\n(sip)|smutta|smuttar|\n#Objects\n(chair)|stol|stolar|\n'})
     }
     if (pathname.endsWith('/spanish/vocabulary.txt')) {
       return route.fulfill({contentType:'text/plain', body:'#Food, Drink, kitchen, Eating\n(drink)|beber|tomar|\n'})
     }
     return serveFixtures(route)
   })
-  await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
+  await page.addInitScript(() => {
+    window.dontConfirmOnRefresh = true
+    window.TranslateRequest = { postMessage(raw) {
+      const { id, source, target, text } = JSON.parse(raw)
+      queueMicrotask(() => window.__cupTranslated(id,
+        source === 'sv' && target === 'hi' && text.toLowerCase() === 'dricka' ? 'पीना' : text))
+    } }
+  })
   await page.goto('http://127.0.0.1:3000/language.html?lang=swedish', {waitUntil:'networkidle'})
   const query = page.locator('#searchText')
   const results = page.locator('#vocabularyResult')
@@ -93,8 +106,8 @@ async function checkMultilingualVocabulary(browser, mobile) {
   const openEditPreference = mobile ? openTools : openSearchOptions
   const search = async value => { await query.fill(value); await query.press('Tab') }
   try {
-    assert.equal(await page.locator('#vocabularyLookupLanguage').isVisible(), false)
-    assert.equal(await page.locator('#vocabularyLearningLanguage').isVisible(), false)
+    assert.equal(await page.locator('#vocabularyLookupLanguage').isVisible(), !mobile)
+    assert.equal(await page.locator('#vocabularyLearningLanguage').isVisible(), !mobile)
     await search('gap')
     const match = results.locator('[data-vocab-match-kind="hint"]').first()
     await match.waitFor()
@@ -124,6 +137,23 @@ async function checkMultilingualVocabulary(browser, mobile) {
     assert.equal(await chair.locator('mark').count(), 0)
     await search('chhed')
     await results.locator('mark').filter({hasText:'hål'}).first().waitFor()
+    await search('dricka')
+    const drink = results.locator('.similar-segment-header').filter({hasText:'dricka'}).first()
+    await drink.waitFor()
+    assert.match(await drink.innerText(), /पीना/)
+    await drink.click()
+    assert.match(await results.locator('.similar-segment-body:visible').first().innerText(), /घूँट लेना.*smutta/)
+    const translations = page.locator('#translationPanel')
+    await translations.getByRole('button', {name:'पीना', exact:true}).waitFor()
+    const google = translations.getByRole('link', {name:'Google Translate'})
+    assert.equal(new URL(await google.getAttribute('href')).searchParams.get('tl'), 'hi')
+    const resultsGroup = page.locator('#result .subtitle-result-toggle').filter({hasText:'dricka'}).first()
+    await resultsGroup.waitFor()
+    if (await resultsGroup.getAttribute('aria-expanded') === 'false') await resultsGroup.click()
+    const translate = page.getByTitle('Translate the visible lines to Hindi').first()
+    await translate.click()
+    await page.locator('#result .secondary-line[lang="hi"]').first().waitFor()
+    assert.equal(await page.locator('#result .secondary-line[lang="hi"] .line-text').first().textContent(), 'पीना')
     await search('peena')
     await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
     await openSearchOptions()

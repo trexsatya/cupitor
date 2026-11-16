@@ -267,6 +267,14 @@ export function applyQueuedEditsToText(current, edits) {
   return text.trim() ? text : null
 }
 
+// A companion track can number its cues independently of the source.
+export function applyQueuedCompanionEdits(current, edits) {
+  const cues = Object.values(edits).filter(edit => edit.start != null && edit.end != null)
+    .map(edit => ({ start: edit.start, end: edit.end, text: edit.newText }))
+  const replace = new Map(cues.map(cue => [srtTimeFromValue(cue.start), { action: 'replace' }]))
+  return capturedSlotText(current, cues, replace)
+}
+
 // Find entries where existing and incoming disagree on the same start time.
 // Returns an array of {start, end, existingText, incomingText} — empty if
 // the merge would be a clean union with no conflict resolution needed.

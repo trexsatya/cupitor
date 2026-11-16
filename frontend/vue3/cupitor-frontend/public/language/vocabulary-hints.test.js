@@ -158,3 +158,13 @@ test('displays the shared spellings when a curated form also matches', () => {
   expect([...index.search('peena')[0].forms]).toContain('dricka')
   expect(index.search('पानी पीना')[0].localizedHints[0]).toBe('पानी पीना')
 })
+
+test('ordinary and surrounding rows can display shared and curated hints without a query match', () => {
+  const shared = parseVocabularyHintTranslations('drink = पीना | peena\nsip = घूँट लेना', 'hi')
+  const vocab = { Drinks: ['(drink)|dricka|', '(sip)|smutta|'], [openings.category]: [openings.line] }
+  const index = indexFor(vocab, 'sv', 'hi', vocabularyHintSeed, shared)
+  expect(index.hintsFor('(drink)|dricka|')).toEqual(['पीना', 'peena'])
+  expect(index.hintsFor('(sip)|smutta|')).toEqual(['घूँट लेना'])
+  expect(index.hintsFor(openings.line)).toContain('छेद')
+  expect(indexFor(vocab, 'sv', 'en').hintsFor('(drink)|dricka|')).toEqual([])
+})
