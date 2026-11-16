@@ -133,6 +133,30 @@ export function assertVocabularyRow(raw, baselineRaw, category, line) {
   }
 }
 
+// Preserve the older form links when ordinary text edits move or correct a row.
+export function reviseVocabularyGroup(group, previousLine, { category, line }) {
+  const previous = vocabularyLineParts(previousLine).forms.map(text => normalizeHint(text))
+  const updated = vocabularyLineParts(line).forms
+  const byName = new Map(updated.map(text => [normalizeHint(text), text]))
+  const previousNames = new Set(previous)
+  const changed = previous.length === updated.length
+    ? updated.map((text, index) => ({ text, oldName: previous[index] }))
+      .filter(({ text, oldName }) => normalizeHint(text) !== oldName)
+    : []
+  const correction = changed.length === 1 && !byName.has(changed[0].oldName) &&
+      !previousNames.has(normalizeHint(changed[0].text)) ? changed[0] : null
+
+  const forms = group.forms.flatMap(form => {
+    const name = normalizeHint(form.text)
+    if (!previousNames.has(name)) return []
+    const text = byName.get(name) ?? (correction?.oldName === name ? correction.text : undefined)
+    return text === undefined ? [] : [{ ...form, text }]
+  })
+  const next = { language: group.language, category, line, forms }
+  if (group.meanings) next.meanings = group.meanings
+  return next
+}
+
 export function createVocabularyHintIndex(rows, target, catalog, source, translations = new Map()) {
   const byEnglish = new Map()
   const byPhrase = new Map()

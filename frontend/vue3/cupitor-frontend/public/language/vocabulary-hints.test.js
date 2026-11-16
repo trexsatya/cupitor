@@ -2,7 +2,7 @@ import { parseVocabularyFile } from './vocab-merge.js'
 import { createVocabularyMatcher } from './vocabulary-matcher.js'
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js'
 import { assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex,
-  mergeVocabularyCatalogs, parseVocabularyCatalog, parseVocabularyHintLanguages, parseVocabularyHintTranslations, vocabularyLineParts } from './vocabulary-hints.js'
+  mergeVocabularyCatalogs, parseVocabularyCatalog, parseVocabularyHintLanguages, parseVocabularyHintTranslations, reviseVocabularyGroup, vocabularyLineParts } from './vocabulary-hints.js'
 
 const openings = vocabularyHintSeed.groups['swedish-openings']
 const eats = vocabularyHintSeed.groups['swedish-eat']
@@ -55,19 +55,20 @@ test('a shared hint change reaches the linked target languages without changing 
 })
 
 test('retains a renamed form ID, drops removed forms and hides links for a removed group', () => {
-  const group = {
-    ...openings,
-    line: '(opening, gap)|öppning|borrhål|',
-    forms: openings.forms.filter(form => ['öppning', 'hål'].includes(form.text))
-      .map(form => form.text === 'hål' ? { ...form, text: 'borrhål' } : form),
-  }
+  const corrected = reviseVocabularyGroup(openings, openings.line, {
+    category: 'Nouns', line: openings.line.replace('hål', 'borrhål'),
+  })
+  const group = reviseVocabularyGroup(corrected, corrected.line, {
+    category: 'Nouns', line: '(opening, gap)|borrhål|öppning|spalt|',
+  })
+  expect(group.forms.map(form => form.text)).toEqual(['öppning', 'borrhål'])
   const parsed = parseVocabularyCatalog(JSON.stringify({
     version: 1, groups: { 'swedish-openings': group }, meanings: {},
   }))
   const catalog = mergeVocabularyCatalogs(vocabularyHintSeed, parsed)
   const index = indexed(group, 'hi', catalog)
   expect([...index.search('chhed')[0].forms]).toEqual(['borrhål'])
-  expect(index.groupFor(0).forms[1].id).toBe(openings.forms.find(form => form.text === 'hål').id)
+  expect(index.groupFor(0).forms.find(form => form.text === 'borrhål').id).toBe(openings.forms.find(form => form.text === 'hål').id)
   expect(index.search('पतली दरार')).toEqual([])
   expect(indexFor({}, 'sv', 'hi', catalog).search('chhed')).toEqual([])
 })

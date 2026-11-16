@@ -2034,14 +2034,7 @@ body.practice-mode #srtLoadingBanner {
     gap: 4px;
     margin-block: 8px;
 }
-#vocabularyMeaningEditor fieldset {
-    margin: 8px 0 12px;
-}
-#vocabularyMeaningEditor legend {
-    font-size: 1rem;
-    font-weight: 600;
-}
-#vocabularyMeaningEditor :is(input:not([type=checkbox]), select, textarea) {
+#vocabularyMeaningEditor :is(input, select, textarea) {
     width: 100%;
     min-width: 0;
     min-height: 36px;
@@ -2053,20 +2046,13 @@ body.practice-mode #srtLoadingBanner {
     color: inherit;
     background: Canvas;
 }
-#vocabularyMeaningEditor .vocab-hint-form {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    margin-block: 4px;
+#vocabularyMeaningEditor .vocab-hint-preview {
+    border-inline-start: 3px solid var(--search-accent, #4dba87);
+    padding: 4px 8px;
+    overflow-wrap: anywhere;
 }
-#vocabularyMeaningEditor .vocab-hint-link-group {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-#vocabularyMeaningEditor .vocab-hint-impact {
-    font-size: 0.9rem;
+#vocabularyMeaningEditor :is(.vocab-hint-preview > span, small) {
+    font-size: 0.85rem;
 }
 #vocabularyMeaningEditor .vocab-hint-editor-actions {
     display: flex;

@@ -1,11 +1,21 @@
-import { openVocabularyMeaningEditor } from './vocabulary-meaning-editor.js'
-import { vocabularyHintSeed } from './vocabulary-hint-seed.js'
+import { openVocabularyEditor } from './vocabulary-meaning-editor.js'
 
-const id = 'swedish-openings'
-const group = vocabularyHintSeed.groups[id]
-const original = group.forms.find(form => form.text === 'hål')
-const label = (form, text) => [...form.querySelectorAll('label')].find(entry => entry.firstChild.textContent === text)
-const byAria = (form, name) => form.querySelector('[aria-label="' + name + '"]')
+function openEditor(options = {}) {
+  const save = jest.fn(async () => {})
+  openVocabularyEditor({
+    row: { category: 'Food', line: '(drink)|dricka|dricker|drack|druckit|' },
+    language: 'sv', lookup: 'hi', categories: ['Food', 'Verbs'],
+    languageName: code => ({ sv: 'Swedish', es: 'Spanish', en: 'English', hi: 'Hindi' })[code],
+    translations: new Map([['drink', ['पीना', 'peena']], ['drink water', ['पानी पीना']]]),
+    save, ...options,
+  })
+  return { form: document.querySelector('#vocabularyMeaningEditor form'), save }
+}
+
+function submit(form) {
+  form.dispatchEvent(new Event('submit', { cancelable: true }))
+  return Promise.resolve()
+}
 
 beforeEach(() => {
   HTMLDialogElement.prototype.showModal = function () { this.open = true }
@@ -13,34 +23,32 @@ beforeEach(() => {
 })
 afterEach(() => { document.body.replaceChildren() })
 
-test('keeps group and form IDs while editing spelling, category and shared aliases', async () => {
-  let calls = 0
-  const save = jest.fn(async () => {})
-  openVocabularyMeaningEditor({
-    row: { category: group.category, line: group.line }, group: { ...group, id },
-    catalog: vocabularyHintSeed, language: 'sv', lookup: 'hi', meaningId: 'hole-in-surface',
-    languages: ['en', 'hi'], categories: [group.category, 'Nouns'],
-    languageName: code => ({ sv: 'Swedish', en: 'English', hi: 'Hindi' })[code],
-    makeId: () => 'new-' + (++calls), save,
-  })
-  const form = document.querySelector('#vocabularyMeaningEditor form')
-  const category = label(form, 'Category').querySelector('select')
-  category.value = 'Nouns'
-  const hints = form.querySelector('textarea')
-  hints.value = 'छेद, chhed, suraakh'
-  hints.dispatchEvent(new Event('input'))
-  const word = byAria(form, 'Vocabulary form 3')
-  word.value = 'borrhål'
-  word.dispatchEvent(new Event('input'))
-  form.dispatchEvent(new Event('submit', { cancelable: true }))
-  await Promise.resolve()
-  expect(save).toHaveBeenCalledTimes(1)
-  const update = save.mock.calls[0][0]
-  expect(update.groupId).toBe(id)
-  expect(update.group.category).toBe('Nouns')
-  expect(update.group.forms.find(entry => entry.text === 'borrhål')).toEqual({
-    ...original, text: 'borrhål',
-  })
-  expect(update.meanings['hole-in-surface'].hints.hi).toEqual(['छेद', 'chhed', 'suraakh'])
+test('edits three fields and previews shared Hindi hints for the English cue', async () => {
+  const { form, save } = openEditor()
+  expect([...form.querySelectorAll('label')].map(label => label.firstChild.textContent))
+    .toEqual(['Category', 'English hints', 'Swedish forms'])
+  const preview = form.querySelector('.vocab-hint-preview')
+  expect(preview.hidden).toBe(false)
+  expect(preview.textContent).toContain('पीना | peena')
+  const english = form.querySelector('input')
+  english.value = 'drink water'
+  english.dispatchEvent(new Event('input'))
+  expect(preview.textContent).toContain('पानी पीना')
+  expect(preview.textContent).not.toContain('peena')
+
+  form.querySelector('select').value = 'Verbs'
+  form.querySelector('textarea').value = 'dricka vatten | dricker vatten'
+  await submit(form)
+  expect(save).toHaveBeenCalledWith({ category: 'Verbs', line: '(drink water)|dricka vatten|dricker vatten|' })
   expect(document.getElementById('vocabularyMeaningEditor')).toBeNull()
+})
+
+test('retains the original vocabulary syntax when only the category changes', async () => {
+  const { form, save } = openEditor({
+    row: { category: 'Food', line: 'tener (have)' }, language: 'es', lookup: 'en',
+  })
+  expect(form.querySelector('.vocab-hint-preview').hidden).toBe(true)
+  form.querySelector('select').value = 'Verbs'
+  await submit(form)
+  expect(save).toHaveBeenCalledWith({ category: 'Verbs', line: 'tener (have)' })
 })

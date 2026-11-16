@@ -28,10 +28,10 @@ import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import {
   assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex, mergeVocabularyCatalogs,
   GENERATED_HINDI_HINTS_FILE, normalizeHint, parseVocabularyCatalog, parseVocabularyHintLanguages,
-  parseVocabularyHintTranslations, SHARED_HINTS_DIRECTORY, vocabularyLineParts, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
+  parseVocabularyHintTranslations, reviseVocabularyGroup, SHARED_HINTS_DIRECTORY, vocabularyLineParts, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
 } from './vocabulary-hints.js';
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js';
-import { openVocabularyMeaningEditor } from './vocabulary-meaning-editor.js';
+import { openVocabularyEditor } from './vocabulary-meaning-editor.js';
 import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
 import { installRichCardUnderline } from './rich-card-underline.js';
 import { installRichCardParagraphTools } from './rich-card-paragraph.js';
@@ -3648,59 +3648,65 @@ async function _editVocabularyMatch(match) {
   if (!_requireSelf()) return
   const context = _dsCaptureSourceContext()
   await _vocabularyCatalogReady
+  const lookup = _vocabularyLookupLanguage()
+  await _loadSharedHintTranslations(lookup)
   context.assertCurrent()
   if (!ownLines(_ownVocabulary(), match.category).includes(match.line)) return
   const catalogBaseline = _vocabularyCatalogSelf
-  const language = getLangFromUrl().code
   const matcher = _getVocabularyMatcher()
   const row = matcher.rows.find(item => item.category === match.category && item.line === match.line)
   if (!row) return
   const group = _getVocabularyHintIndex(matcher).groupFor(row.index)
-  const lookup = _vocabularyLookupLanguage()
-  openVocabularyMeaningEditor({
-    row, group, catalog: _vocabularyCatalog, language, lookup,
-    meaningId: match.hint?.meanings.values().next().value,
-    languages: [...new Set([..._vocabularyLookupChoices, ...Object.values(LANGUAGES).map(item => item.code)])],
+  const groupHints = group?.meanings?.map(id => _vocabularyCatalog.meanings[id]?.hints[lookup]).filter(Boolean) || []
+  openVocabularyEditor({
+    row, language: getLangFromUrl().code, lookup,
+    translations: _sharedHintTranslations.get(lookup),
+    groupHintOverride: groupHints.length ? [...new Set(groupHints.flat())] : undefined,
     categories: Object.keys(_ownVocabulary()).filter(category => category !== '__empty__' && !VOCAB_HIDDEN_CATEGORIES.has(category))
       .sort((left, right) => left.localeCompare(right)),
-    languageName: _vocabularyLanguageName, makeId: () => window.crypto?.randomUUID?.() || uuid(),
-    async save(edit) {
+    languageName: _vocabularyLanguageName,
+    async save({ category, line }) {
       context.assertCurrent()
       const local = _ownVocabulary()
       const lines = ownLines(local, row.category)
       const at = lines.indexOf(row.line)
       if (at < 0) throw new Error('This line changed. Reopen the editor to see the latest version.')
-      const category = edit.group.category
+      if (category === row.category && line === row.line) return
       local[row.category] = [...lines]
-      if (category === row.category) local[row.category][at] = edit.line
+      if (category === row.category) local[row.category][at] = line
       else {
         local[row.category].splice(at, 1)
-        local[category] = [...ownLines(local, category), edit.line]
+        local[category] = [...ownLines(local, category), line]
       }
       const baseline = window._vocabularyBaselineText || ''
       const pending = _userData.getItem(PENDING_VOCAB_KEY)
-      const filePath = _langRepoDir() + '/vocabulary.txt'
       let nextText, nextCatalog
+      const files = [{
+        path: _langRepoDir() + '/vocabulary.txt',
+        getContent(remote) {
+          context.assertCurrent()
+          assertVocabularyRow(remote, baseline, row.category, row.line)
+          nextText = vocabularyToText(mergeVocabulary(baseline, local, remote || ''))
+          return nextText
+        },
+      }]
+      if (group) {
+        const updated = reviseVocabularyGroup(group, row.line, { category, line })
+        files.push({
+          path: VOCABULARY_CATALOG_PATH,
+          getContent(remote) {
+            context.assertCurrent()
+            nextCatalog = changeVocabularyCatalog(remote, catalogBaseline, {
+              groups: { [group.id]: updated }, meanings: {},
+            })
+            return JSON.stringify(nextCatalog, null, 2) + '\n'
+          },
+        })
+      }
       await _userData.flush()
       context.assertCurrent()
       const { owner, repo, branch } = _dsWriteTarget()
-      await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch, commitMessage: 'vocab: update multilingual vocabulary',
-        files: [
-          { path: filePath, getContent(remote) {
-            context.assertCurrent()
-            assertVocabularyRow(remote, baseline, row.category, row.line)
-            nextText = vocabularyToText(mergeVocabulary(baseline, local, remote || ''))
-            return nextText
-          } },
-          { path: VOCABULARY_CATALOG_PATH, getContent(remote) {
-            context.assertCurrent()
-            nextCatalog = changeVocabularyCatalog(remote, catalogBaseline, {
-              groups: { [edit.groupId]: edit.group }, meanings: edit.meanings,
-            })
-            return JSON.stringify(nextCatalog, null, 2) + '\n'
-          } },
-        ],
-      })
+      await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch, commitMessage: 'vocab: edit vocabulary line', files })
       context.assertCurrent()
       const concurrent = _userData.getItem(PENDING_VOCAB_KEY) !== pending
       const shown = concurrent ? vocabularyToText(mergeVocabulary(baseline, _ownVocabulary(), nextText)) : nextText
@@ -3709,10 +3715,12 @@ async function _editVocabularyMatch(match) {
       if (concurrent) _savePendingVocab()
       else _clearPendingVocab()
       await _userData.flush()
-      _vocabularyCatalogSelf = nextCatalog
-      try {
-        localStorage.setItem(_scopedKey('vocabulary-catalog:' + _dsSourceIdentity('self', 'shared')), JSON.stringify(nextCatalog))
-      } catch (_) { /* keep the in-memory revision */ }
+      if (nextCatalog) {
+        _vocabularyCatalogSelf = nextCatalog
+        try {
+          localStorage.setItem(_scopedKey('vocabulary-catalog:' + _dsSourceIdentity('self', 'shared')), JSON.stringify(nextCatalog))
+        } catch (_) { /* keep the in-memory revision */ }
+      }
       loadWholeVocabulary()
       _installVocabularyCatalog()
     },

@@ -6,11 +6,13 @@ const control = (tag, text) => {
   if (text) element.textContent = text
   return element
 }
+
 function label(text, input) {
   const element = control('label', text)
   element.append(input)
   return element
 }
+
 function button(text, type = 'button') {
   const element = control('button', text)
   element.type = type
@@ -18,8 +20,8 @@ function button(text, type = 'button') {
   return element
 }
 
-export function openVocabularyMeaningEditor({
-  row, group, catalog, language, lookup, meaningId, languages, categories, languageName, save, makeId,
+export function openVocabularyEditor({
+  row, language, lookup, categories, languageName, translations, groupHintOverride, save,
 }) {
   if (document.getElementById('vocabularyMeaningEditor')) return
   const dialog = control('dialog')
@@ -29,155 +31,83 @@ export function openVocabularyMeaningEditor({
   title.id = 'vocabularyMeaningEditorTitle'
   const form = control('form')
   const parts = vocabularyLineParts(row.line)
-  const groupId = group?.id || makeId()
-  const groupMeanings = new Set(group?.meanings || [])
-  const unused = [...(group?.forms || [])]
-  const forms = parts.forms.map(text => {
-    const index = unused.findIndex(item => normalizeHint(item.text) === normalizeHint(text))
-    const previous = index < 0 ? null : unused.splice(index, 1)[0]
-    return previous ? { ...previous, text, meanings: [...previous.meanings] } : { id: makeId(), text, meanings: [] }
-  })
-  const meanings = new Map(Object.entries(catalog.meanings))
-  const updates = new Map()
+
+  const category = control('select')
+  for (const name of new Set([row.category, ...categories])) category.append(new Option(name, name))
+  category.value = row.category
+
+  const english = control('input')
+  english.value = parts.hints.join(', ')
+  const forms = control('textarea')
+  forms.value = parts.forms.join(' | ')
+  forms.required = true
+  forms.rows = 2
+  forms.lang = language
+  forms.dir = 'auto'
+  forms.setAttribute('aria-describedby', 'vocabularyFormsHelp')
+  const formsHelp = control('small', 'Separate forms with |')
+  formsHelp.id = 'vocabularyFormsHelp'
+
+  const preview = control('div')
+  preview.className = 'vocab-hint-preview'
+  preview.setAttribute('aria-live', 'polite')
+  const previewTitle = control('span', groupHintOverride
+    ? languageName(lookup) + ' hints for this line'
+    : 'Shared ' + languageName(lookup) + ' hints')
+  const previewValues = control('div')
+  preview.append(previewTitle, previewValues)
+
+  function refreshPreview() {
+    const hints = groupHintOverride
+      ? [[null, groupHintOverride]]
+      : splitVocabularyHints(english.value).map(cue => [cue, translations?.get(normalizeHint(cue, 'en'))])
+    const matches = hints.filter(([, values]) => values?.length)
+    preview.hidden = lookup === 'en' || matches.length === 0
+    previewValues.replaceChildren(...matches.map(([cue, values]) => {
+      const line = control('div')
+      if (matches.length > 1 && cue) line.append(document.createTextNode(cue + ' · '))
+      const value = control('span', values.join(' | '))
+      value.lang = lookup
+      line.append(value)
+      return line
+    }))
+  }
+
   const status = control('p')
   status.setAttribute('role', 'status')
-  const fieldset = control('fieldset')
-  const formList = control('div')
-  const categorySelect = control('select')
-  for (const category of categories) categorySelect.append(new Option(category, category))
-  categorySelect.value = row.category
-  const groupHints = control('input')
-  groupHints.value = parts.hints.join(', ')
-  const meaningSelect = control('select')
-  const linkGroup = control('input')
-  linkGroup.type = 'checkbox'
-  const linkGroupLabel = label('Apply hint to this whole group', linkGroup)
-  linkGroupLabel.className = 'vocab-hint-link-group'
-  const lookupSelect = control('select')
-  const hintInput = control('textarea')
-  hintInput.rows = 2
-  hintInput.dir = 'auto'
-  const addForm = button('Add form')
-  const newLabel = control('input')
-  newLabel.placeholder = 'New meaning'
-  newLabel.setAttribute('aria-label', 'New meaning')
-  const addMeaning = button('Add meaning')
-  const sharedImpact = control('p')
-  sharedImpact.className = 'vocab-hint-impact'
+  status.hidden = true
   const cancel = button('Cancel')
   const saveButton = button('Save changes', 'submit')
   const actions = control('div')
   actions.className = 'vocab-hint-editor-actions'
   actions.append(cancel, saveButton)
-  fieldset.append(control('legend', languageName(language) + ' forms'), formList, addForm)
 
-  for (const code of languages) lookupSelect.append(new Option(languageName(code), code))
-  lookupSelect.value = lookup
-  const renderMeaningOptions = (selected) => {
-    const options = [...meanings].sort((a, b) => a[1].label.localeCompare(b[1].label))
-    meaningSelect.replaceChildren(new Option('Choose a meaning', ''), ...options.map(([id, value]) => new Option(value.label, id)))
-    meaningSelect.value = meanings.has(selected) ? selected : ''
-  }
-  function showImpact() {
-    const active = meaningSelect.value
-    if (!active) { sharedImpact.textContent = ''; return }
-    const targets = new Set(Object.entries(catalog.groups).filter(([id, item]) =>
-      id !== groupId && (item.meanings?.includes(active) || item.forms.some(entry => entry.meanings.includes(active)))).map(([, item]) => item.language))
-    if (groupMeanings.has(active) || forms.some(entry => entry.meanings.includes(active))) targets.add(language)
-    sharedImpact.textContent = targets.size
-      ? 'Hints apply to linked vocabulary in ' + [...targets].map(languageName).join(', ') + '.'
-      : 'Link the group or select a form to make these hints searchable.'
-  }
-  function renderForms() {
-    const active = meaningSelect.value
-    formList.replaceChildren(...forms.map((item, index) => {
-      const line = control('div')
-      line.className = 'vocab-hint-form'
-      const linked = control('input')
-      linked.type = 'checkbox'
-      linked.checked = item.meanings.includes(active)
-      linked.disabled = !active
-      linked.setAttribute('aria-label', 'Link form ' + (index + 1) + ' to this meaning')
-      linked.onchange = () => {
-        item.meanings = linked.checked ? [...item.meanings, active] : item.meanings.filter(id => id !== active)
-        showImpact()
-      }
-      const text = control('input')
-      text.value = item.text
-      text.dir = 'auto'
-      text.required = true
-      text.setAttribute('aria-label', 'Vocabulary form ' + (index + 1))
-      text.oninput = () => { item.text = text.value }
-      const remove = button('Remove')
-      remove.setAttribute('aria-label', 'Remove form ' + (index + 1))
-      remove.disabled = forms.length === 1
-      remove.onclick = () => { forms.splice(index, 1); renderForms(); showImpact() }
-      line.append(linked, text, remove)
-      return line
-    }))
-  }
-  function renderHints() {
-    const selected = meanings.get(meaningSelect.value)
-    linkGroup.disabled = !selected
-    linkGroup.checked = groupMeanings.has(meaningSelect.value)
-    hintInput.disabled = !selected
-    hintInput.value = selected?.hints[lookupSelect.value]?.join(', ') || ''
-    showImpact()
-  }
-  linkGroup.onchange = () => {
-    const active = meaningSelect.value
-    if (linkGroup.checked) groupMeanings.add(active)
-    else groupMeanings.delete(active)
-    showImpact()
-  }
-  hintInput.oninput = () => {
-    const id = meaningSelect.value
-    const selected = meanings.get(id)
-    const next = { ...selected, hints: { ...selected.hints, [lookupSelect.value]: splitVocabularyHints(hintInput.value) } }
-    meanings.set(id, next)
-    updates.set(id, next)
-  }
-  meaningSelect.onchange = () => { renderForms(); renderHints() }
-  lookupSelect.onchange = renderHints
-  addMeaning.onclick = () => {
-    const value = newLabel.value.trim()
-    if (!value) { newLabel.focus(); return }
-    const id = makeId()
-    const meaning = { label: value, hints: {} }
-    meanings.set(id, meaning)
-    updates.set(id, meaning)
-    newLabel.value = ''
-    renderMeaningOptions(id)
-    renderForms()
-    renderHints()
-    hintInput.focus()
-  }
-  addForm.onclick = () => {
-    forms.push({ id: makeId(), text: '', meanings: meaningSelect.value ? [meaningSelect.value] : [] })
-    renderForms()
-    formList.lastElementChild.querySelector('input[type="text"], input:not([type])')?.focus()
-    showImpact()
-  }
   let saving = false
   cancel.onclick = () => dialog.close()
   dialog.addEventListener('cancel', event => { if (saving) event.preventDefault() })
   dialog.addEventListener('close', () => dialog.remove())
+  english.addEventListener('input', refreshPreview)
   form.onsubmit = async event => {
     event.preventDefault()
     if (saving) return
-    const hints = splitVocabularyHints(groupHints.value)
-    const nextForms = forms.map(item => ({ ...item, text: item.text.trim() }))
-    const line = [...(hints.length ? ['(' + hints.join(', ') + ')'] : []), ...nextForms.map(item => item.text)].join('|') + '|'
-    if (nextForms.some(item => !item.text || /[|\r\n]/u.test(item.text)) ||
-        line.startsWith('#') || /[|\r\n]/u.test(groupHints.value) || !isProperlyBracketed(line)) {
-      status.textContent = 'Enter one form per row and balance parentheses and brackets.'
+    const hints = splitVocabularyHints(english.value)
+    const nextForms = forms.value.split('|').map(value => value.trim()).filter(Boolean)
+    const written = [...(hints.length ? ['(' + hints.join(', ') + ')'] : []), ...nextForms].join('|') + '|'
+    if (!nextForms.length || nextForms.some(value => /[\r\n]/u.test(value)) || written.startsWith('#') ||
+        /[|\r\n]/u.test(english.value) || !isProperlyBracketed(written)) {
+      status.hidden = false
+      status.textContent = 'Enter forms separated by | and balance parentheses and brackets.'
       return
     }
+    const sameWords = nextForms.length === parts.forms.length && nextForms.every((value, i) => value === parts.forms[i])
+    const sameHints = hints.length === parts.hints.length && hints.every((value, i) => value === parts.hints[i])
+    // A category-only move can keep the exact line, including older vocabulary syntax.
+    const line = sameWords && sameHints ? row.line : written
     saving = saveButton.disabled = cancel.disabled = true
+    status.hidden = false
     status.textContent = 'Saving vocabulary…'
     try {
-      await save({ line, groupId, group: { language, category: categorySelect.value, line, forms: nextForms, meanings: [...groupMeanings] },
-        meanings: Object.fromEntries(updates) })
+      await save({ category: category.value, line })
       dialog.close()
     } catch (error) {
       status.textContent = error.message || 'Could not save vocabulary.'
@@ -186,12 +116,10 @@ export function openVocabularyMeaningEditor({
     }
   }
 
-  renderMeaningOptions(meaningId || [...groupMeanings][0] || forms.flatMap(item => item.meanings)[0])
-  renderForms()
-  renderHints()
-  form.append(label('Category', categorySelect), label('English group hints', groupHints), fieldset,
-    label('Meaning', meaningSelect), linkGroupLabel, newLabel, addMeaning, label('Hint language', lookupSelect),
-    label('Search hints and spellings, separated by commas', hintInput), sharedImpact, status, actions)
+  refreshPreview()
+  const formsLabel = label(languageName(language) + ' forms', forms)
+  formsLabel.append(formsHelp)
+  form.append(label('Category', category), label('English hints', english), preview, formsLabel, status, actions)
   dialog.append(title, form)
   document.body.append(dialog)
   dialog.showModal()
