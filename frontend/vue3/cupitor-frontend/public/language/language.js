@@ -3015,6 +3015,9 @@ function _applyVocabularyEditVisibility() {
   $('#vocabularyResult').toggleClass('show-vocab-edit', visible)
 }
 
+// A native launch can carry the choice across study languages. Read it
+// before the ready handler strips the search-handoff parameters.
+const _inheritedFamiliarLanguage = new URLSearchParams(window.location.search).get('vocabLookup')
 function loadAppSettings() {
   // Settings are personal preferences — no cross-device sync. Live entirely
   // in localStorage so changes don't generate a commit-per-keystroke on the
@@ -3029,6 +3032,9 @@ function loadAppSettings() {
     }
   } catch (e) {
     console.warn('loadAppSettings: failed to read localStorage — using defaults', e)
+  }
+  if (/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(_inheritedFamiliarLanguage || '')) {
+    window._appSettings.vocabularyLookupLanguage = _inheritedFamiliarLanguage
   }
   _refreshVocabularyLookupSelect()
   _applyVocabularyEditVisibility()
@@ -3638,6 +3644,7 @@ async function _loadVocabularyCatalog() {
   await Promise.all([generatedReady, languagesReady])
   try { context.assertCurrent() } catch (_) { return }
   _installVocabularyCatalog()
+  if (window._appSettings.vocabularyLookupLanguage) _reportFamiliarLanguage()
   await _loadSharedHintTranslations(_vocabularyLookupLanguage())
   try { context.assertCurrent() } catch (_) { return }
   _renderVocabularyForHintLanguage()
@@ -4528,8 +4535,8 @@ $('document').ready(e => {
       const query = String($('#searchText').val() || '').trim()
       if (query) {
         url.searchParams.set('vocabQuery', query)
-        url.searchParams.set('vocabLookup', _vocabularyLookupLanguage())
       }
+      url.searchParams.set('vocabLookup', _vocabularyLookupLanguage())
       window.location.assign(url)
     })
   _refreshVocabularyLookupSelect()
@@ -4537,7 +4544,14 @@ $('document').ready(e => {
     const lookup = this.value
     window._appSettings.vocabularyLookupLanguage = lookup
     saveAppSettings()
+    _reportFamiliarLanguage()
     _refreshMediaSubtitleLanguage().catch(error => console.warn('Could not update companion subtitles:', error))
+    for (const container of document.querySelectorAll('#result .lines-cntnr')) {
+      const link = container.querySelector('.play-btn-container')?.dataset.url
+      if (link && !container.querySelector('.editing')) {
+        renderLines(container.id, link).catch(error => console.warn('Could not update result subtitles:', error))
+      }
+    }
     await _loadSharedHintTranslations(lookup)
     if (_vocabularyLookupLanguage() !== lookup) return
     $('#searchedWords').trigger('change.select2')
@@ -4555,7 +4569,7 @@ $('document').ready(e => {
     }
   })
   const vocabularyUrl = new URL(window.location.href)
-  if (vocabularyUrl.searchParams.has('vocabQuery') && getLangFromUrl().supported) {
+  if ((vocabularyUrl.searchParams.has('vocabQuery') || vocabularyUrl.searchParams.has('vocabLookup')) && getLangFromUrl().supported) {
     const query = vocabularyUrl.searchParams.get('vocabQuery')
     const lookup = vocabularyUrl.searchParams.get('vocabLookup')
     vocabularyUrl.searchParams.delete('vocabQuery')
@@ -4563,14 +4577,11 @@ $('document').ready(e => {
     window.history.replaceState(window.history.state, '', vocabularyUrl)
     window._vocabularyReadyPromise.then(async () => {
       await _vocabularyCatalogReady
-      if ($('#searchText').val() || !query) return
-      if (_vocabularyLookupChoices.includes(lookup)) {
-        window._appSettings.vocabularyLookupLanguage = lookup
+      if (_vocabularyLookupChoices.includes(lookup) && _vocabularyLookupLanguage() === lookup) {
         saveAppSettings()
-        _refreshVocabularyLookupSelect()
         await _loadSharedHintTranslations(lookup)
-        if ($('#searchText').val()) return
       }
+      if (!query || $('#searchText').val()) return
       $('#searchText').val(query).trigger('input')
       await searchTextChanged()
     }).catch(error => console.warn('Vocabulary lookup could not resume', error))
@@ -6015,8 +6026,8 @@ async function _fetchIndexedSrt(entry, code, who) {
   return _fetchSrtFile(`${base}/${encodeURIComponent(_nfc(entry.name) + '.' + code + '.srt')}`)
 }
 
-// Optional companions are fetched only on playback. Keep a small cache so
-// replaying clips from the same media doesn't issue another request.
+// Fetch optional companions on demand. Keep a small cache so multiple
+// clips from the same media can reuse the request.
 const _preferredSubtitleTracks = new Map()
 function _companionSubtitleKey(entry, language) {
   const base = _dsReadUrl(entry.src || 'primary', 'srts', _dsLangFromLocation())
@@ -6041,13 +6052,13 @@ async function _loadPreferredSubtitleTrack(link) {
   if (!link || language === 'en' || language === getLangFromUrl().code) return undefined
   const entry = window.srts?.find(item => item.link === link)
   const context = _dsCaptureSourceContext()
-  let cues = []
+  let text = '', cues = []
   if (link.startsWith('local:')) {
     const local = _localMediaSelection
     if ('local:' + local?.mediaFile.name === link) {
       const track = matchingCompanionSubtitle(local.mediaFile.name, local.files, local.subtitleFile, language)
       if (track) {
-        try { cues = srtToJson(await readLocalSubtitleText(track)) }
+        try { text = await readLocalSubtitleText(track); cues = srtToJson(text) }
         catch (error) { console.warn('Could not read companion subtitles:', error) }
       }
     }
@@ -6056,20 +6067,26 @@ async function _loadPreferredSubtitleTrack(link) {
     let request = _preferredSubtitleTracks.get(key)
     if (!request) {
       request = _withTimeout(_fetchIndexedSrt(entry, language), 3000, 'companion subtitles')
-        .then(text => srtToJson(text))
+        .then(text => ({text, cues: srtToJson(text)}))
         .catch(error => {
           if (error?.kind !== 'notfound' && _preferredSubtitleTracks.get(key) === request) _preferredSubtitleTracks.delete(key)
-          return []
+          return {text: '', cues: []}
         })
       _cacheCompanionSubtitles(key, request)
     }
-    cues = await request
+    const stored = await request
+    text = stored.text
+    cues = stored.cues
   }
   context.assertCurrent()
   if (language !== _vocabularyLookupLanguage()) return _loadPreferredSubtitleTrack(link)
-  const byStart = new Map(cues.map(cue => [cue.start.ordinal, cue]))
-  for (const cue of _pendingCompanionCues(link, language)) byStart.set(cue.start.ordinal, cue)
-  return { language, cues: [...byStart.values()] }
+  const path = _srtPathFor(link, language)
+  const edits = path && _loadPendingSrtEdits()[path]
+  if (edits) {
+    text = applyQueuedCompanionEdits(text, edits)
+    cues = srtToJson(text)
+  }
+  return { language, cues, text }
 }
 
 const _subtitleRestores = new Map()
@@ -6184,8 +6201,8 @@ function _getLocalCaptionPanel() {
       _handleCaptionCapture({...payload, source:'caption', title:selection.mediaFile.name,
         url:'local:' + localSpeakOverIdentity(selection.mediaFile)})
     },
-    translateText: (text, source, target) =>
-      _requestTranslation(text, source, target === 'en' ? _translationTargetLanguage(source) : target),
+    familiarLanguage: source => _translationTargetLanguage(source),
+    translateText: _requestTranslation,
   })
   return _localCaptionPanel
 }
@@ -7133,7 +7150,12 @@ function getInfoAboutMedia(mediaId, source, time_start) {
 }
 
 const openFullSrtDialog = createFullSrtDialog($, {
-  loadSubtitle: async (id, source) => (await getSubtitlesForLink(id, source)) || window.allSubtitles[id],
+  loadSubtitle: async (id, source) => {
+    const [subtitle, preferred] = await Promise.all([
+      getSubtitlesForLink(id, source), _loadPreferredSubtitleTrack(id)
+    ])
+    return { ...(subtitle || window.allSubtitles[id]), preferred }
+  },
   getLanguage: getLangFromUrl,
 })
 
@@ -7427,7 +7449,7 @@ async function flushPendingSrtEdits(selected = null) {
       const language = filePath.match(/\.([^.]+)\.srt$/i)?.[1]
       if (language && _isCompanionSubtitleLanguage(language)) {
         const entry = window.srts?.find(item => item.link === link)
-        if (entry) _cacheCompanionSubtitles(_companionSubtitleKey(entry, language), Promise.resolve(srtToJson(text)))
+        if (entry) _cacheCompanionSubtitles(_companionSubtitleKey(entry, language), Promise.resolve({text, cues: srtToJson(text)}))
         continue
       }
       await _restoreSubtitleDocument(link)
@@ -7592,7 +7614,26 @@ function _getRawSubtitleLineText(link, langCode, lineIndex) {
   return ''
 }
 
-async function renderLines(id, url) {
+// Fetch companion files when a result reaches the viewport, so search can
+// paint from the indexed tracks without waiting on optional network reads.
+const _resultCompanionLoads = new WeakMap()
+let _resultCompanionObserver
+function _loadVisibleResultCompanion(element, load) {
+  if (typeof IntersectionObserver !== 'function') { load(); return }
+  _resultCompanionObserver ||= new IntersectionObserver(entries => {
+    for (const {target, isIntersecting} of entries) {
+      if (!isIntersecting && target.isConnected) continue
+      _resultCompanionObserver.unobserve(target)
+      const run = _resultCompanionLoads.get(target)
+      _resultCompanionLoads.delete(target)
+      if (isIntersecting && target.isConnected) run?.()
+    }
+  })
+  _resultCompanionLoads.set(element, load)
+  _resultCompanionObserver.observe(element)
+}
+
+async function renderLines(id, url, preferred = null) {
   const $container = $('#' + id).addClass('lines-cntnr');
   let fromLineIndex = parseInt($container.data('fromIndex'))
   let toLineIndex = parseInt($container.data('toIndex'))
@@ -7733,7 +7774,7 @@ async function renderLines(id, url) {
   };
   const eId = _.escape(id), eUrl = _.escape(url)
   const translationLanguage = _translationTargetLanguage()
-  const pendingCues = translationLanguage === 'en' ? [] : _pendingCompanionCues(url, translationLanguage)
+  const pendingCues = preferred?.cues || (translationLanguage === 'en' ? [] : _pendingCompanionCues(url, translationLanguage))
   const pendingTranslation = createSubtitleTranslationLookup({ preferred: pendingCues, language: translationLanguage })
 
   // A video from the other user's library is read-only: no ✎ and no 🌐
@@ -7821,7 +7862,22 @@ async function renderLines(id, url) {
 
   html += `${subForLines}<br>`
 
+  const collapsed = $container.find('.collapse-sub-lines').attr('aria-expanded') === 'false'
   $container.html(html)
+  if (collapsed) collapseSubLines({currentTarget: $container.find('.collapse-sub-lines')[0]})
+  if (!preferred && translationLanguage !== 'en') {
+    const lines = $container.find('.sub-lines-cntnr')[0]
+    _loadVisibleResultCompanion(lines, async () => {
+      try {
+        const track = await _loadPreferredSubtitleTrack(url)
+        if (!track?.cues.length || !lines.isConnected ||
+            $container.find('.editing').length || track.language !== _translationTargetLanguage()) return
+        await renderLines(id, url, track)
+      } catch (error) {
+        console.warn('Could not display companion subtitles:', error)
+      }
+    })
+  }
   $($container).find('.play-btn').click(() => playMediaSlice(url + '', timeStart+'', timeEnd+'', subtitleFile.source+''))
   $($container).find('.media-info').click(e => showInfo(subtitleFile.url + '', subtitleFile.source+'', timeStart+'', timeEnd+''))
   $($container).find('.collapse-sub-lines').click(collapseSubLines)
@@ -9586,6 +9642,10 @@ function _searchTermInLang(term, lang) {
   // typed search back to the language the user has just left.
   _setLangToggle(lang === 'en')
   $('#searchText').val(w).trigger('input').trigger('change')
+}
+
+function _reportFamiliarLanguage() {
+  try { window.FamiliarLanguageBridge?.postMessage(_vocabularyLookupLanguage()) } catch (_) {}
 }
 
 function _translationTargetLanguage(source = getLangFromUrl().code) {
@@ -13960,16 +14020,16 @@ function _cpBuildToast(msg) {
   _cpBuildToastTimer = setTimeout(() => { $t.fadeOut(400) }, 3200)
 }
 
-// Translate the phrase (searchText) of every non-manual playlist item that has
-// no translation yet, and store it in the item's `target` (marked `targetAuto`)
-// so Practice can show it as the back. Manual cards are left untouched. Unique
-// phrases are translated once, in bulk (concurrency-capped), via the host's
-// TranslateRequest bridge.
+// Translate playlist phrases missing a translation in the selected language.
+// Practice uses the result on the answer face. Preserve handwritten text
+// and translate each distinct phrase once.
 async function _translatePlaylistPhrases($btn) {
   if (!_haveTranslateBridge()) { alert('Translation needs the Cupitor app.'); return }
   const name = window._recording && window._recording.currentName
   if (!name || _isVirtual(name)) { alert('Pick a normal (non-virtual) playlist to translate.'); return }
   if (_refuseReadOnlyPlaylist(name)) return
+  const source = getLangFromUrl().code || 'sv'
+  const target = _translationTargetLanguage(source)
   const items = (window._recording && window._recording.items) || {}
   // phrase → item refs that share it (all get the same translation).
   const groups = new Map()
@@ -13977,7 +14037,8 @@ async function _translatePlaylistPhrases($btn) {
     Object.keys(items[st] || {}).forEach(w => {
       (items[st][w] || []).forEach(it => {
         if (!it || _isManualItem(it)) return
-        if (it.target && String(it.target).trim()) return // already has a translation
+        if (it.target && String(it.target).trim() &&
+            (!it.targetAuto || (it.targetLanguage || 'en') === target)) return
         const phrase = String(it.searchText || st || '').trim()
         if (!phrase) return
         if (!groups.has(phrase)) groups.set(phrase, [])
@@ -13988,8 +14049,6 @@ async function _translatePlaylistPhrases($btn) {
   const phrases = [...groups.keys()]
   if (!phrases.length) { _cpBuildToast('Every word/phrase already has a translation.'); return }
 
-  const source = (getLangFromUrl().code) || 'sv'
-  const target = _translationTargetLanguage(source)
   const labelHtml = $btn ? $btn.html() : null
   if ($btn) $btn.prop('disabled', true)
   let done = 0
@@ -14011,7 +14070,7 @@ async function _translatePlaylistPhrases($btn) {
   phrases.forEach((p, i) => {
     const tr = (results[i] == null ? '' : String(results[i])).trim()
     if (!tr) return
-    groups.get(p).forEach(it => { it.target = tr; it.targetAuto = true })
+    groups.get(p).forEach(it => { it.target = tr; it.targetAuto = true; it.targetLanguage = target })
     applied++
   })
   if (applied) { _saveRecording(); openRecordingReviewDialog() }
@@ -24506,7 +24565,9 @@ async function _renderPracticeCard() {
   $p.find('.practice-play, .practice-speed').show()
   $p.find('.practice-media-link').remove()
   $p.find('.practice-count').text(`${idx + 1}/${cards.length}`)
-  $p.find('.practice-dir').text(frontIsSource ? `${srcCode} → EN` : `EN → ${srcCode}`)
+  const familiar = _translationTargetLanguage()
+  const familiarCode = familiar.toUpperCase()
+  $p.find('.practice-dir').text(frontIsSource ? `${srcCode} → ${familiarCode}` : `${familiarCode} → ${srcCode}`)
   // Word: shown upfront only when the front IS the source (you see source
   // text and recall its meaning). In target→source mode the word is the
   // thing to recall, so hide it until Reveal.
@@ -24544,12 +24605,14 @@ async function _renderPracticeCard() {
   // 'flip' also fills .practice-back as a fallback AND fills the back-face.
   _practiceRenderLines($p.find('.practice-back'),  rows, frontIsSource ? 'target' : 'source', it.word)
   _practiceRenderLines($p.find('.practice-back-target'), rows, frontIsSource ? 'target' : 'source', it.word)
-  // When the clip has NO English subtitle (E unavailable), the target face is
-  // empty — fall back to the word's own translation: the 🌐 Translate-button
-  // value stored on the item as `it.target` (targetAuto). When English IS
-  // present it already IS the translation, so we add nothing.
-  const _hasEnglish = rows.some(r => r && r.target && r.target.trim())
-  if (!_hasEnglish && it.target && String(it.target).trim()) {
+  // Prefer the saved phrase gloss when no subtitle translation is available,
+  // or when the gloss matches the chosen language and the cues only have English.
+  const hasTranslation = rows.some(row => row.target.trim())
+  const hasFamiliarTrack = rows.some(row => row.targetLanguage === familiar)
+  const targetLanguages = new Set(rows.map(row => row.targetLanguage).filter(Boolean))
+  if (it.target && String(it.target).trim() &&
+      (!hasTranslation || (!hasFamiliarTrack && it.targetLanguage === familiar))) {
+    if (it.targetLanguage) targetLanguages.add(it.targetLanguage)
     const trans = String(it.target).trim()
     const auto = it.targetAuto ? ' data-auto="1"' : ''
     const g = `<div class="practice-phrase-gloss"${auto}>${_.escape(trans)}</div>`
@@ -24558,6 +24621,8 @@ async function _renderPracticeCard() {
     if (frontIsSource) { $p.find('.practice-back').prepend(g); $p.find('.practice-back-target').prepend(g) }
     else { $p.find('.practice-front').prepend(g) }
   }
+  const targetCode = [...targetLanguages].map(code => code.toUpperCase()).join('/') || familiarCode
+  $p.find('.practice-dir').text(frontIsSource ? `${srcCode} → ${targetCode}` : `${targetCode} → ${srcCode}`)
   if (mode === 'both') $p.find('.practice-back').show()
 }
 
@@ -24807,10 +24872,16 @@ async function _cuePracticeVideo(it, request) {
 // Matched line ± context, in both languages, keyed off the source SRT
 // (whose line index is what the recorder stamps as item.lineIndex).
 async function _practiceCardLines(it, before, after) {
-  const parsed = await _loadSubtitlesForItem(it)
+  const [parsed, preferred] = await Promise.all([
+    _loadSubtitlesForItem(it), _loadPreferredSubtitleTrack(it.id)
+  ])
   if (!parsed) return null
   const src = parsed.sv || []
   const tgt = parsed.en || []
+  const lookup = createSubtitleTranslationLookup({
+    preferred: preferred?.cues,
+    language: preferred?.language,
+  })
   const tgtById = new Map()
   tgt.forEach(s => { if (s && s.index != null) tgtById.set(String(s.index), s) })
   // A stale lineIndex (SRT renumbered since capture) → recover by time + word.
@@ -24827,11 +24898,13 @@ async function _practiceCardLines(it, before, after) {
     const line = src[i]
     const li = line.index
     const sec = tgtById.get(String(li))
+    const translation = lookup(line) || (sec?.text?.trim() ? { text: sec.text.trim(), language: 'en' } : null)
     rows.push({
       lineIndex: li,
       isMatch: i === matchPos,
       source: String(line.text || '').trim(),
-      target: sec ? String(sec.text || '').trim() : ''
+      target: translation?.text || '',
+      targetLanguage: translation?.language
     })
   }
   return rows

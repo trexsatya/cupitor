@@ -55,8 +55,12 @@ async function checkMultilingualVocabulary(browser, mobile) {
     if (pathname.endsWith('/vocabulary-hints/hi.txt')) return route.fulfill({
       contentType:'text/plain', body:'drink = पीना | peena\nsip = घूँट लेना'
     })
+    if (pathname.endsWith('.hi.srt')) return route.fulfill({status:404, body:''})
     if (pathname.endsWith('.sv.srt')) return route.fulfill({
-      contentType:'text/plain', body:'1\n00:00:01,000 --> 00:00:03,000\ndricka\n'
+      contentType:'text/plain', body:'1\n00:00:01,000 --> 00:00:03,000\ndricka\n\n2\n00:00:03,000 --> 00:00:05,000\nHa en bra dag\n'
+    })
+    if (pathname.endsWith('.en.srt')) return route.fulfill({
+      contentType:'text/plain', body:'1\n00:00:01,000 --> 00:00:03,000\ndrink\n\n2\n00:00:03,000 --> 00:00:05,000\nHave a good day\n'
     })
     if (pathname.endsWith('/vocabulary-meanings.json')) return route.fulfill({status:404, body:''})
     if (pathname.endsWith('/swedish/vocabulary-hints-hi.json')) return route.fulfill({json:{
@@ -76,6 +80,8 @@ async function checkMultilingualVocabulary(browser, mobile) {
   })
   await page.addInitScript(() => {
     window.dontConfirmOnRefresh = true
+    window.__familiarLanguages = []
+    window.FamiliarLanguageBridge = { postMessage: language => window.__familiarLanguages.push(language) }
     window.TranslateRequest = { postMessage(raw) {
       const { id, source, target, text } = JSON.parse(raw)
       queueMicrotask(() => window.__cupTranslated(id,
@@ -130,6 +136,7 @@ async function checkMultilingualVocabulary(browser, mobile) {
     assert.equal(await edit.isVisible(), false)
     await openSearchOptions()
     await page.getByRole('combobox', {name:'I know well', exact:true}).selectOption('hi')
+    await page.waitForFunction(() => window.__familiarLanguages.at(-1) === 'hi')
     await closeOptions()
     await search('कुर्सी')
     const chair = results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'stolar'})
@@ -151,9 +158,57 @@ async function checkMultilingualVocabulary(browser, mobile) {
     await resultsGroup.waitFor()
     if (await resultsGroup.getAttribute('aria-expanded') === 'false') await resultsGroup.click()
     const translate = page.getByTitle('Translate the visible lines to Hindi').first()
+    const translatedVideo = await translate.getAttribute('data-url')
     await translate.click()
     await page.locator('#result .secondary-line[lang="hi"]').first().waitFor()
     assert.equal(await page.locator('#result .secondary-line[lang="hi"] .line-text').first().textContent(), 'पीना')
+    const saved = await page.evaluate(async () => {
+      const original = window.GitHubUtils.commitMultipleFiles
+      const writes = []
+      try {
+        window.GitHubUtils.commitMultipleFiles = async ({files}) => {
+          for (const file of files) writes.push([file.path, await file.getContent('')])
+          return {committed: true}
+        }
+        await window.flushPendingSrtEdits()
+        return writes
+      } finally {
+        window.GitHubUtils.commitMultipleFiles = original
+      }
+    })
+    assert(saved.some(([path, text]) => path.endsWith('.hi.srt') && text.includes('पीना')))
+    assert(!saved.some(([path]) => path.endsWith('.en.srt')))
+    await search('stol')
+    await results.locator('.similar-segment-header').filter({hasText:'stol'}).first().waitFor()
+    await resultsGroup.waitFor({state:'detached'})
+    await search('dricka')
+    await resultsGroup.waitFor()
+    await page.locator('#subtitleSearchStatus[data-complete="true"]').waitFor()
+    if (await resultsGroup.getAttribute('aria-expanded') === 'false') await resultsGroup.click()
+    const reopened = page.locator('#result .lines-cntnr').filter({
+      has: page.locator(`.play-btn-container[data-url="${translatedVideo}"]`),
+    }).first()
+    await reopened.evaluate(element => element.scrollIntoView({block:'center'}))
+    const restored = reopened.locator('.secondary-line[lang="hi"]').getByText('पीना', {exact:true})
+    await restored.waitFor()
+    for (const card of [
+      {id:translatedVideo, word:'dricka', timeStart:1, timeEnd:3, lineIndex:1, answer:'पीना', target:'HI'},
+      {id:translatedVideo === 'testVideo01' ? 'testVideo02' : 'testVideo01',
+        word:'dag', timeStart:3, timeEnd:5, lineIndex:2, answer:'Have a good day', target:'EN'},
+    ]) {
+      await page.evaluate(({answer, target, ...item}) => {
+        window.ytPlayer = {
+          getPlayerState: () => 2, getCurrentTime: () => 1,
+          getVideoData: () => ({video_id:item.id}), pauseVideo() {},
+        }
+        window._appSettings.practiceRevealMode = 'both'
+        window.openPracticeMode({queue:[{...item, source:'YouTube'}], single:true})
+      }, card)
+      const practice = page.locator('#practiceMode')
+      await practice.locator('.practice-back').getByText(card.answer, {exact:true}).waitFor()
+      assert.equal(await practice.locator('.practice-dir').textContent(), 'SV → ' + card.target)
+      await page.evaluate(() => window.closePracticeMode())
+    }
     await search('peena')
     await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
     await openSearchOptions()

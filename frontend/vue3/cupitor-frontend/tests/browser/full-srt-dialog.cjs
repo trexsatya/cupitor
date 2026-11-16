@@ -1,6 +1,6 @@
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
-const { serveFixtures, clickSubtitleInfo } = require('./language-dialogs.cjs')
+const { serveFixtures, clickSubtitleInfo, selectKnownLanguage } = require('./language-dialogs.cjs')
 
 const first = 'fullSrt0001', second = 'fullSrt0002'
 const time = seconds => new Date(seconds * 1000).toISOString().slice(11, 23).replace('.', ',')
@@ -8,6 +8,7 @@ const source = Array.from({ length: 260 }, (_, i) => `${i + 1}\n${time(i * 2)} -
   (i === 129 ? 'En färgsprakande kväll.' : `Svensk rad ${i + 1}.`) +
   (i === 259 ? '\n<em id="srt-markup">Literal subtitle markup</em>' : '') + '\n').join('\n')
 const english = '1\n00:00:00,000 --> 00:00:02,000\nEnglish first cue.\n\n260\n00:08:38,000 --> 00:08:40,000\nEnglish final cue.\n'
+const hindi = '37\n00:04:18,000 --> 00:04:20,000\nएक रंगीन शाम।\n'
 const other = '1\n00:00:10,000 --> 00:00:12,000\nEn annan färgsprakande scen.\n\n2\n00:00:12,000 --> 00:00:14,000\nSecond link, final cue.\n'
 
 async function check(browser, mobile) {
@@ -25,6 +26,11 @@ async function check(browser, mobile) {
         { link: second, name: `Test || Source only || ${second}`, source: 'YouTube' },
       ]) })
       if (file.endsWith('.srt')) {
+        if (file.endsWith('.hi.srt')) {
+          return file.includes(first)
+            ? route.fulfill({ contentType: 'text/plain', body: hindi })
+            : route.fulfill({ status: 404, body: 'Not found' })
+        }
         if (file.includes(first) && !file.endsWith('.en.srt')) {
           if (defer) { defer = false; await new Promise(resolve => { release = resolve }) }
           if (fail) return route.fulfill({ status: 503, body: 'Unavailable' })
@@ -115,6 +121,12 @@ async function check(browser, mobile) {
     await click(dialog.getByRole('button', { name: 'Try again' }))
     await pre.waitFor({ state: 'visible' })
     assert.equal(await pre.textContent(), source, 'retry recovers the complete file')
+    await close()
+    await selectKnownLanguage(page, 'hi')
+    await open(first)
+    await pre.waitFor({ state: 'visible' })
+    assert.equal(await dialog.locator('.full-srt-language').inputValue(), 'hi')
+    assert.equal(await pre.textContent(), hindi, 'saved Hindi SRT preserves its original cue number and text')
     await close()
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'}: Full SRT action, complete files, languages, scrolling, safe text, late responses and retry passed`)

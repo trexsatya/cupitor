@@ -71,6 +71,12 @@ export function createFullSrtDialog($, { win = window, loadSubtitle, getLanguage
       if (typeof subtitle?.en === 'string' && subtitle.en.trim() && (language.code !== 'en' || !tracks.length)) {
         tracks.push({ key: 'en', label: 'English', text: subtitle.en });
       }
+      if (subtitle?.preferred?.cues.length) {
+        const { language: code, text } = subtitle.preferred;
+        const label = typeof Intl.DisplayNames === 'function'
+          ? new Intl.DisplayNames(['en'], {type: 'language'}).of(code) : code;
+        tracks.push({key: code, label, text});
+      }
       if (!tracks.length) {
         $view.find('.full-srt-status').text('No SRT is available for this link.');
         $view.find('.full-srt-retry').show();
@@ -78,6 +84,10 @@ export function createFullSrtDialog($, { win = window, loadSubtitle, getLanguage
       }
       $view.find('.full-srt-name').text(subtitle.fileName || title || id);
       tracks.forEach(track => $('<option>').val(track.key).text(track.label).appendTo($view.find('.full-srt-language')));
+      if (subtitle?.preferred) {
+        const selection = subtitle.preferred.cues.length ? subtitle.preferred.language : 'en';
+        if (tracks.some(track => track.key === selection)) $view.find('.full-srt-language').val(selection);
+      }
       $view.find('.full-srt-language-label').show();
       $view.find('.full-srt-status').hide();
       $view.find('.full-srt-text').show();

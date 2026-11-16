@@ -49,3 +49,16 @@ test('the media panel shows Hindi first and labels the English fallback for each
   expect(translations()).toEqual([['एक वाक्य', 'hi', 'HI']]);
   panel.close();
 });
+
+test('the subtitle Translate action defaults to the familiar language', async () => {
+  document.body.innerHTML = '<audio></audio>';
+  localStorage.removeItem('cupSubPrefs');
+  const translateText = jest.fn(async () => 'एक वाक्य');
+  const panel = createMediaCaptionPanel({translateText, familiarLanguage: () => 'hi'});
+  panel.open(document.querySelector('audio'));
+  panel.load(srt, '', 'sv');
+  document.querySelector('#localCaptionPanel [data-act=translate]').click();
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  expect(translateText).toHaveBeenCalledWith('En mening', 'sv', 'hi');
+  panel.close();
+});
