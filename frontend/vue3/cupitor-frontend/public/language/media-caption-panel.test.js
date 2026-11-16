@@ -29,3 +29,23 @@ test('the shared panel keeps the webapp translation callback and sends exact sel
   panel.close();
   expect(document.body.classList.contains('cup-local-sub-split')).toBe(false);
 });
+
+test('the media panel shows Hindi first and labels the English fallback for each cue', () => {
+  document.body.innerHTML = '<audio></audio>';
+  const panel = createMediaCaptionPanel({});
+  panel.open(document.querySelector('audio'));
+  const english = srt.replace('En mening', 'One sentence').replace('Sista meningen', 'The last sentence');
+  const preferred = { language: 'hi', cues: [
+    { index: 99, start: {ordinal: 0.1}, end: {ordinal: 2}, text: 'एक वाक्य' },
+    { index: 2, start: {ordinal: 3.25}, end: {ordinal: 6.75}, text: ' ' },
+  ] };
+  const translations = () => Array.from(document.querySelectorAll('#localCaptionPanel .cup-sub-tr'))
+    .map(line => [line.textContent, line.lang, line.dataset.subtitleLanguage]);
+  panel.load(srt, english, 'sv', preferred);
+  expect(translations()).toEqual([['एक वाक्य', 'hi', 'HI'], ['The last sentence', 'en', 'EN']]);
+  panel.load(srt, english, 'sv', { language: 'hi', cues: [] });
+  expect(translations()).toEqual([['One sentence', 'en', 'EN'], ['The last sentence', 'en', 'EN']]);
+  panel.load(srt, '', 'sv', preferred);
+  expect(translations()).toEqual([['एक वाक्य', 'hi', 'HI']]);
+  panel.close();
+});

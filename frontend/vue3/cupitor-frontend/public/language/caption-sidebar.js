@@ -259,6 +259,10 @@
           margin-top: 2px; font-size: 13px; color: #b8d4ff;
           font-style: italic; opacity: 0.85;
         }
+        .cup-sub-tr[data-subtitle-language]::before {
+          content: attr(data-subtitle-language); font-style: normal;
+          font-size: 0.75em; margin-inline-end: 0.5em;
+        }
         .cup-sub-tr.cup-tr-pending { color: #888; }
         .cup-sub-modal {
           position: fixed; inset: 0; z-index: 2147483647;
@@ -492,7 +496,10 @@
 
     function renderCueText(block, cue) {
       block.replaceChildren(tokenize(cue.text));
-      if (cue.translation) block.append(node('div', {class: 'cup-sub-tr'}, [cue.translation]));
+      if (cue.translation) block.append(node('div', {
+        class: 'cup-sub-tr', lang: cue.translationLanguage,
+        'data-subtitle-language': cue.showTranslationLanguage ? cue.translationLanguage?.toUpperCase() : null,
+      }, [cue.translation]));
       else if (cue.trPending) block.append(node('div', {class: 'cup-sub-tr cup-tr-pending'}, ['…']));
     }
 

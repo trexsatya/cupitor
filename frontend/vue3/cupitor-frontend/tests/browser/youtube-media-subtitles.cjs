@@ -9,7 +9,15 @@ async function verify(browser, width) {
   const errors=[]
   page.on('pageerror',e=>errors.push(e.message))
   page.on('dialog',d=>{errors.push(d.message());d.dismiss()})
-  await page.route('**/*',serveFixtures)
+  await page.route('**/*', route => {
+    const pathname = decodeURIComponent(new URL(route.request().url()).pathname)
+    if (pathname.endsWith('testVideo01.hi.srt')) return route.fulfill({ contentType: 'text/plain',
+      body: '99\n00:00:01,000 --> 00:00:03,000\nएक रंगीन शाम।\n' })
+    if (pathname.endsWith('.hi.srt')) return route.fulfill({ status: 404, body: '' })
+    if (pathname.endsWith('.en.srt')) return route.fulfill({ contentType: 'text/plain',
+      body: '1\n00:00:01,000 --> 00:00:03,000\nA colorful evening.\n\n2\n00:00:03,000 --> 00:00:05,000\nIt starts to hail.\n' })
+    return serveFixtures(route)
+  })
   await page.route('https://www.youtube.com/iframe_api', route => route.fulfill({
     contentType: 'application/javascript',
     body: 'window.installMockYoutubeApi()'
@@ -40,6 +48,7 @@ async function verify(browser, width) {
     await page.goto('http://127.0.0.1:3000/language.html',{waitUntil:'networkidle'})
     await page.evaluate(() => Promise.all([window._vocabularyReadyPromise,window._subtitlesReadyPromise]))
     assert.equal(await page.locator('iframe#youtubePlayer').count(), 0, 'Search does not eagerly create the player')
+    await page.locator('#vocabularyLookupLanguage').selectOption('hi')
     await clickSearchTool(page, '#toggleMediaPanelBtn')
     await page.locator('#select2-mp3Choice-container').click()
     await page.locator('#select2-mp3Choice-results .select2-results__group').click()
@@ -52,6 +61,8 @@ async function verify(browser, width) {
     assert.equal(await page.locator('#mediaControlPanel').isVisible(), false)
     assert.equal(await page.locator('#subtitleColumn').isVisible(),false)
     assert.equal(await panel.locator('.cup-sub-cue').count(),5)
+    assert.equal(await panel.locator('.cup-sub-tr[lang="hi"]').textContent(), 'एक रंगीन शाम।')
+    assert.equal(await panel.locator('.cup-sub-tr[lang="en"]').textContent(), 'It starts to hail.')
     assert.equal(await page.evaluate(()=>window.__yt.loads),1,'selected media waits for the iframe load')
     // Use the same actual cue transport, translation, selection and settings UI.
     await panel.locator('.cup-sub-time').nth(2).click()
@@ -151,6 +162,12 @@ async function verify(browser, width) {
     fs.mkdirSync('test-results/youtube-media',{recursive:true})
     await back.click()
     await page.screenshot({path:`test-results/youtube-media/${width}.png`})
+    await page.evaluate(() => {
+      window.mediaSelected = {link:'testVideo02',source:'link'}
+      return window.playSelectedMedia()
+    })
+    await panel.locator('.cup-sub-tr[lang="en"]').first().waitFor()
+    assert.deepEqual(await panel.locator('.cup-sub-tr').allTextContents(), ['A colorful evening.', 'It starts to hail.'])
     assert.deepEqual(errors,[])
     console.log(width+'px: shared YouTube panel, seeks, capture, resize, restore and study handoff passed')
   } catch(e) { console.error(await page.evaluate(()=>({search:document.querySelector('#searchText').value,result:document.querySelector('#result').textContent.slice(0,500),body:document.body.className})),errors); throw e } finally {await page.close()}

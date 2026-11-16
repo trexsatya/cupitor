@@ -210,6 +210,19 @@ describe("buildPlayingSubsVM", () => {
     expect(out.rows[0].secText).toBe("a");
   });
 
+  test("chooses Hindi by cue time and falls back to English when it is absent", () => {
+    const cue = (index, text, start, end) => ({ index, text, start: { ordinal: start }, end: { ordinal: end } });
+    const parsed = {
+      sv: [cue(1, "Hej", 0, 2), cue(2, "God natt", 3, 5)],
+      en: [cue(1, "Hello", 0, 2), cue(2, "Good night", 3, 5)],
+    };
+    const preferred = { language: "hi", cues: [cue(2, "नमस्ते", 0, 2)] };
+    const out = buildPlayingSubsVM({ parsed, preferred, lang: "sv", item: { lineIndex: 1 }, after: 1 });
+    expect(out.rows.map(row => [row.secText, row.secLanguage])).toEqual([["नमस्ते", "hi"], ["Good night", "en"]]);
+    const reverse = buildPlayingSubsVM({ parsed, preferred, lang: "en", item: { lineIndex: 1 }, after: 1 });
+    expect(reverse.rows.map(row => [row.mainText, row.mainLanguage])).toEqual([["नमस्ते", "hi"], ["Good night", "en"]]);
+  });
+
   test("Player displays enough surrounding words without crossing subtitle gaps", () => {
     const cue = (index, text, ts, te) =>
       ({ index, text, start: { ordinal: ts }, end: { ordinal: te } });

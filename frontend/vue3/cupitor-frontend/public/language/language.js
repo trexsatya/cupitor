@@ -7,10 +7,11 @@ import { LANGUAGES, languageFromLocation, requireStudyLanguage, speechLocale } f
 import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
 import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js';
 import { retainCaptionEnds } from './caption-capture.js';
-import { openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
+import { matchingCompanionSubtitle, openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
 import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.js';
 import { browserRecordingAvailable, createBrowserSpeakOverRecorder } from './browser-speakover.js';
 import { createMediaCaptionPanel } from './media-caption-panel.js';
+import { createSubtitleTranslationLookup } from './subtitle-translation.js';
 import { createYoutubeMediaAdapter } from './youtube-media-adapter.js';
 import { playLocalMedia } from './local-playback.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
@@ -4520,6 +4521,7 @@ $('document').ready(e => {
     const lookup = this.value
     window._appSettings.vocabularyLookupLanguage = lookup
     saveAppSettings()
+    _refreshMediaSubtitleLanguage().catch(error => console.warn('Could not update companion subtitles:', error))
     await _loadSharedHintTranslations(lookup)
     if (_vocabularyLookupLanguage() !== lookup) return
     const query = String($('#searchText').val() || '').trim()
@@ -5050,7 +5052,10 @@ const renderSubtitles = () => {
     populateWikiLinks(currentSub.sv, $('#sv-sub'), currentSub.index);
     populateSearchWords(currentSub, $('#sv-sub-mirror'));
 
-    $('#en-sub').html(_safeSubtitleHtml(currentSub.en))
+    const translation = currentSub.translation
+    $('#en-sub').html(_safeSubtitleHtml(currentSub.showTranslationLanguage ? translation?.text : currentSub.en))
+      .attr('lang', translation?.language || (currentSub.showTranslationLanguage ? null : 'en'))
+      .attr('data-subtitle-language', currentSub.showTranslationLanguage && translation ? translation.language.toUpperCase() : null)
     $('#currentTime').text(currentSub.index)
     // Show the subtitle's start-end timestamp above the line so the
     // user can see where in the media they are without checking the player.
@@ -5976,6 +5981,45 @@ async function _fetchIndexedSrt(entry, code, who) {
   return _fetchSrtFile(`${base}/${encodeURIComponent(_nfc(entry.name) + '.' + code + '.srt')}`)
 }
 
+// Optional companions are fetched only on playback. Keep a small cache so
+// replaying clips from the same media doesn't issue another request.
+const _preferredSubtitleTracks = new Map()
+async function _loadPreferredSubtitleTrack(link) {
+  const language = _vocabularyLookupLanguage()
+  if (!link || language === 'en' || language === getLangFromUrl().code) return undefined
+  const entry = window.srts?.find(item => item.link === link)
+  const context = _dsCaptureSourceContext()
+  let cues = []
+  if (link.startsWith('local:')) {
+    const local = _localMediaSelection
+    if ('local:' + local?.mediaFile.name === link) {
+      const track = matchingCompanionSubtitle(local.mediaFile.name, local.files, local.subtitleFile, language)
+      if (track) {
+        try { cues = srtToJson(await readLocalSubtitleText(track)) }
+        catch (error) { console.warn('Could not read companion subtitles:', error) }
+      }
+    }
+  } else if (entry && (!entry.sourceIdentity || entry.sourceIdentity === _dsSourceIdentity(entry.src || 'primary'))) {
+    const base = _dsReadUrl(entry.src || 'primary', 'srts', _dsLangFromLocation())
+    const key = JSON.stringify([base, entry.name, entry.bundle, entry.bundleKey, entry.bundleRevision, language])
+    let request = _preferredSubtitleTracks.get(key)
+    if (!request) {
+      request = _withTimeout(_fetchIndexedSrt(entry, language), 3000, 'companion subtitles')
+        .then(text => srtToJson(text))
+        .catch(error => {
+          if (error?.kind !== 'notfound' && _preferredSubtitleTracks.get(key) === request) _preferredSubtitleTracks.delete(key)
+          return []
+        })
+      _preferredSubtitleTracks.set(key, request)
+      if (_preferredSubtitleTracks.size > 12) _preferredSubtitleTracks.delete(_preferredSubtitleTracks.keys().next().value)
+    }
+    cues = await request
+  }
+  context.assertCurrent()
+  if (language !== _vocabularyLookupLanguage()) return _loadPreferredSubtitleTrack(link)
+  return { language, cues }
+}
+
 const _subtitleRestores = new Map()
 async function _restoreSubtitleDocument(id) {
   if (!window.allSubtitles[id]?._evicted) return window.allSubtitles[id]
@@ -6093,6 +6137,17 @@ function _getLocalCaptionPanel() {
   return _localCaptionPanel
 }
 
+async function _refreshMediaSubtitleLanguage() {
+  const media = window.mediaBeingPlayed
+  if (!_localCaptionPanel || !['link', 'local'].includes(media?.source)) return
+  const [pair, preferred] = await Promise.all([
+    getSubtitlesForLink(media.link, media.source), _loadPreferredSubtitleTrack(media.link),
+  ])
+  if (window.mediaBeingPlayed === media) {
+    _localCaptionPanel.load(pair?.sv, pair?.en, getLangFromUrl().code, preferred)
+  }
+}
+
 const _youtubeCaptionMedia = createYoutubeMediaAdapter(() => window.ytPlayer, () => { window.youtubePlayInterval = null })
 
 function _updateMediaReturnButton() {
@@ -6151,7 +6206,7 @@ function _localMediaLayout(local) {
   _updateMediaReturnButton()
 }
 
-function _renderLocalSubtitleStatus() {
+function _renderLocalSubtitleStatus(preferred) {
   const selection = _localMediaSelection
   if (!selection) return
   $('#localMediaName').text(selection.mediaFile.name)
@@ -6160,7 +6215,7 @@ function _renderLocalSubtitleStatus() {
     ? selection.subtitleFile.name + ' · ' + count + ' subtitle' + (count === 1 ? '' : 's')
     : 'No subtitles attached. Add an SRT file to see captions.')
   const pair = window.allSubtitles['local:' + selection.mediaFile.name]
-  _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
+  _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code, preferred)
   if (window.playingAudio) showAudioPlayer()
   else if (window.playingVideo) showVideoPlayer()
 }
@@ -6180,7 +6235,7 @@ async function _chooseLocalSubtitles(files, mediaFile) {
     files: available, mediaFile,
     targetLanguage: getLangFromUrl().code,
     attachOnly: sameMedia,
-    onPlay: async ({ mediaFile, subtitleFile, englishFile }) => {
+    onPlay: async ({ mediaFile, subtitleFile, englishFile, files }) => {
       const baseName = mediaFile.name.replace(/\.(mp3|wav|mp4)$/i, '')
       const link = 'local:' + mediaFile.name
       let sv = '', en = ''
@@ -6191,16 +6246,17 @@ async function _chooseLocalSubtitles(files, mediaFile) {
       }
       if (sv) window.allSubtitles[link] = {sv, en, source:'local', fileName:baseName}
       else delete window.allSubtitles[link]
-      _localMediaSelection = {mediaFile, subtitleFile, englishFile, files:available}
+      _localMediaSelection = {mediaFile, subtitleFile, englishFile, files}
       if (sameMedia && window.mediaBeingPlayed?.source === 'local' && window.mediaBeingPlayed.link === link) {
+        const preferred = await _loadPreferredSubtitleTrack(link)
         clearSubtitles()
         window.syncSubtitle = true
         if (sv) {
-          await loadSubtitlesForLink(sv, en)
+          loadSubtitlesForLink(sv, en, preferred)
           setCurrentSub(getCurrentTime() || 0)
           renderSubtitles()
         }
-        _renderLocalSubtitleStatus()
+        _renderLocalSubtitleStatus(preferred)
       } else {
         await playNewMedia(link, 'local', mediaFile)
       }
@@ -6241,29 +6297,24 @@ $(document).on('change', '#localSubtitleFiles', async function () {
   if (files.length && _localMediaSelection) await _chooseLocalSubtitles(files, _localMediaSelection.mediaFile)
 })
 
-async function loadSubtitlesForLink(sv, en) {
+function loadSubtitlesForLink(sv, en, preferred) {
   if (!sv) {
     alert("SV subtitle not found")
     return
   }
 
-  if (!en) {
-    en = sv
-  }
-
   window.srtLoaded = sv
-  sv = srtToJson(sv, 'sv')
-
-  en = srtToJson(en, 'en')
-  const combined = sv.map(svItem => {
-    const enItem = en.find(eni => eni.ts === svItem.ts)
-    const combinedItem = {...svItem, ...enItem};
-    combinedItem['id'] = svItem.id //Give priority to SV subtitle
-    return combinedItem
+  const source = srtToJson(sv, 'sv')
+  const english = srtToJson(en || sv)
+  const translate = createSubtitleTranslationLookup({
+    preferred: preferred?.cues, language: preferred?.language,
+    english: !preferred || (en && en !== sv) ? english : [],
   })
-  // console.log(sv)
-  // console.log(en)
-  console.log(combined)
+  const combined = source.map(cue => {
+    const translation = translate(cue)
+    return { ...cue, en: translation?.language === 'en' ? translation.text : undefined,
+      translation, showTranslationLanguage: !!preferred }
+  })
   storeSubtitles(combined)
   lastSub = null
   renderSubtitles()
@@ -6377,7 +6428,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   async function _playMedia() {
     if (source === 'link') {
       window.youtubePlayInterval = null
-      await loadYoutubeVideo(link, {isCurrent, mainMedia: true})
+      await loadYoutubeVideo(link, {isCurrent, mainMedia: true, loadCaptions: false})
       if (!isCurrent()) return
       if (!autoPlay) _suppressYoutubeAutoplay()
     } else if (source === 'local') {
@@ -6399,6 +6450,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
       }
       window.mediaBeingPlayed = {link, source}
       _localMediaLayout(true)
+      _getLocalCaptionPanel().load(null, null, getLangFromUrl().code)
       if (window.playingAudio) showAudioPlayer()
       else if (window.playingVideo) showVideoPlayer()
       // The existing local <audio>/<video> is the source of truth for the
@@ -6427,19 +6479,20 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   // (missing file / rate-limited / network). Degrade gracefully so playback
   // isn't aborted by an unavailable subtitle; a transient miss will be topped
   // up by the background retry and the next selection will pick it up.
-  let sv = '', en = ''
+  let pair, preferred
   try {
-    ({sv = '', en = ''} = (await getSubtitlesForLink(link, source)) || {})
+    [pair, preferred] = await Promise.all([getSubtitlesForLink(link, source), _loadPreferredSubtitleTrack(link)])
   } catch (e) {
     console.warn('subtitles unavailable for', link, e && e.message)
   }
   if (!isCurrent()) return
   // A local media file can be played without an SRT. Do not show the remote
   // missing-subtitle alert for that deliberate choice.
-  if (sv || $('#onlySubsCheckbox').is(':checked')) await loadSubtitlesForLink(sv, en);
-  if (source === 'local') _renderLocalSubtitleStatus()
-  else if (document.body.classList.contains('youtube-media-mode')) {
-    _getLocalCaptionPanel().load(sv, en, getLangFromUrl().code)
+  const { sv = '', en = '' } = pair || {}
+  if (sv || $('#onlySubsCheckbox').is(':checked')) loadSubtitlesForLink(sv, en, preferred)
+  if (source === 'local') _renderLocalSubtitleStatus(preferred)
+  else if (window.mediaBeingPlayed?.link === link && source === 'link') {
+    _getLocalCaptionPanel().load(sv, en, getLangFromUrl().code, preferred)
     $('#youtubeMediaName').text(window.srts?.find(it => it.link === link)?.name || link)
   }
 
@@ -10192,7 +10245,7 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 
 async function loadYoutubeVideo(videoId, {
   isCurrent = () => true, startSeconds, respectInterval = true, now = () => Date.now(), beforeLoad,
-  mainMedia = !window._playingRecording && !window._practiceActive,
+  mainMedia = !window._playingRecording && !window._practiceActive, loadCaptions = true,
 } = {}) {
   const readyDeadline = now() + VIDEO_RECOVERY_MS
   const ready = () => { try { return !!(window.ytPlayerReady && window.ytPlayer?.getIframe?.()) } catch (_) { return false } }
@@ -10213,13 +10266,15 @@ async function loadYoutubeVideo(videoId, {
     _youtubeMediaLayout(true)
     hideMediaRelatedContainer()
     $('#youtubeMediaName').text(window.srts?.find(it => it.link === videoId)?.name || videoId)
-    const pair = window.allSubtitles[videoId]
-    _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
-    getSubtitlesForLink(videoId, 'link').then(pair => {
-      if (isCurrent() && document.body.classList.contains('youtube-media-mode') && window.mediaBeingPlayed?.link === videoId) {
-        _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
-      }
-    }).catch(e => console.warn('subtitles unavailable for', videoId, e?.message))
+    _getLocalCaptionPanel().load(null, null, getLangFromUrl().code)
+    if (loadCaptions) {
+      Promise.all([getSubtitlesForLink(videoId, 'link'), _loadPreferredSubtitleTrack(videoId)])
+        .then(([pair, preferred]) => {
+          if (isCurrent() && window.mediaBeingPlayed?.link === videoId) {
+            _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code, preferred)
+          }
+        }).catch(error => console.warn('subtitles unavailable for', videoId, error?.message))
+    }
   }
   return new Promise((resolve, reject) => {
     // Finish the way a reload used to.
@@ -19261,7 +19316,7 @@ async function _renderPlayingSubtitles(item, { isCurrent = () => true } = {}) {
   if (!$sub.length) $sub = $('<div id="recPlayingSubs"></div>').appendTo('body')
   $sub.html('<div class="rec-ps-loading">Loading subtitles…</div>')
 
-  const parsed = await _loadSubtitlesForItem(item)
+  const [parsed, preferred] = await Promise.all([_loadSubtitlesForItem(item), _loadPreferredSubtitleTrack(item.id)])
   if (!isCurrent() || !document.body.contains($sub[0])) return null
   if (!parsed || (!parsed.sv.length && !parsed.en.length)) {
     $sub.html('<div class="rec-ps-err">Subtitles unavailable for this video.</div>')
@@ -19271,7 +19326,7 @@ async function _renderPlayingSubtitles(item, { isCurrent = () => true } = {}) {
   const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
   const before = (window._appSettings && window._appSettings.contextLinesBefore) || 0
   const after  = (window._appSettings && window._appSettings.contextLinesAfter)  || 0
-  const vm = buildPlayingSubsVM({ parsed, lang, item, before, after,
+  const vm = buildPlayingSubsVM({ parsed, lang, item, before, after, preferred,
     minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
 
   if (vm.state === 'no-primary') {

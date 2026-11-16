@@ -4769,6 +4769,12 @@ body.rec-playing #scrollButton, body.practice-mode #scrollButton { display: none
    one cue per line — so the overlay has to honour them instead of collapsing
    the whole card onto one run-on line. */
 #recPlayingSubs .rec-ps-main,
+#en-sub[data-subtitle-language]::before,
+#recPlayingSubs [data-subtitle-language]::before {
+    content: attr(data-subtitle-language);
+    font-size: 0.75em;
+    margin-inline-end: 0.5em;
+}
 #recPlayingSubs .rec-ps-sec {
     white-space: pre-wrap;
     overflow-wrap: anywhere;

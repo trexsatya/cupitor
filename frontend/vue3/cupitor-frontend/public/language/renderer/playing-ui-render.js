@@ -40,6 +40,10 @@ export function renderPlayingSubsList(vm, mountEl) {
 
     const main = document.createElement('div')
     main.className = 'rec-ps-main'
+    if (row.mainLanguage) {
+      main.lang = row.mainLanguage
+      main.dataset.subtitleLanguage = row.mainLanguage.toUpperCase()
+    }
     if (row.highlightHtml) {
       // Trusted: highlightWordHtml HTML-escapes its input and emits only
       // <mark> wrappers, so this is safe.
@@ -52,6 +56,10 @@ export function renderPlayingSubsList(vm, mountEl) {
     if (row.secText) {
       const sec = document.createElement('div')
       sec.className = 'rec-ps-sec'
+      if (row.secLanguage) {
+        sec.lang = row.secLanguage
+        sec.dataset.subtitleLanguage = row.secLanguage.toUpperCase()
+      }
       sec.textContent = row.secText
       $row.appendChild(sec)
     }
