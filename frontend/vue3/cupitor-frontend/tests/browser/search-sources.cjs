@@ -163,7 +163,9 @@ async function checkHeader(page, mobile) {
       return {
         toolbar: bounds('.lang-toolbar'), controls: bounds('.lang-toolbar-center'),
         chips: bounds('#searchSourceChips'), shortcuts: bounds('.lang-header-shortcuts'),
-        search: bounds('#searchText'), viewport: document.documentElement.clientWidth,
+        search: bounds('#searchText'), languages: bounds('#vocabularyLanguages'),
+        learning: bounds('#vocabularyLearningLanguage'), familiar: bounds('#vocabularyLookupLanguage'),
+        viewport: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
         allLabelsVisible: shortcuts.every(label => label.getBoundingClientRect().width > 0),
       }
@@ -172,6 +174,8 @@ async function checkHeader(page, mobile) {
     assert.ok(layout.shortcuts.bottom <= layout.chips.top && layout.chips.right <= layout.controls.left)
     assert.ok(layout.controls.right <= layout.toolbar.right && layout.shortcuts.right <= layout.toolbar.right)
     assert.ok(layout.search.width >= layout.viewport * .7, 'search uses the space freed by the idle caption pane')
+    assert.ok(layout.languages.top >= layout.search.bottom, 'language controls sit below search')
+    assert.ok(layout.learning.width > 0 && layout.familiar.width > 0, 'both language selectors stay visible')
     assert.equal(layout.viewport, layout.scrollWidth, 'desktop layout fits without horizontal scrolling')
   }
   const captions = page.locator('#subtitleColumn')
