@@ -1,4 +1,4 @@
-import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video'
+import { createRecordingVideoAttempt, confirmRecordingSeek, getYoutubeVideoId, VIDEO_RECOVERY_MS } from './recording-video'
 
 beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(0) })
 afterEach(() => jest.useRealTimers())
@@ -255,4 +255,22 @@ test('cancelling preparation pauses before restoring sound and cannot unmute a r
   attempt.dispose()
   expect(player.isMuted()).toBe(true)
   expect(player.unMute).toHaveBeenCalledTimes(1)
+})
+
+test('the canonical player ID wins, with the video URL as a fallback', () => {
+  const player = { getVideoUrl: () => 'https://www.youtube.com/watch?v=requested',
+    getVideoData: () => ({ video_id: 'still-loaded' }) }
+  expect(getYoutubeVideoId(player)).toBe('still-loaded')
+  expect(getYoutubeVideoId({ ...player, getVideoData: () => ({}) })).toBe('requested')
+})
+
+test('small forward steps at slow playback count as genuine progress', () => {
+  const { attempt } = setup()
+  for (let i = 0; i < 250; i++) {
+    attempt.observe(40 + i * 0.025, 1, 'wanted')
+    jest.advanceTimersByTime(100)
+  }
+  expect(attempt.played).toBe(true)
+  expect(attempt.active()).toBe(true)
+  attempt.dispose()
 })

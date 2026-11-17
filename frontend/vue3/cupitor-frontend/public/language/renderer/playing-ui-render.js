@@ -1,3 +1,24 @@
+import { fromSeconds } from '../time-format.js'
+
+export function subtitleTimestampButton({ start, stop }, onSeek) {
+  if (!onSeek || !Number.isFinite(start) || !Number.isFinite(stop) || start < 0 || stop <= start) return null
+  const label = time => {
+    const ms = Math.round(time * 1000)
+    const fraction = ms % 1000
+    return fromSeconds(ms / 1000) + (fraction ? '.' + String(fraction).padStart(3, '0') : '')
+  }
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'study-srt-timestamp'
+  button.textContent = '[' + label(start) + '-' + label(stop) + ']'
+  button.title = 'Play this subtitle line'
+  button.addEventListener('click', event => {
+    event.stopPropagation()
+    onSeek({ start, stop })
+  })
+  return button
+}
+
 // DOM emitter for the playing-subtitles list and the now-playing banner
 // per-item text updates. The banner's static skeleton + one-shot click
 // wiring (gap stepper) stays in language.js — this module only handles
@@ -11,7 +32,7 @@
 //   'no-primary' → "Subtitles unavailable" placeholder
 //   'no-match'   → "Matched line not found" placeholder
 //   'ok'         → full row list
-export function renderPlayingSubsList(vm, mountEl) {
+export function renderPlayingSubsList(vm, mountEl, onSeek) {
   if (!mountEl) return
   while (mountEl.firstChild) mountEl.removeChild(mountEl.firstChild)
 
@@ -51,6 +72,8 @@ export function renderPlayingSubsList(vm, mountEl) {
     } else {
       main.textContent = row.mainText
     }
+    const timestamp = subtitleTimestampButton(row, onSeek)
+    if (timestamp) main.prepend(timestamp, ' ')
     $row.appendChild(main)
 
     if (row.secText) {

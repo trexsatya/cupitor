@@ -1,6 +1,20 @@
 // One bounded attempt spans metadata, iframe readiness, loading, seeking and
 // playback. In particular, BUFFERING is not permission to wait indefinitely.
 export const VIDEO_RECOVERY_MS = 20000
+export const VIDEO_STALL_RETRY_MS = 4000
+
+export function getYoutubeVideoId(player) {
+  try {
+    const id = player?.getVideoData?.()?.video_id
+    if (id) return id
+  } catch (_) {}
+  try {
+    const url = new URL(player.getVideoUrl())
+    return url.searchParams.get('v') ||
+      (url.hostname === 'youtu.be' ? url.pathname.split('/')[1] :
+        /^\/(?:embed|shorts)\/([^/]+)\/?$/.exec(url.pathname)?.[1]) || null
+  } catch (_) { return null }
+}
 
 // Player must not treat an ignored seek as success. Require two settled
 // samples from the requested video; retry while loading, then let the caller
@@ -28,7 +42,7 @@ export function confirmRecordingSeek({ player, videoId, start, requirePlaying = 
       try {
         state = player.getPlayerState()
         time = player.getCurrentTime()
-        loaded = player.getVideoData()?.video_id === videoId && Number.isFinite(time)
+        loaded = getYoutubeVideoId(player) === videoId && Number.isFinite(time)
       } catch (_) {}
       // YouTube can land on an earlier keyframe. Let muted playback advance
       // into the clip rather than seeking back to that keyframe every second.
@@ -56,7 +70,7 @@ export function confirmRecordingSeek({ player, videoId, start, requirePlaying = 
         // autoplaying. Start them while preparation is still muted, then
         // verify the actual position before the caller restores sound.
         try {
-          if (requirePlaying && player.getVideoData()?.video_id === videoId &&
+          if (requirePlaying && getYoutubeVideoId(player) === videoId &&
             [0, 2, 5].includes(player.getPlayerState())) player.playVideo()
         } catch (_) {}
       }
@@ -64,7 +78,7 @@ export function confirmRecordingSeek({ player, videoId, start, requirePlaying = 
       try {
         const state = player.getPlayerState()
         const time = player.getCurrentTime()
-        landed = player.getVideoData()?.video_id === videoId && Number.isFinite(time) &&
+        landed = getYoutubeVideoId(player) === videoId && Number.isFinite(time) &&
           Math.abs(time - target) <= 0.5 &&
           (requirePlaying ? state === 1 : [1, 2, 5].includes(state))
       } catch (_) {}
@@ -136,13 +150,16 @@ export function createRecordingVideoAttempt({ videoId, isCurrent, isPaused = () 
     observe(time, state, loadedId) {
       if (!active() || isPaused() || state !== 1 || loadedId !== videoId || !Number.isFinite(time)) { lastTime = null; return }
       const maxStep = Math.max(2, (now() - lastSample) / 1000 * 4 + 1)
-      if (lastTime != null && time > lastTime + 0.05 && time - lastTime <= maxStep) {
+      if (lastTime == null || time < lastTime || time - lastTime > maxStep) {
+        lastTime = time
+        lastSample = now()
+      } else if (time > lastTime + 0.05) {
         played = true
         recovering = false
         lastProgress = now()
+        lastTime = time
+        lastSample = lastProgress
       }
-      lastTime = time
-      lastSample = now()
     },
     wait(operation) {
       return Promise.race([Promise.resolve(operation), finished.then(reason => { throw reason })]).then(value => {

@@ -30,7 +30,8 @@ async function checkPlayerSeek(browser) {
         if (s.state === 1 && !s.muted) s.audible.push({ action, id: s.id, time: currentTime() })
       }
       window.ytPlayer = {
-        getVideoData: () => ({ video_id: s.id }), getVideoUrl: () => 'https://youtube.com/watch?v=' + s.id,
+        getVideoData: () => s.mode === 'url-only' ? {} : ({ video_id: s.id }),
+        getVideoUrl: () => 'https://youtube.com/watch?v=' + s.id,
         getIframe: () => document.getElementById('youtubePlayer'), getCurrentTime: currentTime,
         getPlayerState: () => s.state, getDuration: () => 1000,
         getPlaybackRate: () => s.rate, setPlaybackRate: rate => { s.rate = rate },
@@ -40,10 +41,14 @@ async function checkPlayerSeek(browser) {
           s.seeks[target] = (s.seeks[target] || 0) + 1
           const broken = s.id === 'testVideo02' &&
             (s.mode === 'never' || s.mode === 'buffering' || (s.mode === 'retry' && s.seeks[target] < 3) ||
-              (s.mode === 'reload' && s.loads.filter(v => v.videoId === s.id).length < 2))
+              (s.mode === 'reload' && s.loads.filter(v => v.videoId === s.id).length < 2) ||
+              (s.mode === 'practice-reload' && !s.loads.length))
           if (!broken) s.time = target
           if (s.mode === 'keyframe') { s.time = target - 2; s.positionedAt = Date.now() }
           log('seek')
+        },
+        cueVideoById: ({ videoId, startSeconds }) => {
+          s.id = videoId; s.time = startSeconds; s.state = 5; log('cue')
         },
         loadVideoById: value => {
           s.loads.push(value); s.id = value.videoId; s.state = 1
@@ -150,6 +155,42 @@ async function checkPlayerSeek(browser) {
       assert.equal(await page.evaluate(() => window.__seek.loads.length), 1, 'same-video clips seek without redundant loads')
       assert.equal(await page.evaluate(() => window.__seek.muted), true)
       await stop()
+
+      await start('url-only')
+      await ready()
+      const range = '[00:02:00-00:02:03]'
+      const playerTimestamp = page.locator('#recPlayingSubs').getByRole('button', { name: range, exact: true })
+      await playerTimestamp.waitFor()
+      await page.evaluate(() => { window.__seek.time = 121; window.__seek.events = [] })
+      await playerTimestamp.click()
+      await ready()
+      await stop()
+
+      await start('good')
+      await ready()
+      await page.clock.runFor(4700)
+      assert((await page.evaluate(() => window.__seek.loads.length)) >= 2,
+        'a frozen PLAYING clock gets a fresh load')
+      await stop()
+
+      await page.evaluate(() => {
+        window.__seek.mode = 'practice-reload'
+        window.__seek.loads = []
+        window.__seek.events = []
+        window.openPracticeMode({ single: true, queue: [
+          { id: 'testVideo02', source: 'YouTube', word: 'räkna med', timeStart: 120, timeEnd: 123, lineIndex: 1 },
+        ] })
+      })
+      await page.waitForFunction(() => window.__seek.state === 5)
+      // Simulate a cue acknowledgement leaving the clock on the wrong time.
+      await page.evaluate(() => { window.__seek.time = 0 })
+      const practiceTimestamp = page.locator('#practiceMode .practice-front').getByRole('button', { name: range, exact: true })
+      await practiceTimestamp.click()
+      await page.clock.runFor(3800)
+      await page.waitForFunction(() => window.__seek.loads.length > 0 && window.__seek.time === 120 &&
+        window.__seek.state === 1 && !window._practicePlayPending)
+      assert.deepEqual(await page.evaluate(() => window.__seek.audible.filter(e => e.id === 'testVideo02' && e.time < 119.5)), [])
+      await page.evaluate(() => window.closePracticeMode())
       assert.deepEqual(errors, [])
       console.log(`${mobile ? 'Mobile' : 'Desktop'}: verified Player seeks, retries/reloads, silent preparation, 20s skip, cancellation, same-video clips and mute preservation passed`)
     } catch (error) {
