@@ -128,7 +128,7 @@ await page.addInitScript(() => {
 
 let result = {status: 'failed', playlistPath, cardCount: cards.length, controlEpisode: controlEpisode || null,
   passageCount: ranges.length, browser: browser.version()};
-let lastState, startupClick = false, playbackStarted = false;
+let lastState, startupClick = false, startupDiagnosed = false, playbackStarted = false;
 const frameDiagnostics = async () => {
   const result = [];
   for (const frame of page.frames().filter(frame => /open\.spotify\.com\/embed/.test(frame.url()))) {
@@ -203,19 +203,30 @@ try {
     if (frame && iframeSeenAt === null) iframeSeenAt = Date.now();
     if (frame && Date.now() - iframeSeenAt > 8000 && !startupClick && !playbackStarted &&
         !(lastUpdate && !lastUpdate.isPaused && !lastUpdate.isBuffering && lastUpdate.position > 0)) {
-      const diagnostics = await frameDiagnostics();
-      console.log('SPOTIFY_STARTUP ' + JSON.stringify(diagnostics));
-      const blocked = diagnostics.find(value => value.props?.status >= 400 ||
-        value.props?.forbiddenReason ||
-        /not currently available|not available in your (country|region)/i.test(value.text || ''));
-      if (blocked) {
-        result.status = 'blocked'; result.reason = 'Spotify rejected the live embed';
-        result.block = blocked; break;
+      if (!startupDiagnosed) {
+        const diagnostics = await frameDiagnostics();
+        console.log('SPOTIFY_STARTUP ' + JSON.stringify(diagnostics));
+        const blocked = diagnostics.find(value => value.props?.status >= 400 ||
+          value.props?.forbiddenReason ||
+          /not currently available|not available in your (country|region)/i.test(value.text || ''));
+        if (blocked) {
+          result.status = 'blocked'; result.reason = 'Spotify rejected the live embed';
+          result.block = blocked; break;
+        }
+        startupDiagnosed = true;
       }
-      const play = frame.locator('button[data-testid="play-pause-button"]:visible').first();
-      if (await play.isVisible().catch(() => false)) {
+      // Spotify can show its own promotion above the embedded controls.
+      const dismiss = frame.locator('[role="dialog"][aria-labelledby="dialogUpsellTitle"]:visible')
+        .getByRole('button', {name: 'Close', exact: true}).first();
+      if (await dismiss.isVisible()) {
+        await dismiss.click({timeout: 5000});
+        continue;
+      }
+      const play = frame.locator('button[data-testid="play-pause-button"]:visible:not([aria-label="Loading" i]):not([aria-label^="Pause" i])').first();
+      if (await play.isVisible()) {
+        await play.click({timeout: 5000});
         console.log('INITIAL_IFRAME_PLAY_CLICK');
-        await play.click({timeout: 5000}); startupClick = true; lastProgress = Date.now();
+        startupClick = true; lastProgress = Date.now();
       }
     }
     if (state.run?.error) throw new Error(state.run.error);
