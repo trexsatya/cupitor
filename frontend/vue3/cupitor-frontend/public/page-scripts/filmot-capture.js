@@ -3,7 +3,7 @@
     try {
       var loc = doc && doc.location;
       return !!loc && (loc.protocol === 'https:' || loc.protocol === 'http:') &&
-        (loc.hostname === 'filmot.com' || loc.hostname.endsWith('.filmot.com'));
+        /(^|\.)filmot\.(com|org)$/.test(loc.hostname);
     } catch (_) {
       return false;
     }

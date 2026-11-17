@@ -5,6 +5,8 @@ const {test, before, after} = require('node:test');
 const {chromium} = require('playwright');
 
 const script = readFileSync(path.join(__dirname, 'filmot-capture.js'), 'utf8');
+const saveScript = readFileSync(path.join(__dirname, 'filmot-save-video.js'), 'utf8');
+const annotator = readFileSync(path.join(__dirname, 'filmot-annotator.js'), 'utf8');
 const video = `
   <div id="divVideoDetails">
     <div class="col-6">Video title</div>
@@ -40,14 +42,16 @@ before(async () => {
   await page.route('**/*', route => {
     const url = new URL(route.request().url());
     let body = '';
-    if (url.hostname === 'filmot.com') {
+    if (url.hostname === 'filmot.org') {
+      body = video.replace('example123', '8E_PWhMzHuY') + captions.replace('att lida smälek', 'honom på villospår.');
+    } else if (url.hostname === 'filmot.com') {
       if (url.pathname.endsWith('/frame')) body = video + '<iframe src="/captions"></iframe>';
       else if (url.pathname === '/captions') body = captions;
       else if (url.pathname.endsWith('/mobile')) body = mobileCaptions;
       else if (url.pathname.endsWith('/unnamed-panel')) body = withoutPanel;
       else if (url.pathname.endsWith('/external')) body = '<iframe src="https://other.example/detail"></iframe>';
       else if (!url.pathname.endsWith('/empty')) body = video + captions;
-    } else if (url.hostname === 'other.example') {
+    } else if (['other.example', 'filmot.org.example.com'].includes(url.hostname)) {
       body = video + captions;
     }
     return route.fulfill({contentType: 'text/html; charset=utf-8', body: '<!doctype html>' + body});
@@ -89,6 +93,22 @@ test('unrelated frames and pages and unloaded captions produce no capture', asyn
   assert.equal(await capture('https://other.example/detail'), null);
   assert.deepEqual((await capture('https://filmot.com/search/word/1/external')).lines, []);
   assert.deepEqual((await capture('https://filmot.com/search/word/1/empty')).lines, []);
+});
+
+test('captures, saves, and annotates a result on filmot.org', async () => {
+  const result = await capture('https://filmot.org/search/%22villosp%C3%A5r%22/8E_PWhMzHuY/1?lang=sv');
+  assert.equal(result.query, 'villospår');
+  assert.equal(result.videoId, '8E_PWhMzHuY');
+  assert.equal(result.lines[result.matchIdx].t, 'honom på villospår.');
+  assert.equal(result.lines[result.matchIdx].ts, 4.25);
+  assert.equal(JSON.parse(await page.evaluate(saveScript)).url, result.videoUrl);
+  await page.evaluate(annotator);
+  assert.equal(await page.evaluate(() => typeof window.__cupitorFilmotApply), 'function');
+
+  assert.equal(await capture('https://filmot.org.example.com/'), null);
+  assert.deepEqual(JSON.parse(await page.evaluate(saveScript)), {});
+  await page.evaluate(annotator);
+  assert.equal(await page.evaluate(() => typeof window.__cupitorFilmotApply), 'undefined');
 });
 
 test('reads a mobile transcript and identifies its video from the current result URL', async () => {
