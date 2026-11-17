@@ -2765,7 +2765,7 @@ body.practice-mode #recPlayingTransport,
 body.practice-mode #recPlayingMinimizeBtn,
 body.practice-mode #recPlayingCloseBtn,
 body.practice-mode #recPlayingRestorePill,
-body.practice-mode #recPlayNavToast { display: none !important; }
+body.practice-mode #recPlayNavToast:not(.session-timeout) { display: none !important; }
 body.rec-playing #mainControlInputs,
 body.rec-playing #vocabularyResult,
 body.rec-playing #result,

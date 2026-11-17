@@ -19,12 +19,12 @@ function fixture(options = {}) {
   const recordings = (options.recordings || []).slice()
   const context = {
     _pracRec:state, _practiceTts:null, Promise, Date:{now:()=>time}, Math, clearInterval(){},
-    window:{_practiceActive:true}, $:()=>({addClass(){},removeClass(){},click(){}}),
+    window:{_practiceActive:true,_appSettings:{}}, $:()=>({addClass(){},removeClass(){},click(){}}),
     hideMediaRelatedContainer(){}, spotifyClips:()=>[], _newPracticeVideoRequest(){},
     _practiceVideoCues:{releaseMute(){}}, _updatePracticeRestoreCount(){},
     console:{warn(){}}, alert:message=>alerts.push(message),
     _practiceSpeakOverShown:()=>true, _pracRecNow:()=>10,
-    _pracRecTakeOverPlayhead(){}, _pracRecPauseVideo(){},
+    _pracRecTakeOverPlayhead(){}, _pracRecPauseVideo(){}, _practiceSessionTimeout:{ensure(){}},
     _pracRecLoopClearAudio(){}, _pracRecLoopStop(){},
     _renderPracticeRecBar:note=>notes.push({phase:context._pracRec?.phase,note}),
     ensureMicPermissionViaBridge:()=>{ permissionChecks++; return options.permission || Promise.resolve('granted') },
