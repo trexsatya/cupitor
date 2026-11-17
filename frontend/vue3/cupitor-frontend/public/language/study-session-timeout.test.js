@@ -1,0 +1,36 @@
+import { createStudySessionTimeout, studyTimeoutMinutes } from './study-session-timeout.js'
+
+beforeEach(() => jest.useFakeTimers())
+afterEach(() => jest.useRealTimers())
+
+test('defaults to 30 minutes and starts the next session only on demand', () => {
+  const expire = jest.fn()
+  const timeout = createStudySessionTimeout(expire)
+  timeout.start()
+  jest.advanceTimersByTime(29 * 60000)
+  timeout.ensure(30)
+  jest.advanceTimersByTime(60000)
+  expect(expire).toHaveBeenCalledTimes(1)
+  expect(timeout.expired).toBe(true)
+  timeout.ensure(2)
+  expect(timeout.expired).toBe(false)
+  jest.advanceTimersByTime(120000)
+  expect(expire).toHaveBeenCalledTimes(2)
+})
+
+test('allows disabling, cancels on close, and waits for an active recording', () => {
+  const expire = jest.fn().mockReturnValueOnce(false)
+  const timeout = createStudySessionTimeout(expire)
+  expect(studyTimeoutMinutes('0')).toBe(0)
+  expect(studyTimeoutMinutes('')).toBe(30)
+  timeout.start(0)
+  jest.advanceTimersByTime(60000)
+  expect(expire).not.toHaveBeenCalled()
+  timeout.start(1)
+  timeout.cancel()
+  jest.advanceTimersByTime(60000)
+  expect(expire).not.toHaveBeenCalled()
+  timeout.start(1)
+  jest.advanceTimersByTime(61000)
+  expect(expire).toHaveBeenCalledTimes(2)
+})

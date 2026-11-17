@@ -47,6 +47,7 @@ import { cardCanUseTts, cardTtsText, ttsFaceSequence, speakTts } from './card-tt
 import { createPracticeVideoCues } from './practice-video.js';
 import { createRecordingVideoAttempt, confirmRecordingSeek, getYoutubeVideoId, VIDEO_RECOVERY_MS, VIDEO_STALL_RETRY_MS } from './recording-video.js';
 import { createAppLifecycleClock } from './app-lifecycle.js';
+import { DEFAULT_STUDY_TIMEOUT_MINUTES, createStudySessionTimeout, studyTimeoutMinutes } from './study-session-timeout.js';
 import { installStudyDivider } from './study-divider.js';
 import { installStudyChrome } from './study-chrome.js';
 import { keyboardShortcut, KEYBOARD_SHORTCUTS, studyShortcutView } from './keyboard-shortcuts.js';
@@ -725,17 +726,63 @@ function _hookYtForReturnGuard() {
     _enforceYoutubePlaybackView(e && e.data)
   }) } catch (_) {}
 }
+const _playerSessionTimeout = createStudySessionTimeout(() => {
+  if (!window._playingRecording) return
+  if (!window._recPlayPaused) _applyRecPlayPause(true, true)
+  _recPlayToast('Player session timed out', { sessionTimeout: true })
+})
+
+const _practiceSessionTimeout = createStudySessionTimeout(() => {
+  if (!window._practiceActive) return
+  if (['starting', 'recording', 'stopping'].includes(_pracRec?.phase)) return false
+  if (window._practiceMinimized) {
+    _stopPracticeTts()
+  } else {
+    _pracRecTakeOverPlayhead()
+    _newPracticeVideoRequest({ keepSpotify: true })
+    window._practicePlayPending = null
+    _stopPracticeAudio()
+    if (window._manualAudioPreview?.$btn?.is('#practiceMode .practice-media-link')) _stopManualAudioPreview()
+    if (spotifyClips(window._practiceCards?.[window._practiceIdx]).length) {
+      spotifyPlayer.media?.pause()
+    } else {
+      _pracRecPauseVideo()
+    }
+    if (_pracRec) {
+      _pracRec.token++
+      _pracRec.watchPos = null
+      _pracRec.loopSuspended = _pracRec.loop
+      _pracRecLoopClearAudio(_pracRec)
+      _pracRec.audio?.pause()
+      _pracRec.audio = null
+      if (_pracRec.phase === 'playback') {
+        _pracRec.phase = 'idle'
+        _renderPracticeRecBar()
+      }
+    }
+  }
+  _recPlayToast('Practice session timed out', { sessionTimeout: true })
+})
+
+function _checkStudySessionTimeouts() {
+  _playerSessionTimeout.check()
+  _practiceSessionTimeout.check()
+}
+
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     _cancelSpeakOverCapture()
     _hookYtForReturnGuard()
     _ytReturnGuard.onHidden()
   }
-  else { _enforceYoutubePlaybackView(); _ytReturnGuard.onVisible() }
+  else { _enforceYoutubePlaybackView(); _ytReturnGuard.onVisible(); _checkStudySessionTimeouts() }
 })
 ;['pageshow', 'focus'].forEach(event => window.addEventListener(event, () => _enforceYoutubePlaybackView()))
 window.addEventListener('cupitorAppLifecycle', event => {
-  if (event.detail?.isForeground) _enforceYoutubePlaybackView()
+  if (event.detail?.isForeground) {
+    _enforceYoutubePlaybackView()
+    _checkStudySessionTimeouts()
+  }
   else if (event.detail?.state === 'hidden' || event.detail?.state === 'paused') _cancelSpeakOverCapture()
 })
 ;['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
@@ -2623,6 +2670,7 @@ window._appSettings = {
   blockedChannels: [],
   searchChannels: [],
   playbackSpeed: null,
+  studySessionTimeoutMinutes: DEFAULT_STUDY_TIMEOUT_MINUTES,
   ttsReplacements: [{ from: "->", to: "could be" }, { from: "→", to: "could be" }],
   ttsNewlinePauseMs: 700,
   practicePlaybackRate: 1,
@@ -3050,6 +3098,7 @@ function loadAppSettings() {
   $('#recPlayYouTubeClipSeconds').val(clipFallbackSeconds(window._appSettings.recPlayYouTubeClipSeconds))
   $('#recManualPlaybackMode').val(_manualPlaybackPreference())
   $('#playbackSpeed').val(_preferredRecordingAudioRate())
+  $('#studySessionTimeoutMinutes').val(studyTimeoutMinutes(window._appSettings.studySessionTimeoutMinutes))
   $('#ttsReplacements').val((window._appSettings.ttsReplacements || []).map(r => `${r.from}=${r.to}`).join('\n'))
   $('#ttsNewlinePauseMs').val(window._appSettings.ttsNewlinePauseMs ?? 700)
   $('#recPlayTtsFallback').prop('checked', !!window._appSettings.recPlayTtsFallback)
@@ -4465,6 +4514,12 @@ $('document').ready(e => {
     const value = clipFallbackSeconds($(e.target).val())
     window._appSettings.recPlayYouTubeClipSeconds = value
     $(e.target).val(value)
+    saveAppSettings()
+  })
+  $('#studySessionTimeoutMinutes').on('change', function () {
+    const minutes = studyTimeoutMinutes(this.value)
+    this.value = minutes
+    window._appSettings.studySessionTimeoutMinutes = minutes
     saveAppSettings()
   })
   $('#playbackSpeed').on('change', function () {
@@ -16493,7 +16548,7 @@ function _stopManualAudioPreview() {
 // Toggle-style entry point used by every "play this audio mediaUrl" button
 // outside the manual-entry editor. Returns immediately; logs+gives up on
 // failure rather than alerting (these are casual previews, not saves).
-async function _startManualAudioPreview(url, $btn) {
+async function _startManualAudioPreview(url, $btn, isCurrent = () => true) {
   if (!url) return
   // Same button clicked again → stop.
   const cur = window._manualAudioPreview
@@ -16503,6 +16558,7 @@ async function _startManualAudioPreview(url, $btn) {
   _stopManualAudioPreview()
   _silenceOtherAudio('preview')
   const dataUrl = await loadManualAudioData(url)
+  if (!isCurrent()) return
   if (!dataUrl) { console.warn('[manualAudio] could not load', url); return }
   const a = new Audio(dataUrl)
   const restoreLabel = $btn ? $btn.html() : null
@@ -21275,6 +21331,7 @@ function _practiceAudioEl() {
     // a face button, so it silences the other sources too.
     const el = $wrap.find('.rec-pa-el')[0]
     el.addEventListener('play', () => {
+      _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
       _applyRecordingAudioRate(el, Number(window._practicePlaybackRate) || _preferredRecordingAudioRate())
       _silenceOtherAudio('practice')
       try { window.ytPlayer?.pauseVideo() } catch (_) {}
@@ -21322,6 +21379,7 @@ function _stopPracticeAudio() {
 // Play one of the card's faces through Practice's element.
 async function _playPracticeFace(face) {
   if (!face || !face.url) return
+  _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
   const token = window._practiceClipToken
   let dataUrl = null
   try { dataUrl = await loadManualAudioData(face.url) } catch (_) {}
@@ -21673,6 +21731,7 @@ async function playRecording(opts) {
   $('body').addClass('rec-playing').removeClass('rec-paused rec-playing-minimized')
 
   window._playingRecording = true
+  _playerSessionTimeout.start(settings.studySessionTimeoutMinutes)
   _setOpenView('player')
   // Paint the pill as paused when we started that way, or it shows a pause
   // button over a deck that is not running. controlYt stays false: there is
@@ -22182,6 +22241,7 @@ async function playRecording(opts) {
   window._recPlayQueue = null
   window._recPlayTemporary = false
   window._playingRecording = false
+  _playerSessionTimeout.cancel()
   _setSessionItemGap(null)
   // A deck that played to its end is finished, not interrupted — so it is not
   // something to put back on screen next launch.
@@ -22256,12 +22316,12 @@ function _showRecPlayNavToast(direction) {
   _recPlayToast(msg)
 }
 
-function _recPlayToast(msg) {
+function _recPlayToast(msg, { sessionTimeout = false } = {}) {
   let $t = $('#recPlayNavToast')
   if (!$t.length) $t = $('<div id="recPlayNavToast" role="status" aria-live="polite"></div>').appendTo('body')
-  $t.text(msg).addClass('visible')
+  $t.text(msg).toggleClass('session-timeout', sessionTimeout).addClass('visible')
   if (_recPlayNavToastTimer) clearTimeout(_recPlayNavToastTimer)
-  _recPlayNavToastTimer = setTimeout(() => { $t.removeClass('visible') }, 1600)
+  _recPlayNavToastTimer = setTimeout(() => { $t.removeClass('visible') }, sessionTimeout ? 4000 : 1600)
 }
 
 // Queue a prev/next navigation request for the playback loop. The loop
@@ -22353,6 +22413,9 @@ function _interruptRecordingPlayback() {
 // we do command the player we stamp _recPlayPauseCmdAt so the poll's grace
 // window ignores the transient state while the player settles.
 function _applyRecPlayPause(paused, controlYt = true) {
+  if (!paused && window._playingRecording) {
+    _playerSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
+  }
   window._recPlayPaused = !!paused
   const t = window._recTTS
   // Drive YouTube while its linked clip is active; during recordings or the
@@ -22668,6 +22731,7 @@ function _sleepRespectingPause(ms) {
 }
 
 function stopPlayingRecording() {
+  _playerSessionTimeout.cancel()
   _setSessionItemGap(null)
   spotifyPlayer.stop()
   window._recVideoAttempt?.cancel()
@@ -22779,7 +22843,7 @@ function _newPracticeVideoRequest({ mute = false, keepSpotify = false, keepTts =
   if (!window.ytPlayerReady) window._ytReadyAutoplaySuppressed = true
   return _practiceVideoCues.invalidate({ mute })
 }
-// Card-based, no timer. Each card is a shuffled playlist item showing the
+// Each card is a shuffled playlist item showing the
 // matched subtitle line in the "front" language, a Reveal button for the
 // other language, and the YouTube clip cued (NOT auto-played) at the item's
 // timeStart. Navigate by swipe, arrow keys, or the prev/next buttons.
@@ -22853,6 +22917,7 @@ function openPracticeMode(opts) {
   // return, so a refused open cannot change the flag of the one on screen.
   window._practiceSingle = !!opts.single
   window._practiceActive = true
+  _practiceSessionTimeout.start(window._appSettings.studySessionTimeoutMinutes)
   _setOpenView('practice')
   // Any dialog left open before this covered the screen would be behind it.
   _coverOpenDialogsForStudy()
@@ -23116,6 +23181,7 @@ $(document).on('click', '#practiceMode .card-html img, #recPlayingSubs .card-htm
 })
 
 function closePracticeMode() {
+  _practiceSessionTimeout.cancel()
   if (window._practiceTemporary) window._practiceCards = []
   const temporary = window._practiceTemporary
   window._practiceTemporary = false
@@ -23721,6 +23787,7 @@ async function playPracticeClip(range = null, { retryStall = true, forceLoad = f
   const idx = window._practiceIdx
   const it = window._practiceCards && window._practiceCards[idx]
   if (!it) return
+  _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
   if (_pracRec?.loop && _pracRec.key === _pracRecKey(it)) {
     _pracRecLoopSeek(_pracRec, range ? { start: range.start } : undefined)
     return
@@ -23882,7 +23949,7 @@ function _pracRecBegin(it) {
     token: 0,
     timer: null,
     audio: null,
-    loop: false, loopTake: null, loopAudio: null, loopToken: 0,
+    loop: false, loopSuspended: false, loopTake: null, loopAudio: null, loopToken: 0,
     loopPlayed: false, loopSeeking: false, loopSeekTimer: null,
   }
   // Armed for the whole card, not just after a recording.
@@ -24175,6 +24242,7 @@ function _pracRecStartError(error) {
 async function _pracRecStart() {
   const st = _pracRec
   if (!st || st.phase !== 'idle') return
+  _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
   const t1 = _pracRecNow() || st.clipStart
   st.awaiting = null
   const token = ++st.token
@@ -24265,6 +24333,8 @@ function _pracRecLoopClearAudio(st) {
 
 function _pracRecLoopSeek(st, { preserveAudio = false, start = Number(st.clipStart) || 0 } = {}) {
   if (_pracRec !== st || !st.loop || window._practiceMinimized || !window._practiceActive) return
+  _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
+  st.loopSuspended = false
   _pracRecTakeOverPlayhead()
   // A take can be longer than a single loop. Keep that recording audible
   // across source rewinds instead of cutting it short at the clip boundary.
@@ -24320,6 +24390,7 @@ function _pracRecLoopToggle() {
 async function _pracRecLoopStart() {
   const st = _pracRec
   if (!st || !st.loop || st.phase !== 'idle') return false
+  if (st.loopSuspended) _pracRecLoopSeek(st)
   // The microphone must capture the user's new voice, not the previous
   // take still sounding over the clip.
   _pracRecLoopClearAudio(st)
@@ -24348,6 +24419,9 @@ async function _pracRecLoopStart() {
     st.url = url
     st.startedMs = Date.now()
     st.phase = 'recording'
+    // Opening the microphone can pause the media while the recorder takes
+    // focus. Reassert loop playback after startup without rewinding the clip.
+    _pracRecPlayVideo()
     _renderPracticeRecBar()
     return true
   } catch (error) {
@@ -24431,6 +24505,7 @@ function _pracRecWatch() {
     // where it actually is rather than against where it was long ago.
     st.watchPos = ct
     if (st.loop) {
+      if (st.loopSuspended) return
       // Let the source run while recording. Seek at the clip's actual end;
       // do not let the normal stop-watcher or saved timestamped takes fire.
       if (st.loopSeeking) {
@@ -24490,6 +24565,7 @@ function _pracRecWatch() {
 function _pracRecReplay(t1) {
   const st = _pracRec
   if (!st) return
+  _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
   const token = ++st.token
   const isCurrent = () => window._practiceActive && !window._practiceMinimized && _pracRec === st && token === st.token
   st.awaiting = null
@@ -24764,6 +24840,7 @@ function _cardTextEl(text) {
 }
 
 async function _playPracticeManualVideo(it) {
+  _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
   const video = _manualCardVideo(it)
   if (!video) return
   _stopPracticeAudio()
@@ -24860,7 +24937,9 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
       } else if (isAudio) {
         // Bridge-loaded preview with toggle: click while playing stops it;
         // navigating away or closing Practice also stops it.
-        _startManualAudioPreview(it.mediaUrl, $btn)
+        _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
+        const token = window._practiceClipToken
+        _startManualAudioPreview(it.mediaUrl, $btn, () => window._practiceClipToken === token)
       } else if (_isWebUrl(it.mediaUrl)) {
         window.open(it.mediaUrl, '_blank', 'noopener')
       }
@@ -25076,14 +25155,21 @@ function _practiceSpotifyOptions(it) {
   return {
     mode: 'practice',
     isCurrent: () => window._practiceActive && window._practiceCards?.[window._practiceIdx] === it,
-    isPaused: () => window._practiceMinimized || (_pracRec?.key === _pracRecKey(it) &&
-      ['starting', 'recording', 'playback'].includes(_pracRec.phase))
+    isPaused: () => window._practiceMinimized || _practiceSessionTimeout.expired || (_pracRec?.key === _pracRecKey(it) &&
+      (_pracRec.loop
+        ? _pracRec.loopSuspended
+        : ['starting', 'recording', 'playback'].includes(_pracRec.phase)))
   }
 }
 
 function _togglePracticePlayback() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
+  _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
+  if (_pracRec?.loopSuspended && _pracRec.loop) {
+    _pracRecLoopSeek(_pracRec)
+    return
+  }
   if (_canSpeakSilentCard(it)) return _togglePracticeTts(it)
   if (spotifyClips(it).length) {
     const st = _pracRec

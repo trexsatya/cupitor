@@ -2765,7 +2765,7 @@ body.practice-mode #recPlayingTransport,
 body.practice-mode #recPlayingMinimizeBtn,
 body.practice-mode #recPlayingCloseBtn,
 body.practice-mode #recPlayingRestorePill,
-body.practice-mode #recPlayNavToast { display: none !important; }
+body.practice-mode #recPlayNavToast:not(.session-timeout) { display: none !important; }
 body.rec-playing #mainControlInputs,
 body.rec-playing #vocabularyResult,
 body.rec-playing #result,
@@ -4724,7 +4724,7 @@ body.study-split-active.practice-mode #practiceMode .practice-card { top: calc(v
 }
 body.study-controls-hidden :is(#recPlayingBanner .rec-pb-top > :not(.rec-pb-progress),
     #recPlayingBanner .rec-pb-details, #recPlayingTransport, #recPlayingMinimizeBtn,
-    #recPlayingCloseBtn, #recPlayNavToast, #studyMediaDivider, #practiceMode .practice-topbar,
+    #recPlayingCloseBtn, #recPlayNavToast:not(.session-timeout), #studyMediaDivider, #practiceMode .practice-topbar,
     #practiceMode .practice-nav > :not(.practice-unflip):not(.practice-keep-visible),
     #practiceMode .practice-line-edit,
     #practiceMode .practice-restore, #practiceAudio > *, #recPlayingAudio > *) {

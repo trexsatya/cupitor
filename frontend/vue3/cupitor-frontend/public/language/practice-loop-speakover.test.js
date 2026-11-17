@@ -9,7 +9,7 @@ const watchEnd = source.indexOf('// Rewind to the take before', watchBegin)
 if (begin < 0 || end < begin || watchBegin < 0 || watchEnd < watchBegin) throw new Error('Loop controls missing')
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() }
-function fixture() {
+function fixture({ pauseOnRecordStart = false } = {}) {
   const state = {
     item: {}, phase:'idle', clipStart:10, clipStop:16,
     loop:false, loopTake:null, loopToken:0, loopPlayed:false,
@@ -17,7 +17,7 @@ function fixture() {
     timer:null, token:0, watchPos:null, awaiting:null,
   }
   const calls = [], deleted = [], audioPlays = [], audios = []
-  let tick = () => {}, position = 11, next = 0
+  let tick = () => {}, position = 11, next = 0, sourcePaused = false
   class AudioMock {
     constructor(url) { this.url = url; this.listeners = {}; this.paused = false; audios.push(this) }
     addEventListener(key, listener) { this.listeners[key] = listener }
@@ -26,10 +26,10 @@ function fixture() {
   }
   const context = {
     _pracRec:state,
-    window: { _practiceActive:true, _practiceMinimized:false,
+    window: { _practiceActive:true, _practiceMinimized:false, _appSettings:{},
       ytPlayer: {seekTo:(t, play)=>{calls.push(['seek',t,play]); position=t}} },
     _pracRecTakeOverPlayhead:()=>calls.push(['takeover']),
-    _pracRecPlayVideo:()=>calls.push(['play']),
+    _pracRecPlayVideo:()=>{ sourcePaused = false; calls.push(['play']) },
     _pracRecPauseVideo:()=>calls.push(['pause']),
     _pracRecNow:()=>position,
     _pracRecRefreshClip:async()=>{},
@@ -39,12 +39,16 @@ function fixture() {
     _TAKE_MAX_STEP:5,
     _TAKE_SAME_SPOT:0.12,
     _renderPracticeRecBar:note=>calls.push(['render',note]),
+    _practiceSessionTimeout:{ensure() {}},
     _pracRecStartError:e=>String(e),
     _loadSpeakOverAudio:async url=>'data:audio/webm;base64,' + url.slice(-1),
     _deleteSpeakOverAudio:url=>deleted.push(url),
     _speakOverAudioRpc:async op=>{
       calls.push([op])
-      if (op === 'recordStart') return 'webrec://started_' + (++next)
+      if (op === 'recordStart') {
+        if (pauseOnRecordStart) sourcePaused = true
+        return 'webrec://started_' + (++next)
+      }
       if (op === 'recordStop') return 'webrec://take_' + next
       return true
     },
@@ -61,11 +65,49 @@ function fixture() {
   vm.runInContext(source.slice(begin,end) + '\n' + source.slice(watchBegin,watchEnd),context)
   return {
     context,state,calls,deleted,audios,audioPlays,
-    tick:()=>tick(),setPosition:t=>{position=t},flush,
+    tick:()=>tick(),setPosition:t=>{position=t},sourcePaused:()=>sourcePaused,flush,
   }
 }
 
 describe('continuous Practice Speak Over loop', () => {
+  test('Spotify keeps playing through loop recording and pauses for timestamped recording', () => {
+    const h = fixture()
+    const start = source.indexOf('function _practiceSpotifyOptions(it)')
+    const end = source.indexOf('function _togglePracticePlayback()', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    h.state.key = 'card'
+    h.context._pracRecKey = () => 'card'
+    vm.runInContext(source.slice(start, end), h.context)
+    const options = h.context._practiceSpotifyOptions(h.state.item)
+
+    h.state.loop = true
+    h.state.phase = 'starting'
+    h.state.loopSuspended = false
+    expect(options.isPaused()).toBe(false)
+    h.state.phase = 'recording'
+    expect(options.isPaused()).toBe(false)
+    h.state.loopSuspended = true
+    expect(options.isPaused()).toBe(true)
+    h.state.loop = false
+    expect(options.isPaused()).toBe(true)
+    h.state.phase = 'idle'
+    h.context._practiceSessionTimeout.expired = true
+    expect(options.isPaused()).toBe(true)
+  })
+
+  test('restores playback at the current position if the microphone pauses it', async () => {
+    const h = fixture({ pauseOnRecordStart: true })
+    h.context._pracRecLoopToggle()
+    await flush()
+    h.setPosition(12)
+    const seeks = h.calls.filter(([op]) => op === 'seek').length
+    expect(await h.context._pracRecLoopStart()).toBe(true)
+    expect(h.sourcePaused()).toBe(false)
+    expect(h.state.t1).toBe(12)
+    expect(h.calls.filter(([op]) => op === 'seek')).toHaveLength(seeks)
+  })
+
   test('recording does not pause the source; only latest take overlays on every loop', async () => {
     const h=fixture(), {context:ctx,state:st}=h
     ctx._pracRecLoopToggle(); await flush()
