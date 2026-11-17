@@ -1,5 +1,5 @@
 (function(){
-  if (location.hostname !== 'filmot.com' && !location.hostname.endsWith('.filmot.com')) return;
+  if (!/(^|\.)filmot\.(com|org)$/.test(location.hostname)) return;
   if (window.__cupitorFilmotInstalled) { if (window.__cupitorFilmotApply) window.__cupitorFilmotApply(); return; }
   window.__cupitorFilmotInstalled = true;
   function bridge(msg) { try { FilmotBridge.postMessage(JSON.stringify(msg)); } catch(e) {} }

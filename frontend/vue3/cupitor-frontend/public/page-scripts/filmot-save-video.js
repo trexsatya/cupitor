@@ -1,5 +1,5 @@
 (function(){
-  if (location.hostname !== 'filmot.com' && !location.hostname.endsWith('.filmot.com')) return JSON.stringify({});
+  if (!/(^|\.)filmot\.(com|org)$/.test(location.hostname)) return JSON.stringify({});
   function ytIdFromAny(href) {
     if (!href) return null;
     var pats = [
