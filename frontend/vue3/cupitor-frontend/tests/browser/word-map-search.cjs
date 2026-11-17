@@ -1,6 +1,6 @@
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
-const { serveFixtures } = require('./language-dialogs.cjs')
+const { serveFixtures, setSearchSource } = require('./language-dialogs.cjs')
 
 async function check(browser, mobile) {
   const page = await browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 844 }, isMobile: mobile, hasTouch: mobile })
@@ -34,9 +34,9 @@ async function check(browser, mobile) {
     await page.waitForFunction(() => document.querySelectorAll('#wordMapResults .word-map-hit').length === 2)
     await page.locator('#searchLoadingOverlay').waitFor({state:'hidden'})
     assert.equal(await page.locator('#wordMapResults .highlight').count(), 2)
-    await page.locator('#wordMapSearchIncludeCb').uncheck()
+    await setSearchSource(page, '#wordMapSearchIncludeCb', false)
     assert.equal(await page.locator('#wordMapResults .word-map-hit').count(), 0)
-    await page.locator('#wordMapSearchIncludeCb').check()
+    await setSearchSource(page, '#wordMapSearchIncludeCb', true)
     await page.locator('.word-map-hit[data-map-id="second"]').click()
     const dialog = page.locator('#wordMapsDialog')
     await dialog.waitFor({state:'visible'})

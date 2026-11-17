@@ -55,10 +55,6 @@ async function revealSearchTool(page, selector) {
     if (!await tools.isVisible()) {
       await page.getByRole('button', { name: 'Tools', exact: true }).click()
     }
-    const details = control.locator('xpath=ancestor::details[1]')
-    if (await details.count() && (await details.getAttribute('open')) === null) {
-      await details.locator('summary').click()
-    }
   } else if (await control.evaluate(el => !!el.closest('#searchVocabularyMenu')) && !await control.isVisible()) {
     await page.locator('#searchVocabularyByPrefixBtn').click()
   }
@@ -68,6 +64,16 @@ async function revealSearchTool(page, selector) {
 async function clickSearchTool(page, selector) {
   const {control} = await revealSearchTool(page, selector)
   await control.click()
+}
+
+async function setSearchSource(page, selector, enabled) {
+  const control = page.locator(selector)
+  const dropdown = page.locator('.search-sources-dropdown')
+  const openForChange = await control.evaluate(el => !!el.closest('#mobileSearchSources')) &&
+    await dropdown.getAttribute('open') === null
+  if (openForChange) await dropdown.locator('summary').click()
+  await control.setChecked(enabled)
+  if (openForChange) await dropdown.locator('summary').click()
 }
 
 async function selectKnownLanguage(page, language) {
@@ -427,4 +433,4 @@ if (require.main === module) (async () => {
   }
 })().catch(error => { console.error(error); process.exitCode = 1 })
 
-module.exports = { serveFixtures, checkVocabInsertPositions, clickSearchTool, clickSubtitleInfo, selectKnownLanguage }
+module.exports = { serveFixtures, checkVocabInsertPositions, clickSearchTool, clickSubtitleInfo, selectKnownLanguage, setSearchSource }

@@ -2,7 +2,7 @@ const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { serveFixtures, clickSearchTool } = require('./language-dialogs.cjs')
+const { serveFixtures, clickSearchTool, setSearchSource } = require('./language-dialogs.cjs')
 
 async function checkMobileLabelTimeout(browser) {
   const page = await browser.newPage({ viewport: { width: 350, height: 800 }, isMobile: true, hasTouch: true })
@@ -92,21 +92,25 @@ async function checkHeader(page, mobile) {
     await language.selectOption('sv')
     await page.waitForFunction(() => window._subtitleSearchCompletion?.complete && document.querySelector('#searchLoadingOverlay').hidden)
 
-    const sourceRows = () => page.locator('#searchSourceChips label').evaluateAll(labels => {
-      const rows = new Map()
-      for (const label of labels) {
-        const top = label.getBoundingClientRect().top
-        rows.set(top, (rows.get(top) || 0) + 1)
-      }
-      return [...rows.values()]
-    })
+    const filters = page.locator('#mobileSearchFilters')
+    const sources = filters.getByText('SRTs', { exact: true }).first()
+    const options = filters.getByRole('button', { name: 'Search options' })
+    const filterSizes = () => filters.locator('summary, #searchLanguageSelect, #searchVocabularyByPrefixBtn').evaluateAll(controls =>
+      controls.map(el => ({ top: el.getBoundingClientRect().top, height: el.getBoundingClientRect().height })))
     await page.setViewportSize({ width: 350, height: 800 })
-    assert.deepEqual(await sourceRows(), [4], 'the four filters fit on an ordinary phone')
-    const chips = await page.locator('#searchSourceChips label').evaluateAll(labels => labels.map(label => ({
-      target: label.getBoundingClientRect().height,
-      visual: label.querySelector('.search-source-face').getBoundingClientRect().height,
-    })))
-    assert.ok(chips.every(({ target, visual }) => target >= 44 && visual === 30), 'compact chips keep a 44px hit area')
+    const sizesAt350 = await filterSizes()
+    assert.equal(new Set(sizesAt350.map(({top}) => top)).size, 1, 'the three dropdowns share one row')
+    assert.ok(sizesAt350.every(({height}) => height >= 44))
+    await sources.click()
+    const sourceLabels = filters.locator('#searchSourceChips label')
+    assert.deepEqual(await sourceLabels.allTextContents(), ['Books', 'SRTs', 'Maps', 'Cards'])
+    assert.ok((await sourceLabels.evaluateAll(labels => labels.map(label => label.getBoundingClientRect().height)))
+      .every(height => height >= 44))
+    await options.click()
+    assert.equal(await filters.locator('#mobileSearchSources').isVisible(), false)
+    assert.equal(await filters.getByRole('combobox', { name: 'I know well' }).isVisible(), true)
+    await page.keyboard.press('Escape')
+    assert.equal(await options.getAttribute('aria-expanded'), 'false')
     const selectClips = page.getByRole('button', { name: 'Select clips for a playlist' })
     const clipSizes = await selectClips.evaluate(el => {
       const style = getComputedStyle(el, '::before')
@@ -124,11 +128,11 @@ async function checkHeader(page, mobile) {
     const dropdown = page.locator('.search-vocabulary-dropdown')
     await dropdown.waitFor({ state: 'visible' })
     const [row, active, menu] = await Promise.all([fieldRow.boundingBox(), picker.boundingBox(), dropdown.boundingBox()])
-    assert.ok(active.width > original.width, 'opening Vocabulary expands the picker')
+    assert.ok(Math.abs(active.width - original.width) < 1, 'Vocabulary fills the row before and after opening')
     for (const bounds of [active, menu]) {
       assert.ok(Math.abs(bounds.x - row.x) < 2 && Math.abs(bounds.width - row.width) < 2, 'picker and dropdown fill the row')
     }
-    assert.equal(await language.isVisible(), false)
+    assert.equal(await language.isVisible(), true)
     const typeahead = dropdown.getByRole('searchbox', { name: 'Search vocabulary' })
     await typeahead.fill('färgsprakande')
     assert.ok((await dropdown.getByRole('option').allTextContents()).some(text => text.includes('färgsprakande')))
@@ -148,7 +152,7 @@ async function checkHeader(page, mobile) {
       }))
       assert.ok(sizes.every(({ width, height }) => width >= 44 && height >= 44), 'all nav buttons accommodate touch')
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320, 'large text reflows at 320px')
-      assert.deepEqual(await sourceRows(), [2, 2], 'larger text keeps the two rows balanced')
+      assert.equal(new Set((await filterSizes()).map(({top}) => top)).size, 1, 'large text keeps the three dropdowns in one row')
     } finally {
       await page.locator('html').evaluate(el => { el.style.fontSize = '' })
       await page.setViewportSize({ width: 390, height: 900 })
@@ -296,9 +300,9 @@ async function check(browser, mobile) {
       await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR, `cupitor-search-chips-${mobile?'mobile':'desktop'}.png`)})
     }
     await checkHeader(page, mobile)
-    await page.locator('#includeLibraryInSearchCb').check()
-    await page.locator('#wordMapSearchIncludeCb').check()
-    await page.locator('#manualSearchIncludeCb').check()
+    await setSearchSource(page, '#includeLibraryInSearchCb', true)
+    await setSearchSource(page, '#wordMapSearchIncludeCb', true)
+    await setSearchSource(page, '#manualSearchIncludeCb', true)
     await search('färgsprakande')
     assert.equal(await page.locator('#manualResults .manual-hit').count(), 1)
     assert.equal(await page.locator('#wordMapResults .word-map-hit').count(), 1)
@@ -317,13 +321,13 @@ async function check(browser, mobile) {
         return run.call(this,type,...args)
       }
     })
-    await page.locator('#includeSrtsInSearchCb').uncheck()
+    await setSearchSource(page, '#includeSrtsInSearchCb', false)
     await page.waitForFunction(() => window._subtitleSearchCompletion?.disabled && document.querySelector('#searchLoadingOverlay').hidden)
     assert.equal(await page.locator('#result .l-accordion').count(), 0)
     assert.equal(await page.locator('#manualResults .manual-hit').count(), 1)
     assert.equal(await page.locator('#wordMapResults .word-map-hit').count(), 1)
     assert.equal(await page.evaluate(() => window.__searchRuns), 0, 'SRTs off skips the worker search entirely')
-    await page.locator('#includeSrtsInSearchCb').check()
+    await setSearchSource(page, '#includeSrtsInSearchCb', true)
     await page.waitForFunction(() => window._subtitleSearchCompletion?.complete && !window._subtitleSearchCompletion.disabled)
     assert.ok(await page.locator('#result .l-accordion').count())
 
@@ -344,10 +348,10 @@ async function check(browser, mobile) {
     assert.ok(await page.evaluate(() => window.__bridgeMessages.some(message => message.op === 'cancelSearch')))
 
     // Disabled sources are absent and cannot run, even with auto mode saved.
-    await page.locator('#includeLibraryInSearchCb').uncheck()
-    await page.locator('#manualSearchIncludeCb').uncheck()
-    await page.locator('#wordMapSearchIncludeCb').uncheck()
-    await page.locator('#includeSrtsInSearchCb').uncheck()
+    await setSearchSource(page, '#includeLibraryInSearchCb', false)
+    await setSearchSource(page, '#manualSearchIncludeCb', false)
+    await setSearchSource(page, '#wordMapSearchIncludeCb', false)
+    await setSearchSource(page, '#includeSrtsInSearchCb', false)
     assert.equal(await page.locator('#toggleAutoLibrarySearchCheckbox').isDisabled(), true)
     await page.evaluate(() => { window._appSettings.autoLibrarySearch = true; window.saveAppSettings(); window.__bridgeMessages = [] })
     await search('färgsprakande')
@@ -364,25 +368,25 @@ async function check(browser, mobile) {
     for (const id of ['includeLibraryInSearchCb', 'includeSrtsInSearchCb', 'manualSearchIncludeCb', 'wordMapSearchIncludeCb'])
       assert.equal(await page.locator('#' + id).isChecked(), false, id + ' persists after reload')
     assert.equal(await page.locator('#toggleAutoLibrarySearchCheckbox').isDisabled(), true)
-    await page.locator('#includeLibraryInSearchCb').check()
+    await setSearchSource(page, '#includeLibraryInSearchCb', true)
     await openSettings()
     await page.locator('.settings-row').filter({ has: page.locator('#toggleAutoLibrarySearchCheckbox') }).locator('label').first().click()
     await closeSettings()
-    await page.locator('#wordMapSearchIncludeCb').check()
-    await page.locator('#includeSrtsInSearchCb').check()
+    await setSearchSource(page, '#wordMapSearchIncludeCb', true)
+    await setSearchSource(page, '#includeSrtsInSearchCb', true)
     await search('färgsprakande')
     assert.equal(await page.locator('#wordMapResults .word-map-hit').count(), 1, 'source can be enabled again')
 
     for (const blank of ['', '   ']) {
-      await page.locator('#manualSearchIncludeCb').check()
+      await setSearchSource(page, '#manualSearchIncludeCb', true)
       await search('färgsprakande')
       await page.locator('#searchText').fill(blank)
       assert.equal(await page.locator('#result').innerText(), '')
       assert.equal(await page.locator('#vocabularyResult').innerText(), '')
-      await page.locator('#manualSearchIncludeCb').uncheck()
-      await page.locator('#manualSearchIncludeCb').check()
-      await page.locator('#wordMapSearchIncludeCb').uncheck()
-      await page.locator('#wordMapSearchIncludeCb').check()
+      await setSearchSource(page, '#manualSearchIncludeCb', false)
+      await setSearchSource(page, '#manualSearchIncludeCb', true)
+      await setSearchSource(page, '#wordMapSearchIncludeCb', false)
+      await setSearchSource(page, '#wordMapSearchIncludeCb', true)
       assert.equal(await page.locator('#result').innerText(), '', 'source toggles cannot revive cleared results')
     }
 
