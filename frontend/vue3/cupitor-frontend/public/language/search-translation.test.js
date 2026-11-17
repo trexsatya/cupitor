@@ -61,7 +61,7 @@ test.each(['peena', 'पीना'])('uses the study-language subtitle forms for
   context._vocabularyCatalogReady = Promise.resolve();
   context._loadSharedHintTranslations = jest.fn(async () => {});
   const searchHints = jest.fn(() => [{line: '(drink) | dricka | dricker |', forms: new Set(['dricka', 'dricker'])}]);
-  context._getVocabularyHintIndex = () => ({search: searchHints});
+  context._searchVocabularyHints = searchHints;
   context.vocabularyLineParts = () => ({forms: ['dricka', 'dricker']});
   context.vocabularyFormKey = word => word;
   context._translationPanelDirection = () => ({from: 'hi', to: 'sv'});
@@ -69,7 +69,7 @@ test.each(['peena', 'पीना'])('uses the study-language subtitle forms for
   finishSubtitles([]);
   expect(await search).toBe(true);
   expect(context._loadSharedHintTranslations).toHaveBeenCalledWith('hi');
-  expect(searchHints).toHaveBeenCalledWith(query);
+  expect(searchHints).toHaveBeenCalledWith(query, undefined, 'hi');
   expect(context.fetchFromDownloadedFiles).toHaveBeenCalledWith('dricka|dricker', 1);
   expect(translate).toHaveBeenCalledWith(query, 'hi', 'sv', 2500);
   expect(context.window._vocabularySearchText).toBe(query);

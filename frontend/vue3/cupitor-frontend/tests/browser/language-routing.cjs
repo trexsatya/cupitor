@@ -49,6 +49,9 @@ async function checkMultilingualVocabulary(browser, mobile) {
   const viewport = mobile ? {width:390,height:844} : {width:1280,height:900}
   const page = await browser.newPage({viewport, isMobile:mobile, hasTouch:mobile})
   const errors = []
+  const swedishVocabulary = '#Shapes, arrangements and conditions\n(opening, gap)|öppning|slits|hål|glugg|gluggar|springa|springor|\n' +
+    '#Food, Drink, kitchen, Eating\n(drink)|dricka|dricker|drack|druckit|\n(sip)|smutta|smuttar|\n' +
+    '#Objects\n(chair)|stol|stolar|\n#Phrases\n(greeting)|ha en bra dag|\n'
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/*', route => {
     const pathname = new URL(route.request().url()).pathname
@@ -69,9 +72,7 @@ async function checkMultilingualVocabulary(browser, mobile) {
     }})
     if (pathname.endsWith('/vocabulary-hints-hi.json')) return route.fulfill({status:404, body:''})
     if (pathname.endsWith('/swedish/vocabulary.txt')) {
-      return route.fulfill({contentType:'text/plain', body:
-        '#Shapes, arrangements and conditions\n(opening, gap)|öppning|slits|hål|glugg|gluggar|springa|springor|\n' +
-        '#Food, Drink, kitchen, Eating\n(drink)|dricka|dricker|drack|druckit|\n(sip)|smutta|smuttar|\n#Objects\n(chair)|stol|stolar|\n'})
+      return route.fulfill({contentType:'text/plain', body:swedishVocabulary})
     }
     if (pathname.endsWith('/spanish/vocabulary.txt')) {
       return route.fulfill({contentType:'text/plain', body:'#Food, Drink, kitchen, Eating\n(drink)|beber|tomar|\n'})
@@ -124,7 +125,8 @@ async function checkMultilingualVocabulary(browser, mobile) {
     await closeOptions()
     await edit.waitFor({state:'visible'})
     await edit.click()
-    const editor = page.getByRole('dialog', {name:'Edit vocabulary'})
+    const editor = page.getByRole('dialog', {name:'Edit vocabulary hints'})
+    assert.equal(await editor.getByRole('textbox', {name:'English hints'}).inputValue(), 'opening, gap')
     await editor.getByRole('button', {name:'Cancel'}).click()
     await openEditPreference()
     await editPreference.uncheck()
@@ -208,17 +210,68 @@ async function checkMultilingualVocabulary(browser, mobile) {
     await search('peena')
     await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
     const language = page.getByRole('combobox', {name:'Search language'})
-    assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), ['Swedish', 'Hindi'])
+    assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), ['Swedish', 'English', 'Hindi'])
     await language.selectOption({label:'Hindi'})
     await resultsGroup.waitFor()
     assert.match(await google.getAttribute('href'), /[?&]sl=hi&tl=sv(?:&|$)/)
+    await search('greeting')
+    await results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'ha en bra dag'}).waitFor()
+    await page.locator('#result .subtitle-result-toggle').filter({hasText:/ha en bra dag/i}).first().waitFor()
+    assert.equal(await language.inputValue(), 'known')
+
+    await language.selectOption({label:'English'})
+    await search('drink')
+    const englishDrink = results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'dricka'})
+    await englishDrink.waitFor()
+    assert.match(await englishDrink.innerText(), /\(drink\)/)
+    await page.waitForFunction(() => window._resultsSearchLang === 'en' && window._subtitleSearchCompletion?.complete &&
+      window.searchResult.length > 0)
+    assert.match(await google.getAttribute('href'), /[?&]sl=en&tl=sv(?:&|$)/)
+
+    await openEditPreference()
+    await editPreference.check()
+    await closeOptions()
+    await search('sip')
+    const sip = results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'smuttar'})
+    await sip.getByRole('button', {name:'Edit vocabulary'}).click()
+    const hindiHints = editor.getByRole('textbox', {name:'Hindi hints'})
+    assert.equal(await hindiHints.inputValue(), 'घूँट लेना')
+    await page.evaluate(vocabulary => {
+      window.__hintWrites = []
+      const original = window.GitHubUtils.commitMultipleFiles
+      window.GitHubUtils.commitMultipleFiles = async options => {
+        if (!options.commitMessage.startsWith('vocab:')) return original(options)
+        for (const file of options.files) {
+          const next = await file.getContent(file.path.endsWith('/vocabulary.txt') ? vocabulary : null)
+          if (next != null) window.__hintWrites.push([file.path, JSON.parse(next)])
+        }
+        return {committed:true}
+      }
+    }, swedishVocabulary)
+    await hindiHints.fill('घूँट भरना | ghoont bharna')
+    await editor.getByRole('button', {name:'Save changes'}).click()
+    await editor.waitFor({state:'detached'})
+    const writes = await page.evaluate(() => window.__hintWrites)
+    assert.equal(writes.length, 1)
+    assert.match(writes[0][0], /vocabulary-meanings\.json$/)
+    const [updated] = Object.values(writes[0][1].groups)
+    assert.equal(updated.line, '(sip)|smutta|smuttar|')
+    assert.deepEqual(updated.hintOverrides, {hi:['घूँट भरना', 'ghoont bharna']})
+    await language.selectOption({label:'Hindi'})
+    await search('ghoont bharna')
+    await sip.waitFor()
+    assert.match(await sip.innerText(), /घूँट भरना/)
+    await search('घूँट लेना')
+    await sip.waitFor({state:'detached'})
+    await search('peena')
+    await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
     await openSearchOptions()
     await page.locator('#vocabularyLearningLanguage').selectOption('spanish')
     await page.waitForURL(/lang=spanish/)
     await results.locator('mark').filter({hasText:'beber'}).first().waitFor()
     assert.equal(await query.inputValue(), 'peena')
     assert.equal(await page.locator('#vocabularyLookupLanguage').inputValue(), 'hi')
-    assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), ['Spanish', 'Hindi'])
+    assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), ['Spanish', 'English', 'Hindi'])
     assert.equal(await language.locator('option:checked').textContent(), 'Hindi')
     assert.deepEqual(errors, [])
     console.log((mobile ? 'Mobile' : 'Desktop') + ': optional vocabulary controls and cross-language lookup passed')

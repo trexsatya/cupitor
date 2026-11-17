@@ -2,7 +2,8 @@ import { parseVocabularyFile } from './vocab-merge.js'
 import { createVocabularyMatcher } from './vocabulary-matcher.js'
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js'
 import { assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex,
-  mergeVocabularyCatalogs, parseVocabularyCatalog, parseVocabularyHintLanguages, parseVocabularyHintTranslations, reviseVocabularyGroup, vocabularyLineParts } from './vocabulary-hints.js'
+  mergeVocabularyCatalogs, parseVocabularyCatalog, parseVocabularyHintLanguages, parseVocabularyHintTranslations,
+  replaceEnglishVocabularyHints, reviseVocabularyGroup, vocabularyLineParts } from './vocabulary-hints.js'
 
 const openings = vocabularyHintSeed.groups['swedish-openings']
 const eats = vocabularyHintSeed.groups['swedish-eat']
@@ -167,4 +168,34 @@ test('ordinary and surrounding rows can display shared and curated hints without
   expect(index.hintsFor('(sip)|smutta|')).toEqual(['घूँट लेना'])
   expect(index.hintsFor(openings.line)).toContain('छेद')
   expect(indexFor(vocab, 'sv', 'en').hintsFor('(drink)|dricka|')).toEqual([])
+})
+
+test('replaces English hints while preserving forms and supports legacy lines', () => {
+  expect(replaceEnglishVocabularyHints('(shark) | haj | hajar |', ['shark (fish)']))
+    .toBe('(shark (fish)) | haj | hajar |')
+  expect(replaceEnglishVocabularyHints('tener (have)', ['possess'])).toBe('(possess)|tener')
+  expect(replaceEnglishVocabularyHints('(have)|tener|', [])).toBe('tener|')
+  expect(() => replaceEnglishVocabularyHints('(have)|tener|', ['have ('])).toThrow(/balance/)
+})
+
+test('localized edits override both shared aliases and linked hints for the edited row', () => {
+  const group = vocabularyHintSeed.groups['swedish-drink']
+  const shared = parseVocabularyHintTranslations('drink = पीना | peena', 'hi')
+  const other = '(drink)|smutta|'
+  const vocab = { [group.category]: [group.line, other] }
+  const catalog = parseVocabularyCatalog(JSON.stringify({
+    ...vocabularyHintSeed,
+    groups: { ...vocabularyHintSeed.groups, 'swedish-drink': { ...group, hintOverrides: { hi: ['पेय लेना'] } } },
+  }))
+  const index = indexFor(vocab, 'sv', 'hi', catalog, shared)
+  expect(index.hintsFor(group.line)).toEqual(['पेय लेना'])
+  expect(index.search('पेय लेना').map(hit => hit.line)).toEqual([group.line])
+  expect(index.search('peena').map(hit => hit.line)).toEqual([other])
+  expect(index.search('पानी पीना')).toEqual([])
+  expect(indexFor(vocab, 'sv', 'en', catalog).search('drink').map(hit => hit.line)).toEqual([group.line, other])
+
+  catalog.groups['swedish-drink'].hintOverrides.hi = []
+  const cleared = indexFor(vocab, 'sv', 'hi', catalog, shared)
+  expect(cleared.hintsFor(group.line)).toEqual([])
+  expect(cleared.search('peena').map(hit => hit.line)).toEqual([other])
 })

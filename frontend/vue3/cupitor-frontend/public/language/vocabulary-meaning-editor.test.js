@@ -4,9 +4,8 @@ function openEditor(options = {}) {
   const save = jest.fn(async () => {})
   openVocabularyEditor({
     row: { category: 'Food', line: '(drink)|dricka|dricker|drack|druckit|' },
-    language: 'sv', lookup: 'hi', categories: ['Food', 'Verbs'],
+    language: 'sv', lookup: 'hi', hints: ['पीना', 'peena'],
     languageName: code => ({ sv: 'Swedish', es: 'Spanish', en: 'English', hi: 'Hindi' })[code],
-    translations: new Map([['drink', ['पीना', 'peena']], ['drink water', ['पानी पीना']]]),
     save, ...options,
   })
   return { form: document.querySelector('#vocabularyMeaningEditor form'), save }
@@ -23,32 +22,35 @@ beforeEach(() => {
 })
 afterEach(() => { document.body.replaceChildren() })
 
-test('edits three fields and previews shared Hindi hints for the English cue', async () => {
+test('edits only the familiar-language hints and shows the forms as context', async () => {
   const { form, save } = openEditor()
-  expect([...form.querySelectorAll('label')].map(label => label.firstChild.textContent))
-    .toEqual(['Category', 'English hints', 'Swedish forms'])
-  const preview = form.querySelector('.vocab-hint-preview')
-  expect(preview.hidden).toBe(false)
-  expect(preview.textContent).toContain('पीना | peena')
-  const english = form.querySelector('input')
-  english.value = 'drink water'
-  english.dispatchEvent(new Event('input'))
-  expect(preview.textContent).toContain('पानी पीना')
-  expect(preview.textContent).not.toContain('peena')
-
-  form.querySelector('select').value = 'Verbs'
-  form.querySelector('textarea').value = 'dricka vatten | dricker vatten'
+  expect([...form.querySelectorAll('label')].map(label => label.firstChild.textContent)).toEqual(['Hindi hints'])
+  expect(form.querySelector('.vocab-hint-editor-forms').textContent).toBe('dricka · dricker · drack · druckit')
+  expect(form.querySelector('select, textarea')).toBeNull()
+  const input = form.querySelector('input')
+  expect(input.lang).toBe('hi')
+  expect(input.value).toBe('पीना | peena')
+  input.value = 'पानी पीना | pee lena'
   await submit(form)
-  expect(save).toHaveBeenCalledWith({ category: 'Verbs', line: '(drink water)|dricka vatten|dricker vatten|' })
+  expect(save).toHaveBeenCalledWith(['पानी पीना', 'pee lena'])
   expect(document.getElementById('vocabularyMeaningEditor')).toBeNull()
 })
 
-test('retains the original vocabulary syntax when only the category changes', async () => {
-  const { form, save } = openEditor({
-    row: { category: 'Food', line: 'tener (have)' }, language: 'es', lookup: 'en',
-  })
-  expect(form.querySelector('.vocab-hint-preview').hidden).toBe(true)
-  form.querySelector('select').value = 'Verbs'
+test('uses commas for English hints and keeps parenthetical qualifiers', async () => {
+  const { form, save } = openEditor({ lookup: 'en', hints: ['drink'] })
+  const input = form.querySelector('input')
+  expect(input.value).toBe('drink')
+  input.value = 'drink (water, tea), sip'
   await submit(form)
-  expect(save).toHaveBeenCalledWith({ category: 'Verbs', line: 'tener (have)' })
+  expect(save).toHaveBeenCalledWith(['drink (water, tea)', 'sip'])
+})
+
+test('skips writes for unchanged hints and lets the user clear hints', async () => {
+  const unchanged = openEditor()
+  await submit(unchanged.form)
+  expect(unchanged.save).not.toHaveBeenCalled()
+  const { form, save } = openEditor()
+  form.querySelector('input').value = ''
+  await submit(form)
+  expect(save).toHaveBeenCalledWith([])
 })

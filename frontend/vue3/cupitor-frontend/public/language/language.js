@@ -29,7 +29,8 @@ import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import {
   assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex, mergeVocabularyCatalogs,
   GENERATED_HINDI_HINTS_FILE, normalizeHint, parseVocabularyCatalog, parseVocabularyHintLanguages,
-  parseVocabularyHintTranslations, reviseVocabularyGroup, SHARED_HINTS_DIRECTORY, vocabularyFormKey, vocabularyLineParts, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
+  parseVocabularyHintTranslations, replaceEnglishVocabularyHints, reviseVocabularyGroup, SHARED_HINTS_DIRECTORY,
+  vocabularyFormKey, vocabularyHintGroupId, vocabularyLineParts, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
 } from './vocabulary-hints.js';
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js';
 import { openVocabularyEditor } from './vocabulary-meaning-editor.js';
@@ -3547,7 +3548,7 @@ let _sharedHintLanguages = ['hi']
 const _sharedHintTranslations = new Map()
 const _sharedHintLoads = new Map()
 let _vocabularyCatalogReady
-let _vocabularyHintIndex
+const _vocabularyHintIndexes = new Map()
 
 const _vocabularyLanguageNames = typeof Intl.DisplayNames === 'function'
   ? new Intl.DisplayNames(['en'], { type: 'language' }) : null
@@ -3571,12 +3572,11 @@ function _refreshSearchLanguageChoices() {
   const familiar = _vocabularyLookupLanguage()
   const studied = getLangFromUrl().code
   const $select = $('#searchLanguageSelect')
-  const wasFamiliar = $select.val() === 'known' ||
-    ($select.val() === 'en' && !$select.find('option[value="en"]').prop('hidden'))
+  const wasFamiliar = $select.val() === 'known'
+  const hasFamiliar = familiar !== 'en' && familiar !== studied
   $select.find('option[value="known"]').text(_vocabularyLanguageName(familiar))
-    .prop('hidden', familiar === 'en' || familiar === studied)
-  if (wasFamiliar) _setLangToggle(familiar === 'en', familiar !== 'en' && familiar !== studied)
-  else $select.find('option[value="en"]').prop('hidden', familiar !== 'en')
+    .prop('hidden', !hasFamiliar)
+  if (wasFamiliar && !hasFamiliar) _setLangToggle(true)
 }
 
 function _installVocabularyCatalog() {
@@ -3666,16 +3666,28 @@ async function _loadVocabularyCatalog() {
   _renderVocabularyForHintLanguage()
 }
 
-function _getVocabularyHintIndex(matcher = _getVocabularyMatcher()) {
+function _getVocabularyHintIndex(matcher = _getVocabularyMatcher(), lookup = _vocabularyLookupLanguage()) {
   const target = getLangFromUrl().code
-  const lookup = _vocabularyLookupLanguage()
   const translations = _sharedHintTranslations.get(lookup)
-  if (_vocabularyHintIndex?.matcher !== matcher || _vocabularyHintIndex.catalog !== _vocabularyCatalog ||
-      _vocabularyHintIndex.lookup !== lookup || _vocabularyHintIndex.translations !== translations) {
-    _vocabularyHintIndex = { matcher, catalog: _vocabularyCatalog, lookup, translations,
+  let cached = _vocabularyHintIndexes.get(lookup)
+  if (cached?.matcher !== matcher || cached.catalog !== _vocabularyCatalog || cached.translations !== translations) {
+    cached = { matcher, catalog: _vocabularyCatalog, translations,
       index: createVocabularyHintIndex(matcher.rows, target, _vocabularyCatalog, lookup, translations) }
+    _vocabularyHintIndexes.set(lookup, cached)
   }
-  return _vocabularyHintIndex.index
+  return cached.index
+}
+
+function _searchVocabularyHints(query, matcher = _getVocabularyMatcher(), lookup = _vocabularyLookupLanguage()) {
+  const index = _getVocabularyHintIndex(matcher, lookup)
+  const hits = index.search(query)
+  if (lookup === 'en') return hits
+
+  const untranslated = hits.length ? query.split('|').filter(term => !index.search(term).length).join('|') : query
+  if (!untranslated.trim()) return hits
+  const seen = new Set(hits.map(hit => hit.index))
+  const fallback = _getVocabularyHintIndex(matcher, 'en').search(untranslated)
+  return [...hits, ...fallback.filter(hit => !seen.has(hit.index))]
 }
 
 async function _editVocabularyMatch(match) {
@@ -3685,32 +3697,30 @@ async function _editVocabularyMatch(match) {
   const lookup = _vocabularyLookupLanguage()
   await _loadSharedHintTranslations(lookup)
   context.assertCurrent()
+  const language = getLangFromUrl().code
   if (!ownLines(_ownVocabulary(), match.category).includes(match.line)) return
   const catalogBaseline = _vocabularyCatalogSelf
   const matcher = _getVocabularyMatcher()
   const row = matcher.rows.find(item => item.category === match.category && item.line === match.line)
   if (!row) return
-  const group = _getVocabularyHintIndex(matcher).groupFor(row.index)
-  const groupHints = group?.meanings?.map(id => _vocabularyCatalog.meanings[id]?.hints[lookup]).filter(Boolean) || []
+  const index = _getVocabularyHintIndex(matcher, lookup)
+  const group = index.groupFor(row.index)
+  const english = lookup === 'en'
+  const hints = english ? vocabularyLineParts(row.line).hints : index.hintsFor(row.line, row.index)
   openVocabularyEditor({
-    row, language: getLangFromUrl().code, lookup,
-    translations: _sharedHintTranslations.get(lookup),
-    groupHintOverride: groupHints.length ? [...new Set(groupHints.flat())] : undefined,
-    categories: Object.keys(_ownVocabulary()).filter(category => category !== '__empty__' && !VOCAB_HIDDEN_CATEGORIES.has(category))
-      .sort((left, right) => left.localeCompare(right)),
+    row, language, lookup, hints,
     languageName: _vocabularyLanguageName,
-    async save({ category, line }) {
+    async save(nextHints) {
       context.assertCurrent()
+      const { category } = row
       const local = _ownVocabulary()
-      const lines = ownLines(local, row.category)
+      const lines = ownLines(local, category)
       const at = lines.indexOf(row.line)
       if (at < 0) throw new Error('This line changed. Reopen the editor to see the latest version.')
-      if (category === row.category && line === row.line) return
-      local[row.category] = [...lines]
-      if (category === row.category) local[row.category][at] = line
-      else {
-        local[row.category].splice(at, 1)
-        local[category] = [...ownLines(local, category), line]
+      const line = english ? replaceEnglishVocabularyHints(row.line, nextHints) : row.line
+      if (english) {
+        local[category] = [...lines]
+        local[category][at] = line
       }
       const baseline = window._vocabularyBaselineText || ''
       const pending = _userData.getItem(PENDING_VOCAB_KEY)
@@ -3719,19 +3729,23 @@ async function _editVocabularyMatch(match) {
         path: _langRepoDir() + '/vocabulary.txt',
         getContent(remote) {
           context.assertCurrent()
-          assertVocabularyRow(remote, baseline, row.category, row.line)
+          assertVocabularyRow(remote, baseline, category, row.line)
+          if (!english) return null
           nextText = vocabularyToText(mergeVocabulary(baseline, local, remote || ''))
           return nextText
         },
       }]
-      if (group) {
-        const updated = reviseVocabularyGroup(group, row.line, { category, line })
+      if (group || !english) {
+        const id = group?.id || await vocabularyHintGroupId(language, row)
+        const current = group || { language, category, line, forms: [] }
+        const updated = reviseVocabularyGroup(current, row.line, { category, line })
+        if (!english) updated.hintOverrides = { ...current.hintOverrides, [lookup]: nextHints }
         files.push({
           path: VOCABULARY_CATALOG_PATH,
           getContent(remote) {
             context.assertCurrent()
             nextCatalog = changeVocabularyCatalog(remote, catalogBaseline, {
-              groups: { [group.id]: updated }, meanings: {},
+              groups: { [id]: updated }, meanings: {},
             })
             return JSON.stringify(nextCatalog, null, 2) + '\n'
           },
@@ -3740,23 +3754,29 @@ async function _editVocabularyMatch(match) {
       await _userData.flush()
       context.assertCurrent()
       const { owner, repo, branch } = _dsWriteTarget()
-      await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch, commitMessage: 'vocab: edit vocabulary line', files })
+      await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch, commitMessage: 'vocab: update ' + lookup + ' hints', files })
       context.assertCurrent()
-      const concurrent = _userData.getItem(PENDING_VOCAB_KEY) !== pending
-      const shown = concurrent ? vocabularyToText(mergeVocabulary(baseline, _ownVocabulary(), nextText)) : nextText
-      _setVocabularyLayers(_dsMergeVocabularyLayers(shown, window._vocabularyOtherText))
-      window._vocabularyBaselineText = nextText
-      if (concurrent) _savePendingVocab()
-      else _clearPendingVocab()
-      await _userData.flush()
+      if (english) {
+        const concurrent = _userData.getItem(PENDING_VOCAB_KEY) !== pending
+        const shown = concurrent ? vocabularyToText(mergeVocabulary(baseline, _ownVocabulary(), nextText)) : nextText
+        _setVocabularyLayers(_dsMergeVocabularyLayers(shown, window._vocabularyOtherText))
+        window._vocabularyBaselineText = nextText
+        if (concurrent) _savePendingVocab()
+        else _clearPendingVocab()
+        await _userData.flush()
+        context.assertCurrent()
+        loadWholeVocabulary()
+      }
       if (nextCatalog) {
         _vocabularyCatalogSelf = nextCatalog
         try {
           localStorage.setItem(_scopedKey('vocabulary-catalog:' + _dsSourceIdentity('self', 'shared')), JSON.stringify(nextCatalog))
         } catch (_) { /* keep the in-memory revision */ }
       }
-      loadWholeVocabulary()
       _installVocabularyCatalog()
+      if (_familiarSearchLanguage() && window._requestedSearchText) {
+        doSearch(window._requestedSearchText).catch(error => console.warn('Could not refresh the search after saving hints:', error))
+      }
     },
   })
 }
@@ -4552,6 +4572,7 @@ $('document').ready(e => {
       if (query) {
         url.searchParams.set('vocabQuery', query)
         if (_familiarSearchLanguage()) url.searchParams.set('searchLanguage', 'known')
+        else if (getSelectedLang() === 'en') url.searchParams.set('searchLanguage', 'en')
       }
       url.searchParams.set('vocabLookup', _vocabularyLookupLanguage())
       window.location.assign(url)
@@ -4594,7 +4615,7 @@ $('document').ready(e => {
   if ((vocabularyUrl.searchParams.has('vocabQuery') || vocabularyUrl.searchParams.has('vocabLookup')) && getLangFromUrl().supported) {
     const query = vocabularyUrl.searchParams.get('vocabQuery')
     const lookup = vocabularyUrl.searchParams.get('vocabLookup')
-    const useFamiliar = vocabularyUrl.searchParams.get('searchLanguage') === 'known'
+    const searchLanguage = vocabularyUrl.searchParams.get('searchLanguage')
     vocabularyUrl.searchParams.delete('vocabQuery')
     vocabularyUrl.searchParams.delete('vocabLookup')
     vocabularyUrl.searchParams.delete('searchLanguage')
@@ -4606,7 +4627,8 @@ $('document').ready(e => {
         await _loadSharedHintTranslations(lookup)
       }
       if (!query || $('#searchText').val()) return
-      if (useFamiliar && !$('#searchLanguageSelect option[value="known"]').prop('hidden')) _setLangToggle(false, true)
+      if (searchLanguage === 'known' && !$('#searchLanguageSelect option[value="known"]').prop('hidden')) _setLangToggle(false, true)
+      else if (searchLanguage === 'known' || searchLanguage === 'en') _setLangToggle(true)
       $('#searchText').val(query).trigger('input')
       await searchTextChanged()
     }).catch(error => console.warn('Vocabulary lookup could not resume', error))
@@ -4620,6 +4642,8 @@ $('document').ready(e => {
   }
   $searchLanguage.val(getSelectedLang())
   $searchLanguage.on('change', function () {
+    window.forceLangForNextSearch = null
+    window.forceMainLangForNextSearch = false
     _setLangToggle(this.value === 'en', this.value === 'known')
     if (window._requestedSearchText) doSearch(window._requestedSearchText)
   })
@@ -8432,9 +8456,7 @@ function enablePasteForHashChange() {
 function _setLangToggle(isEn, familiar = false) {
   const $cb = $('#toggleLangCb')
   $cb.prop('checked', !!isEn)
-  const $select = $('#searchLanguageSelect')
-  $select.find('option[value="en"]').prop('hidden', !isEn && _vocabularyLookupLanguage() !== 'en')
-  $select.val(familiar ? 'known' : isEn ? 'en' : 'sv')
+  $('#searchLanguageSelect').val(familiar ? 'known' : isEn ? 'en' : 'sv')
   try {
     const widget = $cb.data('bs.toggle')
     if (widget) { if (isEn) widget.on(true); else widget.off(true) }
@@ -8839,7 +8861,7 @@ function _vocabLineFirstWord(line) {
 
 let _vocabularyDisplayIndex
 function _displayVocabularyLine(line, index, matches = []) {
-  if (_vocabularyLookupLanguage() === 'en' || !line) return line
+  if (_vocabularyLookupLanguage() === 'en' || getSelectedLang() === 'en' || !line) return line
   if (!_vocabularyDisplayIndex) {
     _vocabularyDisplayIndex = _getVocabularyHintIndex()
     // One index lookup per render or picker query. The matcher checks the
@@ -9109,7 +9131,7 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
     $body.append($line)
   })
   if (match.hint?.meanings.size) {
-    const lookup = _vocabularyLookupLanguage()
+    const lookup = getSelectedLang() === 'en' ? 'en' : _vocabularyLookupLanguage()
     const target = getLangFromUrl().code
     for (const id of match.hint.meanings) {
       const meaning = _vocabularyCatalog.meanings[id]
@@ -9162,7 +9184,8 @@ function _renderVocabularySearch(search, includePrefix) {
   if (!query) return
   const matcher = _getVocabularyMatcher()
   const ordinary = commonWordsToIgnore.includes(query) ? [] : matcher.search(query, { includePrefix })
-  const hints = _getVocabularyHintIndex(matcher).search(window._vocabularyHintQuery || query)
+  const lookup = getSelectedLang() === 'en' ? 'en' : _vocabularyLookupLanguage()
+  const hints = _searchVocabularyHints(window._vocabularyHintQuery || query, matcher, lookup)
   const hintsByRow = new Map(hints.map(hit => [hit.index, hit]))
   const exact = ordinary.filter(match => match.kind === 'exact')
   const exactRows = new Set(exact.map(match => match.index))
@@ -9248,8 +9271,9 @@ export function renderVocabularyFindings(search) {
 }
 
 window._renderVocabularyHintsEarly = query => {
-  if (!_getVocabularyHintIndex().search(query).length) return false
   const vocabularyOnly = query.trim().length < 3
+  const lookup = getSelectedLang() === 'en' ? 'en' : _vocabularyLookupLanguage()
+  if (!vocabularyOnly && !_searchVocabularyHints(query, undefined, lookup).length) return false
   if (vocabularyOnly) {
     window.searchText = query
     window.searchResult = []
@@ -9703,8 +9727,7 @@ function _translationPanelDirection() {
     : getSelectedLang()
   const familiarSearch = window._resultsFamiliarSearchLanguage
   const from = familiarSearch || (lang === 'en' ? 'en' : studied.code)
-  const familiar = _vocabularyLookupLanguage()
-  const to = familiarSearch || (from === 'en' && familiar === 'en') ? studied.code : _translationTargetLanguage(from)
+  const to = familiarSearch || from === 'en' ? studied.code : _translationTargetLanguage(from)
   const name = code => code === 'en' ? 'EN' : _vocabularyLanguageName(code)
   return { from, to, fromName: name(from), toName: name(to),
     searchIn: to === studied.code ? 'sv' : to }
@@ -10358,7 +10381,7 @@ async function fetchSRTs(searchText, requestToken) {
       return
     }
     const knownForms = familiarSearch && !window._resultsSearchRegex
-      ? _getVocabularyHintIndex().search(txt).flatMap(hit => vocabularyLineParts(hit.line).forms
+      ? _searchVocabularyHints(txt, undefined, familiarSearch).flatMap(hit => vocabularyLineParts(hit.line).forms
         .filter(form => !hit.forms.size || hit.forms.has(vocabularyFormKey(form))))
       : []
     const primaryQuery = knownForms.length

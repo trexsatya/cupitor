@@ -28,18 +28,43 @@ export function splitVocabularyHints(value) {
   return [...new Set(hints.filter(Boolean))]
 }
 
+const leadingHint = /^\(((?:[^()]|\([^()]*\))+?)\)$/u
+const trailingHint = /^([^()]+?)\s+\(([^()]+)\)$/u
+
 export function vocabularyLineParts(line) {
   const segments = line.split('|').map(part => part.trim()).filter(Boolean)
-  const leading = segments[0]?.match(/^\(((?:[^()]|\([^()]*\))+?)\)$/u)
+  const leading = segments[0]?.match(leadingHint)
   if (leading && isProperlyBracketed(segments[0])) {
     return { hints: splitVocabularyHints(leading[1]), forms: segments.slice(1) }
   }
   // Some single-form lines use the legacy "hacer (do,make)" format.
-  const trailing = segments.length === 1 && segments[0].match(/^([^()]+?)\s+\(([^()]+)\)$/u)
+  const trailing = segments.length === 1 && segments[0].match(trailingHint)
   if (trailing && isProperlyBracketed(segments[0])) {
     return { hints: splitVocabularyHints(trailing[2]), forms: [trailing[1].trim()] }
   }
   return { hints: [], forms: segments }
+}
+
+export function replaceEnglishVocabularyHints(line, hints) {
+  const cue = hints.length ? '(' + hints.join(', ') + ')' : ''
+  if (cue && (!leadingHint.test(cue) || /[|\r\n]/u.test(cue) || !isProperlyBracketed(cue))) {
+    throw new Error('Use commas between English hints and balance parentheses and brackets.')
+  }
+
+  const segments = line.split('|')
+  const first = segments.findIndex(part => part.trim())
+  const part = segments[first].trim()
+  if (leadingHint.test(part) && isProperlyBracketed(part)) {
+    if (cue) segments[first] = segments[first].replace(part, () => cue)
+    else segments.splice(first, 1)
+  } else {
+    const legacy = segments.filter(segment => segment.trim()).length === 1 && part.match(trailingHint)
+    if (legacy && isProperlyBracketed(part)) {
+      segments[first] = segments[first].replace(part, () => legacy[1].trimEnd())
+    }
+    if (cue) segments.unshift(cue)
+  }
+  return segments.join('|')
 }
 
 const rowKey = (category, line) => JSON.stringify([category, vocabularyLineParts(line)])
@@ -91,6 +116,8 @@ export function parseVocabularyCatalog(raw) {
       validLanguage(language) && typeof text === 'string'))
   const validGroup = (id, item) => validId(id) && record(item) &&
     validLanguage(item.language) && typeof item.category === 'string' && typeof item.line === 'string' &&
+    (item.hintOverrides === undefined || entriesAre(item.hintOverrides, (language, hints) =>
+      validLanguage(language) && strings(hints))) &&
     (item.meanings === undefined || (Array.isArray(item.meanings) && item.meanings.every(validId))) &&
     Array.isArray(item.forms) && new Set(item.forms.map(form => form?.id)).size === item.forms.length &&
     item.forms.every(form => record(form) && validId(form.id) && typeof form.text === 'string' &&
@@ -154,7 +181,14 @@ export function reviseVocabularyGroup(group, previousLine, { category, line }) {
   })
   const next = { language: group.language, category, line, forms }
   if (group.meanings) next.meanings = group.meanings
+  if (group.hintOverrides) next.hintOverrides = group.hintOverrides
   return next
+}
+
+export async function vocabularyHintGroupId(language, row) {
+  const encoded = new TextEncoder().encode(JSON.stringify([language, rowKey(row.category, row.line)]))
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', encoded)
+  return 'hints-' + [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
 export function createVocabularyHintIndex(rows, target, catalog, source, translations = new Map()) {
@@ -188,14 +222,27 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
       const hintKey = phraseKey(hints)
       const formSignature = texts => JSON.stringify(texts.map(formKey).sort())
       const previousForms = formSignature(forms)
-      const linkTexts = group.meanings?.length ? forms : group.forms.filter(form => form.meanings.length).map(form => form.text)
+      const linkTexts = group.meanings?.length || group.hintOverrides
+        ? forms : group.forms.filter(form => form.meanings.length).map(form => form.text)
       const linkedForms = new Set(linkTexts.map(formKey).filter(Boolean))
       const candidates = (rowsByCategory.get(group.category) || []).filter(entry =>
         formSignature(entry.forms) === previousForms ||
         (hints.length && phraseKey(entry.hints) === hintKey && entry.forms.some(form => linkedForms.has(formKey(form)))))
       if (candidates.length === 1) row = candidates[0].row
     }
-    if (row) byRow.set(row.index, { id, ...group, row })
+    if (row && (group.hintOverrides || !byRow.get(row.index)?.hintOverrides)) {
+      byRow.set(row.index, { id, ...group, row })
+    }
+  }
+  const overrides = new Map()
+  if (source !== 'en') {
+    for (const group of byRow.values()) {
+      const aliases = group.hintOverrides?.[source]
+      if (!aliases) continue
+      const keys = new Set(aliases.map(alias => normalizeHint(alias, source)))
+      overrides.set(group.row.index, { aliases, keys })
+      for (const key of keys) put(byPhrase, key, { row: group.row, aliases })
+    }
   }
   for (const [english, matchingRows] of byEnglish) {
     if (source === 'en') {
@@ -205,6 +252,7 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
     const aliases = translations.get(english)
     if (!aliases) continue
     for (const row of matchingRows) {
+      if (overrides.has(row.index)) continue
       const local = byRow.get(row.index)?.meanings
       // An explicit group hint can give this row a narrower meaning.
       if (local?.some(id => catalog.meanings[id]?.hints[source] !== undefined)) continue
@@ -226,7 +274,12 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
     const aliases = meaning.hints[source] || []
     for (const hint of aliases) {
       const key = normalizeHint(hint, source)
-      if (key) for (const link of links) put(byPhrase, key, { ...link, meaning: id, aliases })
+      if (!key) continue
+      for (const link of links) {
+        const override = overrides.get(link.row.index)
+        if (override && !override.keys.has(key)) continue
+        put(byPhrase, key, { ...link, meaning: id, aliases: override?.aliases || aliases })
+      }
     }
   }
   const indexedRows = new Map(rows.map(row => [row.index, row.line]))
@@ -237,6 +290,7 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
     if (source === 'en') return []
     const groups = groupsByLine.get(line)
     const group = indexedRows.get(index) === line ? byRow.get(index) : groups?.length === 1 ? groups[0] : undefined
+    if (group?.hintOverrides?.[source]) return group.hintOverrides[source]
     const own = linkedHints(group?.meanings)
     const { hints, forms } = vocabularyLineParts(line)
     const shared = hints.flatMap(hint => translations.get(normalizeHint(hint, 'en')) || [])
