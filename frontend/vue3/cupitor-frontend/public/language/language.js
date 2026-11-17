@@ -29,7 +29,7 @@ import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import {
   assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex, mergeVocabularyCatalogs,
   GENERATED_HINDI_HINTS_FILE, normalizeHint, parseVocabularyCatalog, parseVocabularyHintLanguages,
-  parseVocabularyHintTranslations, reviseVocabularyGroup, SHARED_HINTS_DIRECTORY, vocabularyLineParts, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
+  parseVocabularyHintTranslations, reviseVocabularyGroup, SHARED_HINTS_DIRECTORY, vocabularyFormKey, vocabularyLineParts, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
 } from './vocabulary-hints.js';
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js';
 import { openVocabularyEditor } from './vocabulary-meaning-editor.js';
@@ -2249,12 +2249,12 @@ async function doSearch(searchThis, el) {
 const SEARCH_NAV_HISTORY_KEY = _scopedKey('searchNavHistory')
 const SEARCH_NAV_HISTORY_MAX = 200
 
-// Storage shape: Array<string | { t: string, l: 'en' }>. Plain strings are
+// Storage shape: Array<string | { t: string, l: 'en' | 'known' }>. Plain strings are
 // main-language (sv) searches — keeping them as bare strings preserves
 // backward compatibility with previously-saved history AND saves ~10 bytes
 // per entry vs an object wrapper. Objects only appear for non-main langs.
 function _normLangFor(lang) {
-  return lang === 'en' ? 'en' : null
+  return lang === 'en' || lang === 'known' ? lang : null
 }
 function _historyEntryTerm(entry) {
   return (typeof entry === 'string') ? entry : (entry && entry.t) || null
@@ -2338,11 +2338,12 @@ function replaySearchHistoryAt(newIdx) {
   window._navigatingHistory = true
   // Replay in the language the search was originally in, regardless of the
   // current UI toggle. Cleared in fetchSRTs's finally block.
-  window.forceLangForNextSearch = lang === 'en' ? 'en' : 'sv'
+  window.forceLangForNextSearch = lang === 'known' ? null : lang === 'en' ? 'en' : 'sv'
   // Sync the toggle so the user can see which language the replayed search is
   // in. After forceLang is cleared, the next typed search will follow this
   // toggle position, which matches user intent.
-  _setLangToggle(lang === 'en')
+  _setLangToggle(lang === 'en' || (lang === 'known' && _vocabularyLookupLanguage() === 'en'),
+    lang === 'known' && _vocabularyLookupLanguage() !== 'en')
   // Trigger 'input' (not 'change') so the X-clear button visibility updates
   // without re-firing the typed-search flow on top of our explicit doSearch
   // call below.
@@ -2403,10 +2404,11 @@ function _renderSearchHistoryPanel() {
     for (let i = list.length - 1; i >= 0; i--) {
       const term = _historyEntryTerm(list[i])
       if (typeof term !== 'string' || !term) continue
-      const lang = _historyEntryLang(list[i]) === 'en' ? 'EN' : ''
+      const choice = _historyEntryLang(list[i])
+      const lang = choice === 'known' ? _vocabularyLanguageName(_vocabularyLookupLanguage()) : choice === 'en' ? 'EN' : ''
       rows.push(`<button type="button" class="srch-hist-row${i === cur ? ' is-current' : ''}" data-idx="${i}">`
         + `<span class="srch-hist-term">${_.escape(term)}</span>`
-        + (lang ? `<span class="srch-hist-lang">${lang}</span>` : '')
+        + (lang ? `<span class="srch-hist-lang">${_.escape(lang)}</span>` : '')
         + (i === cur ? '<span class="srch-hist-here">here</span>' : '')
         + '</button>')
     }
@@ -3562,6 +3564,19 @@ function _refreshVocabularyLookupSelect() {
   $('#vocabularyLookupLanguage').empty()
     .append(_vocabularyLookupChoices.map(code => new Option(_vocabularyLanguageName(code), code)))
     .val(_vocabularyLookupLanguage())
+  _refreshSearchLanguageChoices()
+}
+
+function _refreshSearchLanguageChoices() {
+  const familiar = _vocabularyLookupLanguage()
+  const studied = getLangFromUrl().code
+  const $select = $('#searchLanguageSelect')
+  const wasFamiliar = $select.val() === 'known' ||
+    ($select.val() === 'en' && !$select.find('option[value="en"]').prop('hidden'))
+  $select.find('option[value="known"]').text(_vocabularyLanguageName(familiar))
+    .prop('hidden', familiar === 'en' || familiar === studied)
+  if (wasFamiliar) _setLangToggle(familiar === 'en', familiar !== 'en' && familiar !== studied)
+  else $select.find('option[value="en"]').prop('hidden', familiar !== 'en')
 }
 
 function _installVocabularyCatalog() {
@@ -4536,6 +4551,7 @@ $('document').ready(e => {
       const query = String($('#searchText').val() || '').trim()
       if (query) {
         url.searchParams.set('vocabQuery', query)
+        if (_familiarSearchLanguage()) url.searchParams.set('searchLanguage', 'known')
       }
       url.searchParams.set('vocabLookup', _vocabularyLookupLanguage())
       window.location.assign(url)
@@ -4545,6 +4561,7 @@ $('document').ready(e => {
     const lookup = this.value
     window._appSettings.vocabularyLookupLanguage = lookup
     saveAppSettings()
+    _refreshSearchLanguageChoices()
     _reportFamiliarLanguage()
     _refreshMediaSubtitleLanguage().catch(error => console.warn('Could not update companion subtitles:', error))
     for (const container of document.querySelectorAll('#result .lines-cntnr')) {
@@ -4555,6 +4572,10 @@ $('document').ready(e => {
     }
     await _loadSharedHintTranslations(lookup)
     if (_vocabularyLookupLanguage() !== lookup) return
+    if (window._requestedSearchText && (window._resultsFamiliarSearchLanguage || _familiarSearchLanguage())) {
+      await doSearch(window._requestedSearchText)
+      return
+    }
     $('#searchedWords').trigger('change.select2')
     _renderTranslationPanel(window._subtitleSearchToken).catch(error => console.warn('Could not refresh translations:', error))
     if (window.unprocessedSearchText && window._vocabularySearchText) {
@@ -4573,8 +4594,10 @@ $('document').ready(e => {
   if ((vocabularyUrl.searchParams.has('vocabQuery') || vocabularyUrl.searchParams.has('vocabLookup')) && getLangFromUrl().supported) {
     const query = vocabularyUrl.searchParams.get('vocabQuery')
     const lookup = vocabularyUrl.searchParams.get('vocabLookup')
+    const useFamiliar = vocabularyUrl.searchParams.get('searchLanguage') === 'known'
     vocabularyUrl.searchParams.delete('vocabQuery')
     vocabularyUrl.searchParams.delete('vocabLookup')
+    vocabularyUrl.searchParams.delete('searchLanguage')
     window.history.replaceState(window.history.state, '', vocabularyUrl)
     window._vocabularyReadyPromise.then(async () => {
       await _vocabularyCatalogReady
@@ -4583,6 +4606,7 @@ $('document').ready(e => {
         await _loadSharedHintTranslations(lookup)
       }
       if (!query || $('#searchText').val()) return
+      if (useFamiliar && !$('#searchLanguageSelect option[value="known"]').prop('hidden')) _setLangToggle(false, true)
       $('#searchText').val(query).trigger('input')
       await searchTextChanged()
     }).catch(error => console.warn('Vocabulary lookup could not resume', error))
@@ -4596,11 +4620,11 @@ $('document').ready(e => {
   }
   $searchLanguage.val(getSelectedLang())
   $searchLanguage.on('change', function () {
-    _setLangToggle(this.value === 'en')
-    if (window.searchText) fetchSRTs(window.searchText)
+    _setLangToggle(this.value === 'en', this.value === 'known')
+    if (window._requestedSearchText) doSearch(window._requestedSearchText)
   })
   $('#toggleLangCb').change(e => {
-    $searchLanguage.val(e.target.checked ? 'en' : 'sv')
+    _setLangToggle(e.target.checked)
     if (window.searchText) fetchSRTs(window.searchText)
   })
 
@@ -8405,14 +8429,23 @@ function enablePasteForHashChange() {
 //
 // Silently: the switch's own handler starts a fresh search, and every caller
 // here is about to start one itself.
-function _setLangToggle(isEn) {
+function _setLangToggle(isEn, familiar = false) {
   const $cb = $('#toggleLangCb')
   $cb.prop('checked', !!isEn)
-  $('#searchLanguageSelect').val(isEn ? 'en' : 'sv')
+  const $select = $('#searchLanguageSelect')
+  $select.find('option[value="en"]').prop('hidden', !isEn && _vocabularyLookupLanguage() !== 'en')
+  $select.val(familiar ? 'known' : isEn ? 'en' : 'sv')
   try {
     const widget = $cb.data('bs.toggle')
     if (widget) { if (isEn) widget.on(true); else widget.off(true) }
   } catch (e) { console.warn('lang toggle sync failed', e) }
+}
+
+function _familiarSearchLanguage() {
+  if (window.forceLangForNextSearch || window.forceMainLangForNextSearch ||
+      $('#searchLanguageSelect').val() !== 'known') return null
+  const familiar = _vocabularyLookupLanguage()
+  return familiar === 'en' || familiar === getLangFromUrl().code ? null : familiar
 }
 
 function getSelectedLang() {
@@ -9637,12 +9670,13 @@ function _dictionaryTerms(detail) {
 function _searchTermInLang(term, lang) {
   const w = String(term || '').trim()
   if (!w) return
-  window.forceLangForNextSearch = (lang === 'en') ? 'en' : 'sv'
+  const familiar = lang !== 'en' && lang !== 'sv' && lang === _vocabularyLookupLanguage()
+  window.forceLangForNextSearch = familiar ? null : lang === 'en' ? 'en' : 'sv'
   // Move the switch to match, exactly as replaying a search from the history
   // does: the override lasts one search, and leaving it pointing the other way
   // makes the page describe itself wrongly from then on — and sends the next
   // typed search back to the language the user has just left.
-  _setLangToggle(lang === 'en')
+  _setLangToggle(lang === 'en', familiar)
   $('#searchText').val(w).trigger('input').trigger('change')
 }
 
@@ -9667,9 +9701,10 @@ function _translationPanelDirection() {
   const lang = (window._resultsSearchLang === 'en' || window._resultsSearchLang === 'sv')
     ? window._resultsSearchLang
     : getSelectedLang()
-  const from = lang === 'en' ? 'en' : studied.code
+  const familiarSearch = window._resultsFamiliarSearchLanguage
+  const from = familiarSearch || (lang === 'en' ? 'en' : studied.code)
   const familiar = _vocabularyLookupLanguage()
-  const to = from === 'en' && familiar === 'en' ? studied.code : _translationTargetLanguage(from)
+  const to = familiarSearch || (from === 'en' && familiar === 'en') ? studied.code : _translationTargetLanguage(from)
   const name = code => code === 'en' ? 'EN' : _vocabularyLanguageName(code)
   return { from, to, fromName: name(from), toName: name(to),
     searchIn: to === studied.code ? 'sv' : to }
@@ -10249,16 +10284,32 @@ async function fetchSRTs(searchText, requestToken) {
 
     if (txt.length < 3) return false
 
+    // Search the familiar-language hints in the study vocabulary, then use
+    // their study-language forms against the downloaded subtitle index.
+    window._subtitleSearchToken = requestToken == null
+      ? (window._subtitleSearchToken || 0) + 1
+      : requestToken
+    myToken = window._subtitleSearchToken
+    _searchRunsInFlight++
+    finishLoading = _beginSearchLoading(myToken)
+    const familiarSearch = _familiarSearchLanguage()
+    if (familiarSearch) {
+      await _vocabularyCatalogReady
+      await _loadSharedHintTranslations(familiarSearch)
+      if (myToken !== window._subtitleSearchToken) return false
+    }
+
     const _historyTerm = (window.unprocessedSearchText && window.unprocessedSearchText.trim()) || txt.trim()
     // Capture the lang at record time so Prev/Next can replay the search in
     // the same language the user originally ran it (independent of the
     // current UI toggle). getSelectedLang() already honors any
     // forceLangForNextSearch override from "Search here".
-    recordSessionSearch(_historyTerm, getSelectedLang())
+    recordSessionSearch(_historyTerm, familiarSearch ? 'known' : getSelectedLang())
     // The same answer, kept for the re-renders that come after this search
     // finishes: a settings change redraws these results, but by then the
     // one-search override is gone and the toggle may say the opposite.
     window._resultsSearchLang = getSelectedLang()
+    window._resultsFamiliarSearchLanguage = familiarSearch
 
     window._resultsSearchRegex = !window.unprocessedSearchText && isTypedRegex(txt)
     window.searchText = window._resultsSearchRegex ? txt : expandWords(txt.toLowerCase())
@@ -10278,15 +10329,6 @@ async function fetchSRTs(searchText, requestToken) {
 
     window.allSubtitles = window.allSubtitles || {}
 
-    // Cancellation: each fetchSRTs invocation gets a fresh token; older runs
-    // bail out as soon as they observe a newer token, so the UI stays responsive
-    // when the user types quickly.
-    window._subtitleSearchToken = requestToken == null
-      ? (window._subtitleSearchToken || 0) + 1
-      : requestToken
-    myToken = window._subtitleSearchToken
-    _searchRunsInFlight++
-    finishLoading = _beginSearchLoading(myToken)
     _resetLibrarySearch()
     // A new search starts on its first page, and the old search's page bar
     // goes with its results — a click on it now would page the old results.
@@ -10315,7 +10357,13 @@ async function fetchSRTs(searchText, requestToken) {
       showResultContainer()
       return
     }
-    const primaryQuery = window.searchText
+    const knownForms = familiarSearch && !window._resultsSearchRegex
+      ? _getVocabularyHintIndex().search(txt).flatMap(hit => vocabularyLineParts(hit.line).forms
+        .filter(form => !hit.forms.size || hit.forms.has(vocabularyFormKey(form))))
+      : []
+    const primaryQuery = knownForms.length
+      ? expandWords([...new Set(knownForms)].join(SEPARATOR_PIPE).toLowerCase(), getLangFromUrl().code)
+      : window.searchText
     if (window._appSettings.includeSrtsInSearch === false) {
       window.searchResult = []
       window.wordToItemsMap = window._shownWordToItemsMap = window._lastWordToItemsMap = {}
@@ -10332,7 +10380,7 @@ async function fetchSRTs(searchText, requestToken) {
     if (myToken !== window._subtitleSearchToken) return false
     const primaryHits = Object.values(words).flat().length
     console.log("[stem-fallback] primary hits:", primaryHits, "searchText:", window.searchText)
-    if (!window._resultsSearchRegex && !window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && primaryHits === 0) {
+    if (!familiarSearch && !window._resultsSearchRegex && !window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && primaryHits === 0) {
       // Honor forceLangForNextSearch via getSelectedLang() so a "Search here"
       // on an EN word stems against English even when the UI toggle is on SV
       // (and vice-versa). Non-en uses the URL's lang for language-specific
@@ -12670,6 +12718,7 @@ function _syncSearchSourceSettings() {
   $('#manualSearchIncludeCb').prop('checked', !!window._appSettings?.includeManualInSearch)
   $('#wordMapSearchIncludeCb').prop('checked', window._appSettings?.includeWordMapsInSearch !== false)
   $('#toggleAutoLibrarySearchCheckbox').prop('disabled', !books)
+  window.dispatchEvent(new Event('cupitorSearchSourcesReady'))
 }
 
 $(document).on('change', '#includeSrtsInSearchCb', e => {

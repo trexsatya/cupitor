@@ -97,16 +97,12 @@ async function checkMultilingualVocabulary(browser, mobile) {
   }
   const optionsButton = page.locator('#searchVocabularyByPrefixBtn')
   const openSearchOptions = async () => {
-    if (mobile) {
-      await openTools()
-      const details = tools.locator('.search-sheet-options')
-      if (await details.getAttribute('open') === null) await details.locator('summary').click()
-    } else if (!await page.locator('#searchVocabularyMenu').isVisible()) {
+    if (!await page.locator('#searchVocabularyMenu').isVisible()) {
       await optionsButton.click()
     }
   }
   const closeOptions = async () => {
-    if (mobile) await tools.getByRole('button', {name:'Close tools'}).click()
+    if (await tools.isVisible()) await tools.getByRole('button', {name:'Close tools'}).click()
     else await optionsButton.click()
   }
   const openEditPreference = mobile ? openTools : openSearchOptions
@@ -211,12 +207,19 @@ async function checkMultilingualVocabulary(browser, mobile) {
     }
     await search('peena')
     await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
+    const language = page.getByRole('combobox', {name:'Search language'})
+    assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), ['Swedish', 'Hindi'])
+    await language.selectOption({label:'Hindi'})
+    await resultsGroup.waitFor()
+    assert.match(await google.getAttribute('href'), /[?&]sl=hi&tl=sv(?:&|$)/)
     await openSearchOptions()
     await page.locator('#vocabularyLearningLanguage').selectOption('spanish')
     await page.waitForURL(/lang=spanish/)
     await results.locator('mark').filter({hasText:'beber'}).first().waitFor()
     assert.equal(await query.inputValue(), 'peena')
     assert.equal(await page.locator('#vocabularyLookupLanguage').inputValue(), 'hi')
+    assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), ['Spanish', 'Hindi'])
+    assert.equal(await language.locator('option:checked').textContent(), 'Hindi')
     assert.deepEqual(errors, [])
     console.log((mobile ? 'Mobile' : 'Desktop') + ': optional vocabulary controls and cross-language lookup passed')
   } finally { await page.close() }

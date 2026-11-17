@@ -338,7 +338,7 @@
                             <button type="button" id="searchTextClearBtn" class="lang-search-input-clear" title="Clear" aria-label="Clear" style="display:none;">×</button>
                         </span>
                         <div class="search-vocab-popover-wrap">
-                            <button class="lang-tool-btn" type="button" id="searchVocabularyByPrefixBtn" aria-controls="searchVocabularyMenu" aria-expanded="false"><i class="fas fa-sliders-h" aria-hidden="true"></i> Search options</button>
+                            <button class="lang-tool-btn" type="button" id="searchVocabularyByPrefixBtn" aria-label="Search options" aria-controls="searchVocabularyMenu" aria-expanded="false"><i class="fas fa-sliders-h" aria-hidden="true"></i><span class="search-options-desktop-label">Search options</span><span class="search-options-mobile-label">Options</span></button>
                             <div id="searchVocabularyMenu" class="search-vocab-menu" style="display:none;">
                                 <button type="button" class="lang-tool-btn search-vocab-menu-item" data-mode="prefix">Search by prefix</button>
                                 <button type="button" class="lang-tool-btn search-vocab-menu-item" data-mode="similar">Search Similar</button>
@@ -362,6 +362,7 @@
                                 <select id="searchLanguageSelect" aria-label="Search language">
                                     <option value="sv">Swedish</option>
                                     <option value="en">English</option>
+                                    <option value="known" hidden></option>
                                 </select>
                             </label>
                             <input class="tgl tgl-flip lang-inline-toggle" id="toggleLangCb" type="checkbox"
@@ -372,7 +373,14 @@
                             <div id="vocabLoadingBarFill" style="width:0;height:100%;background:#4dba87;transition:width .2s ease;"></div>
                         </div>
                     </div>
-                    <div id="mobileSearchSources"></div>
+                    <div id="mobileSearchFilters">
+                        <details class="search-sources-dropdown">
+                            <summary aria-label="Search sources"><span>Sources</span></summary>
+                            <div id="mobileSearchSources" class="search-vocab-menu"></div>
+                        </details>
+                        <div id="mobileSearchLanguage"></div>
+                        <div id="mobileSearchOptions"></div>
+                    </div>
                 </div>
 
                 <!-- Account banner: filled by language/account-panel.js -->
@@ -895,12 +903,7 @@
     <h3>Study</h3>
     <div class="search-sheet-group" id="mobileStudyActions"></div>
     <h3>Page</h3>
-    <div class="search-sheet-group" id="mobilePageActions">
-        <details class="search-sheet-options">
-            <summary><i class="fas fa-sliders-h" aria-hidden="true"></i><span>Search options</span></summary>
-            <div id="mobileSearchOptions"></div>
-        </details>
-    </div>
+    <div class="search-sheet-group" id="mobilePageActions"></div>
     <div class="search-sheet-group" id="mobileSettingsAction"></div>
 </dialog>
 
@@ -910,7 +913,7 @@
         <button type="button" data-search-close aria-label="Close help" autofocus>×</button>
     </div>
     <h3>Search</h3>
-    <p>Type a word or phrase, then press Enter. Choose a search language and check any sources to include. SRTs searches subtitles.</p>
+    <p>Type a word or phrase, then press Enter. Choose a search language and the sources to include. SRTs searches subtitles.</p>
     <h3>Explore results</h3>
     <p>Open a vocabulary match or subtitle heading to see more. Use <strong>Select clips</strong> to make a temporary playlist.</p>
     <h3>Study tools</h3>

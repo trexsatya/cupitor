@@ -19,6 +19,7 @@ function fixture(query, { subtitles = true } = {}) {
     removeHintsInBrackets: text => text.replace(/\([^)]*\)/g, ''),
     _stripExpansionMarkers: text => text.replaceAll('<*', ''),
     _haveTranslateBridge: () => true, _vocabularyLookupLanguage: () => 'en',
+    _familiarSearchLanguage: () => null,
     _translationPanelDirection: () => ({ from: 'sv', to: 'en' }),
     _hideStaleTranslationPanel() {}, _dictionaryTerms: () => [], _translateDetailed: translate,
     recordSessionSearch() {}, getSelectedLang: () => 'sv', isTypedRegex: () => false,
@@ -52,6 +53,26 @@ test('translation is requested when subtitle search is disabled and vocabulary i
   expect(await context.fetchSRTs(query, 1)).toBe(true);
   expect(translate).toHaveBeenCalledWith(query, 'sv', 'en', 2500);
   expect(context.fetchFromDownloadedFiles).not.toHaveBeenCalled();
+});
+
+test.each(['peena', 'पीना'])('uses the study-language subtitle forms for the hint %s', async query => {
+  const {context, translate, finishSubtitles} = fixture(query);
+  context._familiarSearchLanguage = () => 'hi';
+  context._vocabularyCatalogReady = Promise.resolve();
+  context._loadSharedHintTranslations = jest.fn(async () => {});
+  const searchHints = jest.fn(() => [{line: '(drink) | dricka | dricker |', forms: new Set(['dricka', 'dricker'])}]);
+  context._getVocabularyHintIndex = () => ({search: searchHints});
+  context.vocabularyLineParts = () => ({forms: ['dricka', 'dricker']});
+  context.vocabularyFormKey = word => word;
+  context._translationPanelDirection = () => ({from: 'hi', to: 'sv'});
+  const search = context.fetchSRTs(query, 1);
+  finishSubtitles([]);
+  expect(await search).toBe(true);
+  expect(context._loadSharedHintTranslations).toHaveBeenCalledWith('hi');
+  expect(searchHints).toHaveBeenCalledWith(query);
+  expect(context.fetchFromDownloadedFiles).toHaveBeenCalledWith('dricka|dricker', 1);
+  expect(translate).toHaveBeenCalledWith(query, 'hi', 'sv', 2500);
+  expect(context.window._vocabularySearchText).toBe(query);
 });
 
 test.each(['[^ ]+Stå ', 'hej|hello', 'word.*', 'x', 'hej\\s+du'])(

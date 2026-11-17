@@ -11,22 +11,25 @@ export function wireMobileSearch() {
   const tools = document.getElementById('mobileSearchTools')
   const help = document.getElementById('searchHelp')
   const pageActions = document.getElementById('mobilePageActions')
-  const options = document.getElementById('mobileSearchOptions')
+  const options = document.getElementById('searchVocabularyMenu')
+  const sourceMenu = document.querySelector('.search-sources-dropdown')
+  const sourceSummary = sourceMenu.querySelector('summary span')
   const placements = [
     ['searchSourceChips', document.getElementById('mobileSearchSources')],
+    [document.querySelector('.mobile-search-language'), document.getElementById('mobileSearchLanguage')],
+    [document.querySelector('.search-vocab-popover-wrap'), document.getElementById('mobileSearchOptions')],
     ['headerAddToVocabBtn', document.getElementById('mobileStudyActions')],
     ['vocabularyEditOption', document.getElementById('mobileStudyActions')],
-    ['cupPageFindToggle', pageActions, 'Find on page', pageActions.firstElementChild],
-    ['vocabularyLanguages', options],
-    ['searchVocabularyMenu', options],
-    ['toggleMainControl', options, 'Toggle search controls'],
-    ['toggleResultContainer', options, 'Toggle results'],
+    ['cupPageFindToggle', pageActions, 'Find on page'],
+    ['vocabularyLanguages', options, null, options.firstElementChild],
+    ['toggleMainControl', pageActions, 'Toggle search controls'],
+    ['toggleResultContainer', pageActions, 'Toggle results'],
     ['toggleMediaPanelBtn', pageActions, 'Media'],
     ['toggleMediaContainer', pageActions, 'Toggle video'],
     ['toggleSettingsPanelBtn', document.getElementById('mobileSettingsAction'), 'Settings'],
   ].map(([id, target, label, before]) => {
-    const control = document.getElementById(id)
-    const anchor = document.createComment(id)
+    const control = typeof id === 'string' ? document.getElementById(id) : id
+    const anchor = document.createComment(control.id || control.className)
     control.before(anchor)
     if (label) {
       const text = document.createElement('span')
@@ -39,6 +42,7 @@ export function wireMobileSearch() {
 
   function updateLayout() {
     if (!mobile.matches && tools.open) tools.close()
+    sourceMenu.open = false
     for (const { control, target, anchor, before } of placements) {
       if (mobile.matches) target.insertBefore(control, before || null)
       else anchor.after(control)
@@ -49,6 +53,29 @@ export function wireMobileSearch() {
   }
   mobile.addEventListener('change', updateLayout)
   updateLayout()
+
+  const sources = document.getElementById('searchSourceChips')
+  const refreshSources = () => {
+    const selected = [...sources.querySelectorAll('input:checked')].map(input => input.labels[0].textContent.trim())
+    sourceSummary.textContent = selected.length === 1 ? selected[0] : selected.length ? `Sources (${selected.length})` : 'Sources'
+  }
+  sources.addEventListener('change', refreshSources)
+  window.addEventListener('cupitorSearchSourcesReady', refreshSources)
+  refreshSources()
+  document.addEventListener('click', event => {
+    if (sourceMenu.open && !sourceMenu.contains(event.target)) sourceMenu.open = false
+  }, true)
+  sourceMenu.addEventListener('toggle', () => {
+    if (sourceMenu.open && document.getElementById('searchVocabularyByPrefixBtn').getAttribute('aria-expanded') === 'true') {
+      document.getElementById('searchVocabularyByPrefixBtn').click()
+    }
+  })
+  sourceMenu.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !sourceMenu.open) return
+    event.stopPropagation()
+    sourceMenu.open = false
+    sourceMenu.querySelector('summary').focus()
+  })
 
   for (const [dialog, openerId] of [[tools, 'mobileSearchToolsBtn'], [help, 'searchHelpBtn']]) {
     const opener = document.getElementById(openerId)

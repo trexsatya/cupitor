@@ -36,7 +36,7 @@
 
 #mobileSearchNav, .search-source-check, .mobile-search-label, .mobile-search-icon, .mobile-search-language,
 .mobile-action-label, .mobile-translation-label,
-.desktop-control-icon, #mobileSearchSources { display: none; }
+.desktop-control-icon, #mobileSearchFilters, .search-options-mobile-label { display: none; }
 
 .search-vocabulary-category { color: #666; font-size: .75em; margin-inline-start: 6px; }
 .search-prefixes-label { font-size: .85em; color: #666; margin: 8px 0 4px; }
@@ -143,7 +143,7 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     background: #fff;
 }
 .search-sheet-group:last-child { margin-bottom: 0; }
-.search-sheet-group > button, .search-sheet-options summary, #mobileSearchOptions button {
+.search-sheet-group > button {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -158,16 +158,14 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     white-space: normal;
     cursor: pointer;
 }
-.search-sheet-group > button:not(:first-child), .search-sheet-options {
+.search-sheet-group > button:not(:first-child) {
     border-top: 1px solid var(--search-divider);
 }
 .search-sheet-group > button:disabled { color: var(--search-muted); cursor: default; }
-.search-sheet-group button:not(:disabled):hover, .search-sheet-options summary:hover { background: var(--search-active); }
+.search-sheet-group button:not(:disabled):hover { background: var(--search-active); }
 .search-sheet-group :is(svg, i) { flex: none; width: 1.3rem; color: var(--search-accent); text-align: center; }
 .search-sheet .mobile-action-label { display: inline; }
-.search-sheet-options summary { list-style: none; }
-.search-sheet-options summary::-webkit-details-marker { display: none; }
-.search-sheet-options summary::after, .search-related > summary::after {
+.search-related > summary::after {
     content: '';
     flex: none;
     margin-inline-start: auto;
@@ -177,17 +175,7 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     height: 7px;
     transform: rotate(45deg);
 }
-:is(.search-sheet-options, .search-related)[open] > summary::after { transform: rotate(225deg); }
-#mobileSearchOptions { margin-inline: 10px; }
-#mobileSearchOptions #searchVocabularyMenu {
-    display: block !important;
-    position: static;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    box-shadow: none;
-}
-
+.search-related[open] > summary::after { transform: rotate(225deg); }
 @media (min-width: 1000px) {
     body:not(.rec-playing,.practice-mode,.local-media-mode,.youtube-media-mode) {
         background: var(--search-paper);
@@ -458,7 +446,7 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     }
     .lang-toolbar #prevSearchBtn { border-radius: 10px 0 0 10px; }
     .lang-toolbar #nextSearchBtn { border-radius: 0 10px 10px 0; border-inline-start: 0; }
-    .lang-toolbar-center, .lang-search-row .search-vocab-popover-wrap,
+    .lang-toolbar-center, .lang-search-top-row > .search-vocab-popover-wrap,
     .lang-select-with-toggle > :is(.toggle, #toggleLangCb), #practiceLogFrontBanner,
     #scrollButton { display: none !important; }
 
@@ -504,11 +492,8 @@ body:has(.search-sheet[open]) { overflow: hidden; }
     .lang-select-with-toggle .select2-selection--single .select2-selection__rendered { color: inherit; padding-inline: 12px 30px; width: 100%; }
     .lang-select-with-toggle .select2-selection--single .select2-selection__placeholder { color: var(--search-muted); }
     .lang-select-with-toggle .select2-selection--single .select2-selection__arrow { top: 50%; transform: translateY(-50%); }
-    .mobile-search-language { position: relative; display: flex; flex: 4 1 122px; min-width: 0; margin: 0; align-items: center; }
-    .mobile-search-language i { display: none; }
-    #searchLanguageSelect { width: 100%; padding: 0 8px; }
-
-    .vocabulary-picker-open > .mobile-search-language { display: none; }
+    #mobileSearchLanguage .mobile-search-language { display: block; margin: 0; }
+    #mobileSearchLanguage i { display: none; }
     .vocabulary-picker-open .select2-selection--single {
         background: var(--search-active);
         border-color: var(--search-accent);
@@ -544,54 +529,75 @@ body:has(.search-sheet[open]) { overflow: hidden; }
         color: var(--search-ink);
     }
 
-    #mobileSearchSources {
-        display: block;
-        container-type: inline-size;
-    }
-    .search-source-chips {
+    #mobileSearchFilters {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        justify-content: start;
-        margin: 0;
-        gap: 0 7px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
     }
-    @container (min-width: 18.75rem) {
-        .search-source-chips { grid-template-columns: repeat(4, 4.2rem); }
-    }
-    .search-source-chip, .search-source-chip:has(input:checked) {
-        min-height: 44px;
-        min-width: 0;
-        padding: 0;
-        border: 0;
-        gap: 0;
-        background: transparent;
-        color: var(--search-ink);
-        text-align: center;
-        font-size: .85rem;
-        font-weight: 500;
-    }
-    .search-source-chip::before { display: none; }
-    .search-source-face {
+    .search-sources-dropdown, #mobileSearchOptions > .search-vocab-popover-wrap { position: relative; }
+    #mobileSearchFilters :is(summary, #searchLanguageSelect, #searchVocabularyByPrefixBtn) {
         box-sizing: border-box;
+        width: 100%;
+        min-height: 44px;
+        margin: 0;
+        padding: 0 8px;
+        border: 1px solid var(--search-border);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--search-ink);
+        font-size: .875rem;
+        text-align: start;
+    }
+    #mobileSearchFilters :is(summary, #searchVocabularyByPrefixBtn) {
         display: flex;
         align-items: center;
-        justify-content: center;
-        gap: 5px;
-        width: 100%;
-        min-height: 30px;
-        padding: 3px 5px;
-        border: 1px solid var(--search-border);
-        border-radius: 999px;
-        background: #fff;
-        overflow-wrap: anywhere;
+        justify-content: space-between;
+        gap: 4px;
+        list-style: none;
+        cursor: pointer;
     }
-    .search-source-chip input:checked + .search-source-face {
-        color: var(--search-accent);
+    #mobileSearchFilters summary::-webkit-details-marker { display: none; }
+    #mobileSearchFilters :is(summary, #searchVocabularyByPrefixBtn)::after {
+        content: '';
+        flex: none;
+        width: 6px;
+        height: 6px;
+        margin-inline-end: 2px;
+        border: solid var(--search-accent);
+        border-width: 0 1.5px 1.5px 0;
+        transform: rotate(45deg);
+    }
+    #mobileSearchFilters :is(.search-sources-dropdown[open] > summary, #searchVocabularyByPrefixBtn[aria-expanded="true"]) {
         background: var(--search-active);
-        border-color: currentColor;
-        font-weight: 700;
+        border-color: var(--search-accent);
     }
-    .search-source-chip:has(input:focus-visible) { outline-color: var(--search-accent); }
+    #mobileSearchFilters :is(.search-sources-dropdown[open] > summary, #searchVocabularyByPrefixBtn[aria-expanded="true"])::after {
+        transform: rotate(225deg);
+    }
+    #mobileSearchFilters .search-options-mobile-label { display: inline; }
+    #mobileSearchFilters #searchVocabularyByPrefixBtn :is(i, .search-options-desktop-label) { display: none; }
+    #mobileSearchSources { inset-inline: 0 auto; min-width: 9rem; }
+    .search-sources-dropdown:not([open]) #mobileSearchSources { display: none; }
+    #mobileSearchSources .search-source-chips { display: grid; gap: 0; margin: 0; }
+    #mobileSearchSources .search-source-chip {
+        justify-content: flex-start;
+        min-height: 44px;
+        padding: 4px 10px;
+        border: 0;
+        border-radius: 6px;
+        background: #fff;
+        color: var(--search-ink);
+    }
+    #mobileSearchSources .search-source-chip:has(input:checked) {
+        background: var(--search-active);
+        color: var(--search-accent);
+    }
+    #mobileSearchSources .search-source-chip::before { display: none; }
+    #mobileSearchSources .search-source-face { display: flex; align-items: center; gap: 8px; }
+    #mobileSearchSources .search-source-check { order: 1; }
+    #mobileSearchOptions #searchVocabularyMenu { width: min(15rem, calc(100vw - 32px)); }
+    #mobileSearchOptions .search-vocab-menu-item { min-height: 44px; }
+    #mobileSearchOptions .vocab-lookup-controls { padding: 6px; }
 
     #mobileSearchNav {
         position: fixed;
