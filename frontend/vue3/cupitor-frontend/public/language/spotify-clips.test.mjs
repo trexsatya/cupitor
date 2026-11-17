@@ -251,6 +251,7 @@ function appPlaylist(f, events, overrides = {}) {
     openPlayingQueueDialog: noop, stopPlayingRecording: noop, togglePlayingRecordingPause: noop, navigateRecordingPlayback: noop, toggleRecPlayShuffle: noop, cycleRecPlayLoopMode: noop, _searchCurrentRecPlayWord: noop, minimizePlayingRecording: noop, restorePlayingRecording: noop,
     _showManualAudioPlayer: () => {f.win._recPlayManualAudio = null;},
     _applyRecPlayPause: paused => {f.win._recPlayPaused = paused;},
+    _playerSessionTimeout: {start: noop, cancel: noop},
     _renderPlayingBanner: (item, index) => events.push(['item', index, item]),
     _recPlayToast: value => events.push(['skip', value]), _cpBuildToast: value => events.push(['notice', value]),
     alert: value => {throw new Error(value);},
