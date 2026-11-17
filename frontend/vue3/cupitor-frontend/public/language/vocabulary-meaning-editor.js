@@ -1,5 +1,4 @@
-import { isProperlyBracketed } from './vocab-merge.js'
-import { normalizeHint, splitVocabularyHints, vocabularyLineParts } from './vocabulary-hints.js'
+import { splitVocabularyHints, vocabularyLineParts } from './vocabulary-hints.js'
 
 const control = (tag, text) => {
   const element = document.createElement(tag)
@@ -21,57 +20,32 @@ function button(text, type = 'button') {
 }
 
 export function openVocabularyEditor({
-  row, language, lookup, categories, languageName, translations, groupHintOverride, save,
+  row, language, lookup, hints, languageName, save,
 }) {
   if (document.getElementById('vocabularyMeaningEditor')) return
   const dialog = control('dialog')
   dialog.id = 'vocabularyMeaningEditor'
   dialog.setAttribute('aria-labelledby', 'vocabularyMeaningEditorTitle')
-  const title = control('h2', 'Edit vocabulary')
+  const title = control('h2', 'Edit vocabulary hints')
   title.id = 'vocabularyMeaningEditorTitle'
   const form = control('form')
   const parts = vocabularyLineParts(row.line)
 
-  const category = control('select')
-  for (const name of new Set([row.category, ...categories])) category.append(new Option(name, name))
-  category.value = row.category
-
-  const english = control('input')
-  english.value = parts.hints.join(', ')
-  const forms = control('textarea')
-  forms.value = parts.forms.join(' | ')
-  forms.required = true
-  forms.rows = 2
+  const forms = control('p', parts.forms.join(' · '))
+  forms.className = 'vocab-hint-editor-forms'
   forms.lang = language
   forms.dir = 'auto'
-  forms.setAttribute('aria-describedby', 'vocabularyFormsHelp')
-  const formsHelp = control('small', 'Separate forms with |')
-  formsHelp.id = 'vocabularyFormsHelp'
 
-  const preview = control('div')
-  preview.className = 'vocab-hint-preview'
-  preview.setAttribute('aria-live', 'polite')
-  const previewTitle = control('span', groupHintOverride
-    ? languageName(lookup) + ' hints for this line'
-    : 'Shared ' + languageName(lookup) + ' hints')
-  const previewValues = control('div')
-  preview.append(previewTitle, previewValues)
-
-  function refreshPreview() {
-    const hints = groupHintOverride
-      ? [[null, groupHintOverride]]
-      : splitVocabularyHints(english.value).map(cue => [cue, translations?.get(normalizeHint(cue, 'en'))])
-    const matches = hints.filter(([, values]) => values?.length)
-    preview.hidden = lookup === 'en' || matches.length === 0
-    previewValues.replaceChildren(...matches.map(([cue, values]) => {
-      const line = control('div')
-      if (matches.length > 1 && cue) line.append(document.createTextNode(cue + ' · '))
-      const value = control('span', values.join(' | '))
-      value.lang = lookup
-      line.append(value)
-      return line
-    }))
-  }
+  const english = lookup === 'en'
+  const separator = english ? ', ' : ' | '
+  const input = control('input')
+  input.value = hints.join(separator)
+  input.lang = lookup
+  input.dir = 'auto'
+  const hintLabel = label(languageName(lookup) + ' hints', input)
+  const help = control('small', english ? 'Separate hints with commas.' : 'Separate hints with |.')
+  help.id = 'vocabularyHintEditorHelp'
+  input.setAttribute('aria-describedby', help.id)
 
   const status = control('p')
   status.setAttribute('role', 'status')
@@ -86,40 +60,29 @@ export function openVocabularyEditor({
   cancel.onclick = () => dialog.close()
   dialog.addEventListener('cancel', event => { if (saving) event.preventDefault() })
   dialog.addEventListener('close', () => dialog.remove())
-  english.addEventListener('input', refreshPreview)
   form.onsubmit = async event => {
     event.preventDefault()
     if (saving) return
-    const hints = splitVocabularyHints(english.value)
-    const nextForms = forms.value.split('|').map(value => value.trim()).filter(Boolean)
-    const written = [...(hints.length ? ['(' + hints.join(', ') + ')'] : []), ...nextForms].join('|') + '|'
-    if (!nextForms.length || nextForms.some(value => /[\r\n]/u.test(value)) || written.startsWith('#') ||
-        /[|\r\n]/u.test(english.value) || !isProperlyBracketed(written)) {
-      status.hidden = false
-      status.textContent = 'Enter forms separated by | and balance parentheses and brackets.'
+    const next = english ? splitVocabularyHints(input.value)
+      : [...new Set(input.value.split('|').map(hint => hint.trim()).filter(Boolean))]
+    if (next.length === hints.length && next.every((hint, index) => hint === hints[index])) {
+      dialog.close()
       return
     }
-    const sameWords = nextForms.length === parts.forms.length && nextForms.every((value, i) => value === parts.forms[i])
-    const sameHints = hints.length === parts.hints.length && hints.every((value, i) => value === parts.hints[i])
-    // A category-only move can keep the exact line, including older vocabulary syntax.
-    const line = sameWords && sameHints ? row.line : written
-    saving = saveButton.disabled = cancel.disabled = true
+    saving = input.disabled = saveButton.disabled = cancel.disabled = true
     status.hidden = false
-    status.textContent = 'Saving vocabulary…'
+    status.textContent = 'Saving hints…'
     try {
-      await save({ category: category.value, line })
+      await save(next)
       dialog.close()
     } catch (error) {
-      status.textContent = error.message || 'Could not save vocabulary.'
+      status.textContent = error.message || 'Could not save hints.'
     } finally {
-      saving = saveButton.disabled = cancel.disabled = false
+      saving = input.disabled = saveButton.disabled = cancel.disabled = false
     }
   }
 
-  refreshPreview()
-  const formsLabel = label(languageName(language) + ' forms', forms)
-  formsLabel.append(formsHelp)
-  form.append(label('Category', category), label('English hints', english), preview, formsLabel, status, actions)
+  form.append(forms, hintLabel, help, status, actions)
   dialog.append(title, form)
   document.body.append(dialog)
   dialog.showModal()
