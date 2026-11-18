@@ -279,11 +279,51 @@ async function checkDialogs(browser, mobile) {
     assert.notEqual(await page.locator('#subtitleWordPopover').getAttribute('hidden'), null)
     await page.reload({ waitUntil: 'networkidle' })
     await page.waitForFunction(() => window._appSettings?.searchChannels?.[0] === 'Ljudbok Klubb')
+    await checkCountdown(page, mobile)
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile touch' : 'Desktop'}: dialog opening, Settings handoff, filtering, cancel, persistence, dismissal and popovers passed`)
   } finally {
     await page.close()
   }
+}
+
+async function checkCountdown(page, mobile) {
+  await page.clock.install()
+  const toggle = page.getByRole('button', { name: 'Timer', exact: true })
+  const dialog = page.getByRole('dialog', { name: 'Timer', exact: true })
+  const openTimer = async () => {
+    if (mobile) {
+      await page.locator('#mobileSearchToolsBtn').tap()
+      await toggle.tap()
+    } else await toggle.click()
+    await dialog.waitFor()
+  }
+  await openTimer()
+  const minutes = dialog.getByRole('spinbutton', { name: 'Minutes' })
+  const seconds = dialog.getByRole('spinbutton', { name: 'Seconds' })
+  await dialog.getByRole('button', { name: '5 min', exact: true }).click()
+  assert.equal(await minutes.inputValue(), '5')
+  await minutes.fill('0')
+  await seconds.fill('20')
+  await dialog.getByRole('button', { name: 'Start', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Pause', exact: true }).click()
+  const paused = await dialog.locator('#cupTimerReadout').textContent()
+  await page.clock.fastForward(30000)
+  assert.equal(await dialog.locator('#cupTimerReadout').textContent(), paused)
+  await dialog.getByRole('button', { name: 'Resume', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Close timer' }).click()
+  await page.reload({ waitUntil: 'networkidle' })
+  await openTimer()
+  await dialog.getByRole('button', { name: 'Pause', exact: true }).waitFor()
+  await dialog.getByRole('button', { name: 'Close timer' }).click()
+  await page.clock.fastForward(21000)
+  await page.locator('#cupTimerAlert').waitFor({ state: 'visible' })
+  assert.equal(await page.locator('#cupTimerAlertText').textContent(), 'Time’s up')
+  await page.getByRole('button', { name: 'Dismiss', exact: true }).click()
+  await openTimer()
+  await dialog.getByRole('button', { name: 'Reset', exact: true }).click()
+  assert.equal(await seconds.inputValue(), '20')
+  await dialog.getByRole('button', { name: 'Close timer' }).click()
 }
 
 async function checkVocabInsertPositions(browser, mobile) {

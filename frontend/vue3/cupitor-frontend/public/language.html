@@ -49,6 +49,7 @@
     </script>
     <script type="module" src="/language/language.js"></script>
     <script type="module" src="/language/page-find.js"></script>
+    <script type="module" src="/language/countdown-timer.js"></script>
     <script type="module" src="/language/word-maps-entry.js"></script>
     <link href="/language.css" rel="stylesheet"/>
     <link href="/language/mobile-search.css" rel="stylesheet"/>
@@ -312,6 +313,10 @@
                                 <circle cx="10.8" cy="10.8" r="6.7"></circle>
                                 <path d="m16 16 5 5"></path>
                             </svg>
+                        </button>
+                        <button type="button" id="cupTimerToggle" class="lang-tool-btn lang-tool-btn--icon" title="Timer" aria-label="Timer" aria-haspopup="dialog" aria-controls="cupTimerDialog">
+                            <i class="fas fa-stopwatch" aria-hidden="true"></i>
+                            <span id="cupTimerMenuStatus" aria-hidden="true"></span>
                         </button>
                         <button id="toggleMediaContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle video" data-toggle-state="collapsed" data-view-id="mediaContainer">
                             <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
@@ -910,6 +915,38 @@
     <div class="search-sheet-group" id="mobilePageActions"></div>
     <div class="search-sheet-group" id="mobileSettingsAction"></div>
 </dialog>
+
+<dialog id="cupTimerDialog" class="search-sheet" aria-labelledby="cupTimerTitle">
+    <div class="search-sheet-header">
+        <h2 id="cupTimerTitle">Timer</h2>
+        <button type="button" id="cupTimerClose" aria-label="Close timer" autofocus>×</button>
+    </div>
+    <form id="cupTimerForm" novalidate>
+        <div class="cup-timer-face">
+            <div id="cupTimerFields" class="cup-timer-fields">
+                <label><input id="cupTimerMinutes" type="number" inputmode="numeric" min="0" max="999" step="1" value="15">Minutes</label>
+                <span aria-hidden="true">:</span>
+                <label><input id="cupTimerSeconds" type="number" inputmode="numeric" min="0" max="59" step="1" value="00">Seconds</label>
+            </div>
+            <div id="cupTimerReadout" role="timer" aria-label="Time remaining" hidden>15:00</div>
+            <div id="cupTimerStatus" role="status"></div>
+        </div>
+        <div id="cupTimerPresets" class="cup-timer-presets" role="group" aria-label="Timer presets">
+            <button type="button" data-timer-minutes="5" aria-pressed="false">5 min</button>
+            <button type="button" data-timer-minutes="15" aria-pressed="true">15 min</button>
+            <button type="button" data-timer-minutes="25" aria-pressed="false">25 min</button>
+        </div>
+        <div id="cupTimerError" role="alert"></div>
+        <div class="cup-timer-actions">
+            <button type="button" id="cupTimerReset" hidden>Reset</button>
+            <button type="submit" id="cupTimerAction">Start</button>
+        </div>
+    </form>
+</dialog>
+<div id="cupTimerAlert" hidden>
+    <strong id="cupTimerAlertText" role="status"></strong>
+    <button type="button" id="cupTimerDismiss">Dismiss</button>
+</div>
 
 <dialog id="searchHelp" class="search-sheet search-help" aria-labelledby="searchHelpTitle">
     <div class="search-sheet-header">
