@@ -122,17 +122,28 @@ export function parseVocabularyCatalog(raw) {
     Array.isArray(item.forms) && new Set(item.forms.map(form => form?.id)).size === item.forms.length &&
     item.forms.every(form => record(form) && validId(form.id) && typeof form.text === 'string' &&
       Array.isArray(form.meanings) && form.meanings.every(validId))
-  if (value?.version !== 1 || !entriesAre(value.meanings, validMeaning) || !entriesAre(value.groups, validGroup)) {
+  if (value?.version !== 1 || !entriesAre(value.meanings, validMeaning) || !entriesAre(value.groups, validGroup) ||
+      (value.sharedHints !== undefined && !entriesAre(value.sharedHints, (language, entries) =>
+        validLanguage(language) && entriesAre(entries, (cue, hints) =>
+          !!cue && normalizeHint(cue, 'en') === cue && strings(hints))))) {
     throw new Error('The vocabulary meanings file has an unsupported format.')
   }
   return value
 }
 
 export function mergeVocabularyCatalogs(...catalogs) {
+  const sharedHints = Object.create(null)
+  for (const catalog of catalogs) {
+    for (const [language, entries] of Object.entries(catalog.sharedHints || {})) {
+      sharedHints[language] ||= Object.create(null)
+      Object.assign(sharedHints[language], entries)
+    }
+  }
   return {
     version: 1,
     meanings: Object.assign(Object.create(null), ...catalogs.map(catalog => catalog.meanings)),
     groups: Object.assign(Object.create(null), ...catalogs.map(catalog => catalog.groups)),
+    sharedHints,
   }
 }
 
@@ -141,7 +152,7 @@ export function mergeVocabularyCatalogs(...catalogs) {
 export function changeVocabularyCatalog(raw, baseline, patch) {
   const live = parseVocabularyCatalog(raw)
   for (const kind of ['meanings', 'groups']) {
-    for (const [id, value] of Object.entries(patch[kind])) {
+    for (const [id, value] of Object.entries(patch[kind] || {})) {
       if (JSON.stringify(Object.hasOwn(live[kind], id) ? live[kind][id] : undefined) !==
           JSON.stringify(Object.hasOwn(baseline[kind], id) ? baseline[kind][id] : undefined)) {
         throw new Error('This meaning or vocabulary group changed in the repository. Reload before editing it.')
@@ -149,7 +160,25 @@ export function changeVocabularyCatalog(raw, baseline, patch) {
       live[kind][id] = value
     }
   }
+  for (const [language, changes] of Object.entries(patch.sharedHints || {})) {
+    live.sharedHints ||= {}
+    const entries = Object.assign(Object.create(null), live.sharedHints[language])
+    const previous = baseline.sharedHints?.[language]
+    for (const [cue, hints] of Object.entries(changes)) {
+      if (JSON.stringify(entries[cue]) !== JSON.stringify(previous && Object.hasOwn(previous, cue) ? previous[cue] : undefined)) {
+        throw new Error('This shared hint changed in the repository. Reload before editing it.')
+      }
+      entries[cue] = hints
+    }
+    live.sharedHints[language] = entries
+  }
   return live
+}
+
+export function sharedVocabularyHints(catalog, language, translations, cue) {
+  const key = normalizeHint(cue, 'en')
+  const entries = catalog.sharedHints?.[language]
+  return entries && Object.hasOwn(entries, key) ? entries[key] : translations?.get(key) || []
 }
 
 export function assertVocabularyRow(raw, baselineRaw, category, line) {
@@ -198,6 +227,14 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
   const byRow = new Map()
   const exactRows = new Map()
   const rowsByCategory = new Map()
+  const sharedEdits = new Map(Object.entries(catalog.sharedHints?.[source] || {}))
+  const sharedForLine = hints => {
+    if (!sharedEdits.size) return undefined
+    const cues = hints.map(hint => normalizeHint(hint, 'en'))
+    if (!cues.some(cue => sharedEdits.has(cue))) return undefined
+    return [...new Set(cues.flatMap(cue => sharedEdits.get(cue) ?? translations.get(cue) ?? []))]
+  }
+  const editedRows = new Map()
   const put = (map, key, value) => {
     if (!map.has(key)) map.set(key, [])
     map.get(key).push(value)
@@ -207,6 +244,8 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
     if (!forms.length) continue
     put(exactRows, rowKey(row.category, row.line), row)
     put(rowsByCategory, row.category, { row, hints, forms })
+    const edited = sharedForLine(hints)
+    if (edited) editedRows.set(row.index, edited)
     for (const hint of hints) put(byEnglish, normalizeHint(hint, 'en'), row)
   }
   const groups = Object.entries(catalog.groups).filter(([, group]) => group.language === target)
@@ -236,12 +275,12 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
   }
   const overrides = new Map()
   if (source !== 'en') {
-    for (const group of byRow.values()) {
-      const aliases = group.hintOverrides?.[source]
+    for (const row of rows) {
+      const aliases = byRow.get(row.index)?.hintOverrides?.[source] ?? editedRows.get(row.index)
       if (!aliases) continue
       const keys = new Set(aliases.map(alias => normalizeHint(alias, source)))
-      overrides.set(group.row.index, { aliases, keys })
-      for (const key of keys) put(byPhrase, key, { row: group.row, aliases })
+      overrides.set(row.index, { aliases, keys })
+      for (const key of keys) put(byPhrase, key, { row, aliases })
     }
   }
   for (const [english, matchingRows] of byEnglish) {
@@ -293,6 +332,8 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
     if (group?.hintOverrides?.[source]) return group.hintOverrides[source]
     const own = linkedHints(group?.meanings)
     const { hints, forms } = vocabularyLineParts(line)
+    const edited = sharedForLine(hints)
+    if (edited) return edited
     const shared = hints.flatMap(hint => translations.get(normalizeHint(hint, 'en')) || [])
     const names = new Set(forms.map(form => normalizeHint(form)))
     const linked = group?.forms.filter(form => names.has(normalizeHint(form.text))).flatMap(form => linkedHints(form.meanings))

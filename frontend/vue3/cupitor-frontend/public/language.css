@@ -2087,6 +2087,28 @@ body.practice-mode #srtLoadingBanner {
 #vocabularyMeaningEditor small {
     font-size: 0.85rem;
 }
+#vocabularyMeaningEditor .vocab-hint-editor-shared {
+    min-width: 0;
+    margin-block: 1rem;
+    padding: 0.5rem 0 0;
+    border: 0;
+    border-top: 1px solid #9ca9a5;
+}
+#vocabularyMeaningEditor .vocab-hint-editor-shared legend {
+    float: none;
+    width: auto;
+    margin: 0;
+    padding-inline-end: 0.5rem;
+    font: inherit;
+    font-weight: 600;
+}
+#vocabularyMeaningEditor form > button {
+    display: block;
+    margin-block: 0.5rem;
+}
+#vocabularyMeaningEditor form > button[hidden] {
+    display: none;
+}
 #vocabularyMeaningEditor .vocab-hint-editor-actions {
     display: flex;
     justify-content: flex-end;
