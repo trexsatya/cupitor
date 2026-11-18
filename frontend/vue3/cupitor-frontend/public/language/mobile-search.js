@@ -20,6 +20,7 @@ export function wireMobileSearch() {
     [document.querySelector('.search-vocab-popover-wrap'), document.getElementById('mobileSearchOptions')],
     ['headerAddToVocabBtn', document.getElementById('mobileStudyActions')],
     ['vocabularyEditOption', document.getElementById('mobileStudyActions')],
+    ['cupTimerToggle', document.getElementById('mobileStudyActions'), 'Timer'],
     ['cupPageFindToggle', pageActions, 'Find on page'],
     ['vocabularyLanguages', options, null, options.firstElementChild],
     ['toggleMainControl', pageActions, 'Toggle search controls'],

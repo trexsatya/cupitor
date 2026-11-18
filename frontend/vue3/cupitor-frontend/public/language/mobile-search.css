@@ -165,6 +165,65 @@ body:has(.search-sheet[open]) { overflow: hidden; }
 .search-sheet-group button:not(:disabled):hover { background: var(--search-active); }
 .search-sheet-group :is(svg, i) { flex: none; width: 1.3rem; color: var(--search-accent); text-align: center; }
 .search-sheet .mobile-action-label { display: inline; }
+
+#cupTimerMenuStatus { display: none; font-size: .875rem; font-variant-numeric: tabular-nums; }
+.search-sheet #cupTimerMenuStatus:not(:empty) { display: inline; order: 1; margin-inline-start: auto; }
+#cupTimerToggle[data-timer-active] { color: var(--search-accent); background: var(--search-active); }
+.cup-timer-face {
+    padding: 16px 12px;
+    border-radius: 16px;
+    background: var(--search-active);
+    text-align: center;
+}
+.cup-timer-fields { display: flex; align-items: flex-start; justify-content: center; gap: 8px; }
+.cup-timer-fields > span { font-size: 2rem; line-height: 48px; }
+.cup-timer-fields label { display: grid; gap: 4px; margin: 0; font-size: .875rem; }
+.cup-timer-fields input {
+    width: 4.4rem;
+    height: 48px;
+    padding: 2px;
+    border: 1px solid var(--search-border);
+    border-radius: 8px;
+    background: #fff;
+    color: inherit;
+    font-size: 1.75rem;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    appearance: textfield;
+}
+.cup-timer-fields input::-webkit-inner-spin-button { appearance: none; }
+#cupTimerReadout { font-size: clamp(2rem, 10vw, 3rem); font-variant-numeric: tabular-nums; }
+#cupTimerStatus { font-size: .875rem; color: var(--search-muted); }
+.cup-timer-presets, .cup-timer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.cup-timer-presets button, .cup-timer-actions button, #cupTimerDismiss {
+    min-height: 44px;
+    padding: 6px 14px;
+    border: 1px solid var(--search-border);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--search-ink);
+    font-weight: 600;
+    cursor: pointer;
+}
+.cup-timer-presets button[aria-pressed="true"] { background: var(--search-active); border-color: var(--search-accent); }
+#cupTimerAction { flex: 1; background: var(--search-accent); color: #fff; border-color: var(--search-accent); }
+#cupTimerError { color: #a32626; margin-top: 6px; }
+#cupTimerAlert {
+    position: fixed;
+    inset: auto 16px calc(var(--mobile-search-nav-height, 0px) + 16px) auto;
+    z-index: 2147483647;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 10px 8px 16px;
+    border: 1px solid var(--search-border);
+    border-radius: 12px;
+    background: var(--search-paper);
+    color: var(--search-ink);
+    box-shadow: 0 4px 20px rgb(0 0 0 / 20%);
+}
+#cupTimerDialog [hidden], #cupTimerAlert[hidden] { display: none; }
+
 .search-related > summary::after {
     content: '';
     flex: none;
