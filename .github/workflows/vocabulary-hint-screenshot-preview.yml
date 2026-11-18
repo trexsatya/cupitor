@@ -1,0 +1,115 @@
+name: Vocabulary hint screenshot preview
+on:
+  push:
+    branches: [preview/vocabulary-hint-screenshots]
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    defaults:
+      run:
+        working-directory: frontend/vue3/cupitor-frontend
+    env:
+      CYPRESS_INSTALL_BINARY: '0'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/vue3/cupitor-frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Capture Cupitor on mobile and desktop
+        run: |
+          if [ -z "$(fc-list :lang=hi)" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq fonts-noto-core
+          fi
+          mkdir -p screenshot-output
+          node <<'JS'
+          const { chromium } = require('playwright')
+          const assert = require('node:assert/strict')
+          const { serveFixtures } = require('./tests/browser/language-dialogs.cjs')
+          const category = 'Body Parts, Accessories and Actions'
+          const line = '(dear to someone)|(ligga någon) varmt om hjärtat|(vara)ögonsten|'
+          const vocabulary = '#' + category + '\n(stare)|stirra|stirrade|\n' + line +
+            '\n(pupil)|pupill|pupiller|\n(look)|blick|blickar|\n'
+          async function capture(browser, mobile) {
+            const page = await browser.newPage({
+              viewport: mobile ? {width: 390, height: 780} : {width: 1080, height: 690},
+              deviceScaleFactor: mobile ? 2 : 1.5, isMobile: mobile, hasTouch: mobile,
+            })
+            await page.route('**/*', route => {
+              const pathname = new URL(route.request().url()).pathname
+              if (pathname.endsWith('/swedish/vocabulary.txt')) {
+                return route.fulfill({contentType:'text/plain', body:vocabulary})
+              }
+              if (pathname.endsWith('/vocabulary-hints/hi.txt')) {
+                return route.fulfill({contentType:'text/plain', body:'dear to someone = किसी को प्रिय\n'})
+              }
+              if (pathname.endsWith('/vocabulary-meanings.json')) {
+                const groups = mobile ? {} : {
+                  'preview-ogonsten': {language:'sv', category, line, forms:[],
+                    hintOverrides:{hi:['आँखों का तारा']}},
+                }
+                return route.fulfill({json:{version:1, meanings:{}, groups}})
+              }
+              if (pathname.endsWith('/vocabulary-hints-hi.json') || pathname.endsWith('/srts/index.json')) {
+                return route.fulfill(pathname.endsWith('/srts/index.json') ? {json:[]} : {status:404, body:''})
+              }
+              return serveFixtures(route)
+            })
+            await page.addInitScript(() => {
+              window.dontConfirmOnRefresh = true
+              window.FamiliarLanguageBridge = { postMessage: value => { window.__previewFamiliar = value } }
+            })
+            await page.goto('http://127.0.0.1:3000/language.html?lang=swedish', {waitUntil:'networkidle'})
+            const options = page.locator('#searchVocabularyByPrefixBtn')
+            const mobileTools = page.locator('#mobileSearchTools')
+            if (mobile) await page.locator('#mobileSearchToolsBtn').click()
+            else await options.click()
+            await page.getByRole('checkbox', {name:'Show Edit vocabulary'}).check()
+            if (mobile) {
+              await mobileTools.getByRole('button', {name:'Close tools'}).click()
+              await options.click()
+            }
+            await page.getByRole('combobox', {name:'I know well', exact:true}).selectOption('hi')
+            await page.waitForFunction(() => window.__previewFamiliar === 'hi')
+            await options.click()
+            const query = page.locator('#searchText')
+            await query.fill('ögonsten')
+            await query.press('Tab')
+            const result = page.locator('#vocabularyResult .vocabulary-segment').filter({hasText:'ögonsten'}).first()
+            await result.getByRole('button', {name:'Edit vocabulary', exact:true}).click()
+            const dialog = page.getByRole('dialog', {name:'Edit vocabulary hints'})
+            const lineHint = dialog.getByRole('textbox', {name:'Hindi hints for this line'})
+            const shared = dialog.getByRole('group', {name:'Shared Hindi catalog'})
+            assert.equal(await lineHint.inputValue(), mobile ? 'किसी को प्रिय' : 'आँखों का तारा')
+            assert.equal(await shared.getByRole('textbox', {name:'dear to someone'}).inputValue(), 'किसी को प्रिय')
+            assert.equal(await dialog.getByRole('button', {name:'Use catalog hints'}).isVisible(), !mobile)
+            await page.evaluate(() => document.fonts.ready)
+            await page.screenshot({path:mobile ? 'screenshot-output/cupitor-hints-mobile.png' :
+              'screenshot-output/cupitor-hints-desktop.png', animations:'disabled', caret:'hide'})
+            await page.close()
+          }
+          ;(async () => {
+            const browser = await chromium.launch({headless:true, executablePath:'/usr/bin/google-chrome', args:['--no-sandbox']})
+            try {
+              await capture(browser, true)
+              await capture(browser, false)
+            } finally { await browser.close() }
+          })().catch(error => { console.error(error); process.exitCode = 1 })
+          JS
+      - name: Attach screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cupitor-vocabulary-hint-screenshots
+          path: frontend/vue3/cupitor-frontend/screenshot-output/
+          if-no-files-found: error
+          retention-days: 5
