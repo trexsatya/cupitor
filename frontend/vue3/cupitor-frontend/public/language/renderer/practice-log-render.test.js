@@ -2,7 +2,7 @@
 import { buildPracticeLogPlanVM, buildPracticeLogHistoryVM } from './practice-log-render-vm'
 import {
   renderPracticeLogPlan, renderPracticeLogHistory,
-  openPracticeLogGoalEditor, openPracticeLogProgressEditor,
+  openPracticeLogGoalEditor, openPracticeLogProgressEditor, openPracticeLogWeekNoteEditor,
 } from './practice-log-render'
 
 const vm = (isNext = false) => buildPracticeLogPlanVM(['Reading', 'Writing'], {
@@ -54,6 +54,23 @@ test('goal editor has one text field, retaining legacy notes in the draft', () =
   expect(dialog.querySelector('input').disabled).toBe(false)
   dialog.querySelector('form').dispatchEvent(new Event('submit'))
   expect(save).toHaveBeenCalledWith({ goal: textarea.value, unit: 'sessions', target: 1 })
+})
+
+test('week overview displays the note and opens its own multiline editor', () => {
+  const overview = document.createElement('div')
+  const dialog = makeDialog()
+  const save = jest.fn()
+  const current = { ...vm(), note: 'First line\nSecond line' }
+  const editWeekNote = () => openPracticeLogWeekNoteEditor(dialog, current.weekLabel, current.note, save)
+  renderPracticeLogPlan(current, document.createElement('div'), { editWeekNote }, overview)
+  expect(overview.querySelector('.practice-log-week-note p').textContent).toBe(current.note)
+  overview.querySelector('[aria-label="Edit week note"]').click()
+  const textarea = dialog.querySelector('[aria-label="Week note"]')
+  expect(textarea.value).toBe(current.note)
+  textarea.value = '  '
+  dialog.querySelector('form').dispatchEvent(new Event('submit'))
+  expect(save).toHaveBeenCalledWith('')
+  expect(dialog.open).toBe(false)
 })
 
 test('unitless updates use the percentage slider and counted updates use the stepper', () => {

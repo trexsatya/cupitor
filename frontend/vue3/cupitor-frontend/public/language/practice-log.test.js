@@ -313,3 +313,34 @@ describe("weekly progress records", () => {
     expect(merged.historyRetainWeeks).toBe(3);
   });
 });
+
+describe("week notes", () => {
+  test("merges each note by edit time, including clears, alongside goal edits", () => {
+    const remote = normalizePracticeLog({
+      weeks: { "2026-W45": { Reading: { goal: "Read", updatedAt: 2 } } },
+      weekNotes: { "2026-W45": { text: "Old note", updatedAt: 1 }, "2026-W46": { text: "Keep", updatedAt: 4 } },
+    });
+    const local = normalizePracticeLog({ weekNotes: {
+      "2026-W45": { text: "", updatedAt: 3 }, "2026-W46": { text: "Stale", updatedAt: 1 },
+      "2026-W47": { text: "Plan", updatedAt: 5 },
+    } });
+    expect(normalizePracticeLog({}).weekNotes).toEqual({});
+    const merged = mergePracticeLog(remote, local);
+    expect(merged.weeks["2026-W45"].Reading.goal).toBe("Read");
+    expect(merged.weekNotes).toEqual({
+      "2026-W45": { text: "", updatedAt: 3 }, "2026-W46": { text: "Keep", updatedAt: 4 },
+      "2026-W47": { text: "Plan", updatedAt: 5 },
+    });
+    expect(mergePracticeLog(local, remote).weekNotes).toEqual(merged.weekNotes);
+  });
+
+  test("retains note-only weeks and uses the same cutoff for notes and goals", () => {
+    const data = normalizePracticeLog({ historyRetainWeeks: 1, weeks: { "2026-W43": {} }, weekNotes: {
+      "2026-W43": { text: "Old recap" }, "2026-W44": { text: "Retained recap" },
+      "2026-W45": { text: "", updatedAt: 2 }, "2026-W46": { text: "This week" }, "2026-W47": { text: "Next week" },
+    } });
+    prunePracticeLogWeeks(data, "2026-W46", "2026-W47");
+    expect(data.weeks).toEqual({});
+    expect(Object.keys(data.weekNotes)).toEqual(["2026-W44", "2026-W45", "2026-W46", "2026-W47"]);
+  });
+});

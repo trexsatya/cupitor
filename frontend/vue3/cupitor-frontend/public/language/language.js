@@ -86,6 +86,7 @@ import {
   prunePracticeLogWeeks as _corePrunePracticeLogWeeks,
   hasPracticeLogEntry,
   practiceLogMeasure,
+  practiceLogWeekNote,
   updatePracticeGoal,
   updatePracticeProgress,
   mergePracticeLog as _mergePracticeLog,
@@ -462,6 +463,7 @@ import {
   openPracticeLogActivityPicker,
   openPracticeLogGoalEditor,
   openPracticeLogProgressEditor,
+  openPracticeLogWeekNoteEditor,
 } from './renderer/practice-log-render.js';
 import {
   tierLabel as _tierLabel,
@@ -3346,7 +3348,9 @@ function _renderPracticeLogPlan() {
   if (!data) return
   const weekLabel = _practiceLogActiveWeekLabel()
   const week = data.weeks[weekLabel]
-  const vm = buildPracticeLogPlanVM(data.customItems, week, weekLabel, window._practiceLogActiveTab === 'next')
+  const vm = buildPracticeLogPlanVM(data.customItems, week, weekLabel,
+    window._practiceLogActiveTab === 'next', practiceLogWeekNote(data, weekLabel))
+  const overview = $('#practiceLogWeekLabel')[0]
   const mount = $('#practiceLogItems')[0]
   const add = $('#practiceLogAddItemBtn')[0]
   const editor = $('#practiceLogEditor')[0]
@@ -3393,6 +3397,15 @@ function _renderPracticeLogPlan() {
   }
   renderPracticeLogPlan(vm, mount, {
     editGoal,
+    editWeekNote: () => openPracticeLogWeekNoteEditor(editor, weekLabel, vm.note, text => {
+      if (window._practiceLog !== data) return false
+      if (text === vm.note) return true
+      data.weekNotes[weekLabel] = { text, updatedAt: Date.now() }
+      _markPracticeLogEdited(data)
+      editor.addEventListener('close', () => overview.querySelector('.practice-log-note-action')?.focus(), { once: true })
+      _renderPracticeLogPlan()
+      return true
+    }),
     update: item => openPracticeLogProgressEditor(editor, item, (value, skip) => {
       const current = data.weeks[weekLabel]?.[item.name] || {}
       if (practiceLogMeasure(current).unit !== item.measure.unit) {
@@ -3402,7 +3415,7 @@ function _renderPracticeLogPlan() {
       }
       return saveRecord(item.name, record => updatePracticeProgress(record, value, { skip }), '.practice-log-update')
     }),
-  }, $('#practiceLogWeekLabel')[0])
+  }, overview)
 }
 
 function _renderPracticeLogHistory() {
@@ -3550,7 +3563,7 @@ async function _commitPracticeLogToGithub() {
     await _userData.flush()
     const syncedText = await commitWithMerge({
       filePath,
-      commitMessage: 'practice-log: update weekly goals and progress',
+      commitMessage: 'practice-log: update weekly practice log',
       merge: remoteText => {
         // Invalid remote data must not be overwritten.
         const remote = remoteText?.trim() ? normalizePracticeLog(JSON.parse(remoteText)) : null

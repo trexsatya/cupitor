@@ -1,5 +1,5 @@
 import {
-  hasPracticeLogEntry, practiceLogMeasure, practiceWeekDates,
+  hasPracticeLogEntry, practiceLogMeasure, practiceWeekDates, practiceLogWeekLabels, practiceLogWeekNote,
   PRACTICE_LOG_DEFAULT_ITEMS, PRACTICE_LOG_DEFAULT_RETAIN, PRACTICE_LOG_STATUSES,
 } from '../practice-log.js'
 
@@ -17,7 +17,7 @@ function projectItem(name, record) {
   }
 }
 
-export function buildPracticeLogPlanVM(customItems, weekRecord, weekLabel, isNext = false) {
+export function buildPracticeLogPlanVM(customItems, weekRecord, weekLabel, isNext = false, note = '') {
   const entries = Object.entries(weekRecord || {}).filter(([, record]) => hasPracticeLogEntry(record))
   const planned = new Map(entries)
   const names = [...new Set([...(customItems || []), ...planned.keys()])]
@@ -26,7 +26,7 @@ export function buildPracticeLogPlanVM(customItems, weekRecord, weekLabel, isNex
     removable: (customItems || []).includes(name) && !PRACTICE_LOG_DEFAULT_ITEMS.includes(name),
   }))
   return {
-    weekLabel, dates: practiceWeekDates(weekLabel), isNext, items,
+    weekLabel, dates: practiceWeekDates(weekLabel), isNext, items, note,
     done: items.filter(item => item.status === 'done').length,
     available: names.filter(name => !planned.has(name)),
   }
@@ -34,13 +34,14 @@ export function buildPracticeLogPlanVM(customItems, weekRecord, weekLabel, isNex
 
 export function buildPracticeLogHistoryVM(data, currentWeek = '') {
   const retainWeeks = Math.max(1, parseInt(data?.historyRetainWeeks, 10) || PRACTICE_LOG_DEFAULT_RETAIN)
-  const pastLabels = Object.keys(data?.weeks || {}).filter(label => !currentWeek || label < currentWeek)
+  const pastLabels = practiceLogWeekLabels(data).filter(label => !currentWeek || label < currentWeek)
   const weeks = pastLabels.sort().reverse().flatMap(label => {
-    const items = Object.entries(data.weeks[label] || {})
+    const items = Object.entries(data.weeks?.[label] || {})
       .filter(([, record]) => hasPracticeLogEntry(record))
       .map(([name, record]) => projectItem(name, record))
-    return items.length ? [{
-      label, dates: practiceWeekDates(label), items, done: items.filter(item => item.status === 'done').length,
+    const note = practiceLogWeekNote(data, label)
+    return items.length || note ? [{
+      label, dates: practiceWeekDates(label), items, note, done: items.filter(item => item.status === 'done').length,
     }] : []
   }).slice(0, retainWeeks)
   return { state: weeks.length ? 'normal' : 'empty', retainWeeks, weeks }
