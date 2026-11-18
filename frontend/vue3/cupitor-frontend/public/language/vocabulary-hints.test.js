@@ -199,3 +199,39 @@ test('localized edits override both shared aliases and linked hints for the edit
   expect(cleared.hintsFor(group.line)).toEqual([])
   expect(cleared.search('peena').map(hit => hit.line)).toEqual([other])
 })
+
+test('shared catalog edits apply across learning languages, with line overrides taking precedence', () => {
+  const group = vocabularyHintSeed.groups['swedish-drink']
+  const other = '(DRINK, sip)|smutta|'
+  const vocab = { [group.category]: [group.line, other] }
+  const translations = parseVocabularyHintTranslations('drink = पीना | peena\nsip = घूँट लेना', 'hi')
+  const patch = { sharedHints: { hi: { drink: ['पेय लेना'] } } }
+  const catalog = mergeVocabularyCatalogs(vocabularyHintSeed, changeVocabularyCatalog(null, parseVocabularyCatalog(null), patch))
+  const shared = indexFor(vocab, 'sv', 'hi', catalog, translations)
+  expect(shared.hintsFor(other)).toEqual(['पेय लेना', 'घूँट लेना'])
+  expect(shared.search('पेय लेना').map(hit => hit.line)).toEqual([group.line, other])
+  expect(shared.search('peena')).toEqual([])
+  expect(indexFor({ Drinks: ['(drink)|beber|'] }, 'es', 'hi', catalog, translations).search('पेय लेना')).toHaveLength(1)
+
+  const local = mergeVocabularyCatalogs(catalog, { meanings: {}, groups: {
+    'swedish-drink': { ...group, hintOverrides: { hi: ['पानी पीना'] } },
+  } })
+  const indexedLocal = indexFor(vocab, 'sv', 'hi', local, translations)
+  expect(indexedLocal.search('पेय लेना').map(hit => hit.line)).toEqual([other])
+  expect(indexedLocal.hintsFor(group.line)).toEqual(['पानी पीना'])
+  expect(indexFor(vocab, 'sv', 'en', local).search('drink')).toHaveLength(2)
+})
+
+test('merges shared translations per cue and rejects a conflicting change to the same cue', () => {
+  const empty = parseVocabularyCatalog(null)
+  const drink = { sharedHints: { hi: { drink: ['पीना'] } } }
+  const sip = { sharedHints: { hi: { sip: ['घूँट लेना'] }, fr: { sip: ['siroter'] } } }
+  const first = changeVocabularyCatalog(null, empty, drink)
+  const both = changeVocabularyCatalog(JSON.stringify(first), empty, sip)
+  expect(parseVocabularyCatalog(JSON.stringify(both)).sharedHints).toEqual({
+    hi: { drink: ['पीना'], sip: ['घूँट लेना'] }, fr: { sip: ['siroter'] },
+  })
+  expect(() => changeVocabularyCatalog(JSON.stringify(both), empty, drink)).toThrow(/shared hint changed/)
+  const cleared = changeVocabularyCatalog(JSON.stringify(both), both, { sharedHints: { hi: { drink: [] } } })
+  expect(mergeVocabularyCatalogs(both, cleared).sharedHints.hi).toEqual({ drink: [], sip: ['घूँट लेना'] })
+})

@@ -29,7 +29,7 @@ import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import {
   assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex, mergeVocabularyCatalogs,
   GENERATED_HINDI_HINTS_FILE, normalizeHint, parseVocabularyCatalog, parseVocabularyHintLanguages,
-  parseVocabularyHintTranslations, replaceEnglishVocabularyHints, reviseVocabularyGroup, SHARED_HINTS_DIRECTORY,
+  parseVocabularyHintTranslations, replaceEnglishVocabularyHints, reviseVocabularyGroup, sharedVocabularyHints, SHARED_HINTS_DIRECTORY,
   vocabularyFormKey, vocabularyHintGroupId, vocabularyLineParts, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
 } from './vocabulary-hints.js';
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js';
@@ -3631,6 +3631,7 @@ function _refreshSearchLanguageChoices() {
 function _installVocabularyCatalog() {
   _vocabularyCatalog = mergeVocabularyCatalogs(_generatedVocabularyHints, vocabularyHintSeed, _vocabularyCatalogOther, _vocabularyCatalogSelf)
   _vocabularyLookupChoices = [...new Set(['en', ..._sharedHintLanguages,
+    ...Object.keys(_vocabularyCatalog.sharedHints),
     ...Object.values(_vocabularyCatalog.meanings).flatMap(meaning => Object.keys(meaning.hints))])]
   _refreshVocabularyLookupSelect()
   _renderVocabularyForHintLanguage()
@@ -3755,11 +3756,15 @@ async function _editVocabularyMatch(match) {
   const index = _getVocabularyHintIndex(matcher, lookup)
   const group = index.groupFor(row.index)
   const english = lookup === 'en'
-  const hints = english ? vocabularyLineParts(row.line).hints : index.hintsFor(row.line, row.index)
+  const cues = vocabularyLineParts(row.line).hints
+  const hints = english ? cues : index.hintsFor(row.line, row.index)
+  const translations = _sharedHintTranslations.get(lookup)
+  const sharedHints = english ? [] : [...new Map(cues.map(cue => [normalizeHint(cue, 'en'), cue])).values()]
+    .map(cue => ({ cue, hints: sharedVocabularyHints(_vocabularyCatalog, lookup, translations, cue) }))
   openVocabularyEditor({
-    row, language, lookup, hints,
+    row, language, lookup, hints, sharedHints, hasOverride: !!group?.hintOverrides?.[lookup],
     languageName: _vocabularyLanguageName,
-    async save(nextHints) {
+    async save(nextHints, sharedChanges) {
       context.assertCurrent()
       const { category } = row
       const local = _ownVocabulary()
@@ -3784,18 +3789,28 @@ async function _editVocabularyMatch(match) {
           return nextText
         },
       }]
-      if (group || !english) {
+      const patch = {}
+      if (sharedChanges.length) {
+        patch.sharedHints = { [lookup]: Object.fromEntries(sharedChanges.map(([cue, aliases]) => [normalizeHint(cue, 'en'), aliases])) }
+      }
+      if (english ? !!group : nextHints !== undefined) {
         const id = group?.id || await vocabularyHintGroupId(language, row)
         const current = group || { language, category, line, forms: [] }
         const updated = reviseVocabularyGroup(current, row.line, { category, line })
-        if (!english) updated.hintOverrides = { ...current.hintOverrides, [lookup]: nextHints }
+        if (!english) {
+          updated.hintOverrides = { ...current.hintOverrides }
+          if (nextHints === null) delete updated.hintOverrides[lookup]
+          else updated.hintOverrides[lookup] = nextHints
+          if (!Object.keys(updated.hintOverrides).length) delete updated.hintOverrides
+        }
+        patch.groups = { [id]: updated }
+      }
+      if (patch.groups || patch.sharedHints) {
         files.push({
           path: VOCABULARY_CATALOG_PATH,
           getContent(remote) {
             context.assertCurrent()
-            nextCatalog = changeVocabularyCatalog(remote, catalogBaseline, {
-              groups: { [id]: updated }, meanings: {},
-            })
+            nextCatalog = changeVocabularyCatalog(remote, catalogBaseline, patch)
             return JSON.stringify(nextCatalog, null, 2) + '\n'
           },
         })

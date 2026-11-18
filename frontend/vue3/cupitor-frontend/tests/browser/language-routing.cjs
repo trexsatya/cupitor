@@ -51,7 +51,7 @@ async function checkMultilingualVocabulary(browser, mobile) {
   const errors = []
   const swedishVocabulary = '#Shapes, arrangements and conditions\n(opening, gap)|öppning|slits|hål|glugg|gluggar|springa|springor|\n' +
     '#Food, Drink, kitchen, Eating\n(drink)|dricka|dricker|drack|druckit|\n(sip)|smutta|smuttar|\n' +
-    '#Objects\n(chair)|stol|stolar|\n#Phrases\n(greeting)|ha en bra dag|\n'
+    '#Objects\n(chair)|stol|stolar|\n#Phrases\n(greeting)|ha en bra dag|\n#Other verbs\n(sip)|sippa|\n'
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/*', route => {
     const pathname = new URL(route.request().url()).pathname
@@ -234,8 +234,10 @@ async function checkMultilingualVocabulary(browser, mobile) {
     await search('sip')
     const sip = results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'smuttar'})
     await sip.getByRole('button', {name:'Edit vocabulary'}).click()
-    const hindiHints = editor.getByRole('textbox', {name:'Hindi hints'})
+    const hindiHints = editor.getByRole('textbox', {name:'Hindi hints for this line'})
     assert.equal(await hindiHints.inputValue(), 'घूँट लेना')
+    const sharedSip = editor.getByRole('group', {name:'Shared Hindi catalog'}).getByRole('textbox', {name:'sip'})
+    assert.equal(await sharedSip.inputValue(), 'घूँट लेना')
     await page.evaluate(vocabulary => {
       window.__hintWrites = []
       const original = window.GitHubUtils.commitMultipleFiles
@@ -249,6 +251,7 @@ async function checkMultilingualVocabulary(browser, mobile) {
       }
     }, swedishVocabulary)
     await hindiHints.fill('घूँट भरना | ghoont bharna')
+    await sharedSip.fill('चुस्की लेना | chuski lena')
     await editor.getByRole('button', {name:'Save changes'}).click()
     await editor.waitFor({state:'detached'})
     const writes = await page.evaluate(() => window.__hintWrites)
@@ -257,11 +260,13 @@ async function checkMultilingualVocabulary(browser, mobile) {
     const [updated] = Object.values(writes[0][1].groups)
     assert.equal(updated.line, '(sip)|smutta|smuttar|')
     assert.deepEqual(updated.hintOverrides, {hi:['घूँट भरना', 'ghoont bharna']})
+    assert.deepEqual(writes[0][1].sharedHints, {hi:{sip:['चुस्की लेना', 'chuski lena']}})
     await language.selectOption({label:'Hindi'})
     await search('ghoont bharna')
     await sip.waitFor()
     assert.match(await sip.innerText(), /घूँट भरना/)
-    await search('घूँट लेना')
+    await search('chuski lena')
+    await results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'sippa'}).waitFor()
     await sip.waitFor({state:'detached'})
     await search('peena')
     await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
