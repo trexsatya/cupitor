@@ -65,6 +65,7 @@ export function defaultPracticeLog() {
   return {
     customItems: PRACTICE_LOG_DEFAULT_ITEMS.slice(),
     weeks: {},
+    weekNotes: {},
     historyRetainWeeks: PRACTICE_LOG_DEFAULT_RETAIN,
   }
 }
@@ -78,6 +79,7 @@ export function normalizePracticeLog(j) {
     j.customItems = PRACTICE_LOG_DEFAULT_ITEMS.slice()
   }
   if (!j.weeks || typeof j.weeks !== 'object') j.weeks = {}
+  if (!j.weekNotes || typeof j.weekNotes !== 'object' || Array.isArray(j.weekNotes)) j.weekNotes = {}
   if (!Number.isFinite(j.historyRetainWeeks) || j.historyRetainWeeks < 1) {
     j.historyRetainWeeks = PRACTICE_LOG_DEFAULT_RETAIN
   }
@@ -103,17 +105,31 @@ export function addDays(date, days) {
   return d
 }
 
+export function practiceLogWeekLabels(data) {
+  return [...new Set([...Object.keys(data?.weeks || {}), ...Object.keys(data?.weekNotes || {})])]
+}
+
+export function practiceLogWeekNote(data, weekLabel) {
+  const text = data?.weekNotes?.[weekLabel]?.text
+  return typeof text === 'string' ? text.trim() : ''
+}
+
 // Drop weeks older than the retention horizon (keep the most-recent N by
 // ISO label, which sorts chronologically). Always keeps `currentLabel`
 // and `nextLabel` even if N is tiny — those are the actively edited rows.
 // Mutates `data` in-place and returns it.
 export function prunePracticeLogWeeks(data, currentLabel, nextLabel) {
   const N = Math.max(1, parseInt(data.historyRetainWeeks, 10) || PRACTICE_LOG_DEFAULT_RETAIN)
-  const keep = new Set(Object.keys(data.weeks).sort()
-    .filter(label => !currentLabel || label < currentLabel).slice(-N))
-  if (currentLabel) keep.add(currentLabel)
-  if (nextLabel) keep.add(nextLabel)
-  Object.keys(data.weeks).forEach(wk => { if ((!currentLabel || wk < currentLabel) && !keep.has(wk)) delete data.weeks[wk] })
+  const labels = practiceLogWeekLabels(data).sort()
+  const oldest = labels.filter(label => (!currentLabel || label < currentLabel) &&
+    (Object.hasOwn(data.weeks || {}, label) || practiceLogWeekNote(data, label))).at(-N)
+  if (!oldest) return data
+  for (const label of labels) {
+    if (label < oldest && label !== nextLabel) {
+      delete data.weeks?.[label]
+      delete data.weekNotes?.[label]
+    }
+  }
   return data
 }
 
@@ -182,6 +198,12 @@ export function mergePracticeLog(remote, local) {
   for (const [name, edit] of activities) {
     if (edit.available && !out.customItems.includes(name)) out.customItems.push(name)
   }
+  // A cleared note retains its edit time so an older copy cannot restore it.
+  const weekNotes = new Map(Object.entries(remote.weekNotes || {}))
+  for (const [week, note] of Object.entries(local.weekNotes || {})) {
+    if ((note?.updatedAt || 0) >= (weekNotes.get(week)?.updatedAt || 0)) weekNotes.set(week, note)
+  }
+  out.weekNotes = Object.fromEntries(weekNotes)
   const weekKeys = new Set([...Object.keys(remote.weeks || {}), ...Object.keys(local.weeks || {})])
   weekKeys.forEach(wk => {
     const r = (remote.weeks && remote.weeks[wk]) || {}

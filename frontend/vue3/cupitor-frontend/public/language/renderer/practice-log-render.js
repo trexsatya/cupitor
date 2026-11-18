@@ -46,6 +46,12 @@ function bar(item) {
   return progress
 }
 
+function weekNote(text, edit) {
+  const header = element('div', 'practice-log-note-header', element('h3', '', 'Week note'))
+  if (edit) header.append(button('Edit', 'practice-log-ghost practice-log-note-action', edit, 'Edit week note'))
+  return element('section', 'practice-log-week-note', header, element('p', '', text))
+}
+
 export function renderPracticeLogPlan(vm, mount, callbacks, weekLabelEl = null) {
   if (weekLabelEl) {
     const { range, week, year } = vm.dates
@@ -54,6 +60,8 @@ export function renderPracticeLogPlan(vm, mount, callbacks, weekLabelEl = null) 
     if (!vm.isNext && vm.items.length) {
       weekLabelEl.append(element('p', 'practice-log-summary', icon('check-circle'), completion(vm.done, vm.items.length)))
     }
+    weekLabelEl.append(vm.note ? weekNote(vm.note, callbacks.editWeekNote)
+      : button('Add week note', 'practice-log-ghost practice-log-note-action', callbacks.editWeekNote))
   }
   const cards = vm.items.map(item => {
     const name = element('h3', 'practice-log-item-name', item.name)
@@ -83,7 +91,7 @@ export function renderPracticeLogHistory(vm, mount) {
   const firstRender = !mount.querySelector('details[data-week]')
   mount.replaceChildren()
   if (!vm.weeks.length) {
-    mount.append(element('p', 'practice-log-empty', 'No history yet. Previous weeks appear here once you’ve set a goal or logged progress.'))
+    mount.append(element('p', 'practice-log-empty', 'No history yet. Previous weeks appear here once you’ve set a goal, logged progress or added a week note.'))
     return
   }
   let year
@@ -95,11 +103,12 @@ export function renderPracticeLogHistory(vm, mount) {
     const summary = element('summary', 'practice-log-history-week-header',
       element('strong', '', week.dates.range),
       element('span', 'practice-log-week-id', `Week ${week.dates.week}`),
-      icon('chevron-down'),
-      element('span', 'practice-log-summary', completion(week.done, week.items.length)))
+      icon('chevron-down'))
+    if (week.items.length) summary.append(element('span', 'practice-log-summary', completion(week.done, week.items.length)))
     const group = element('details', 'practice-log-history-week', summary)
     group.dataset.week = week.label
     group.open = openWeeks.has(week.label) || (firstRender && index === 0)
+    if (week.note) group.append(weekNote(week.note))
     week.items.forEach(item => {
       const goal = element('div', 'practice-log-history-goal', element('h3', '', item.name))
       if (item.goal) goal.append(element('p', '', item.goal))
@@ -173,6 +182,15 @@ function editorContext(item, weekLabel) {
   const detail = weekLabel ? practiceWeekTitle(weekLabel) : item.goal
   return element('p', 'practice-log-editor-context', activityIcon(item.name),
     element('span', '', element('strong', '', item.name), detail ? ` · ${detail}` : ''))
+}
+
+export function openPracticeLogWeekNoteEditor(dialog, weekLabel, text, saveNote) {
+  const note = element('textarea')
+  note.rows = 4
+  note.value = text
+  openEditor(dialog, text ? 'Edit week note' : 'Add week note',
+    element('p', 'practice-log-editor-context', practiceWeekTitle(weekLabel)),
+    [field('Week note', note)], 'Save note', () => saveNote(note.value.trim()))
 }
 
 export function openPracticeLogGoalEditor(dialog, item, weekLabel, saveGoal, removeActivity, removeGoal) {
