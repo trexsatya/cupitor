@@ -84,6 +84,21 @@ async function checkGroups(browser, mobile) {
       fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
       await page.locator('#vocabularyResult').screenshot({ path: path.join(process.env.SCREENSHOT_DIR, 'compound-groups-' + (mobile ? 'mobile' : 'desktop') + '.png') })
     }
+    // Only the actual result should be marked in its expanded context.
+    await page.evaluate(() => {
+      window.vocabulary = { Movement: [
+        '(splash)|sprätta|sprätter|',
+        '(spread)|sprida|sprider|',
+        '(splay)|spreta (åt olika håll)|spretande|',
+      ] }
+      window.searchText = 'spreta'
+      window.renderVocabularyFindings('spreta')
+    })
+    const splay = page.locator('#vocabularyResult [data-vocab-match-kind="exact"]')
+    await splay.locator('.similar-segment-header').click()
+    assert.deepEqual(await splay.locator('.similar-segment-header mark').allTextContents(), ['spreta'])
+    assert.deepEqual(await splay.locator('.similar-segment-body mark').allTextContents(), ['spreta'])
+    assert.match(await splay.locator('.similar-segment-body').innerText(), /sprätta.*sprida/s)
     // Competing root fragments must not consume a real component and send it
     // into the capped prefix suggestions. These are the reported vocabulary
     // rows, including the misleading shorter split and an unrelated ending.
