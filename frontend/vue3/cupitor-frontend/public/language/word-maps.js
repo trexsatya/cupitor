@@ -131,6 +131,18 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     status.textContent =
       'Saved maps could not be read. Export or recover the stored data before saving new maps.'
   }
+  // The last-opened map is a browser preference, separate from synced map data.
+  const lastMapKey = `${storageKey}:last-opened`
+  let lastMapId = null
+  try { lastMapId = window.localStorage.getItem(lastMapKey) } catch (_) {}
+  function rememberMap(id) {
+    lastMapId = id
+    try {
+      if (id) window.localStorage.setItem(lastMapKey, id)
+      else window.localStorage.removeItem(lastMapKey)
+    } catch (_) { /* storage may be unavailable */ }
+  }
+  const lastOpenedMap = () => maps.find(item => item.id === lastMapId)
   let mapIndex = createWordMapIndex(maps)
   const header = el('header'),
     title = el('h2', 'Word maps'),
@@ -375,6 +387,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
       persistMaps(next, map.id, () => {
         maps = next
         activate(maps[0] || null)
+        rememberMap(savedMap?.id ?? null)
       })
     })
   )
@@ -1006,14 +1019,17 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     return !saving && (!hasDraft() || confirm('Discard unsaved changes to this word map?'))
   }
   function switchMap(item) {
-    if (!item || item.id === map.id) return !!item
-    if (!mayLeave()) return false
-    activate(item)
+    if (!item) return false
+    if (item.id !== map.id) {
+      if (!mayLeave()) return false
+      activate(item)
+    }
+    rememberMap(item.id)
     return true
   }
   function discardDraft() {
     if (saving) return
-    activate(savedMap || maps[0] || null)
+    activate(savedMap || lastOpenedMap() || maps[0] || null)
     status.textContent = 'Changes discarded.'
   }
   function applyPendingEdits() {
@@ -1035,6 +1051,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     persistMaps(next, nextMap.id, () => {
       maps = next
       savedMap = nextMap
+      rememberMap(nextMap.id)
       draftStart = JSON.stringify(nextMap)
       if (JSON.stringify(map) === submitted && !changedInspector() &&
           name.value.trim() === map.name && folderInput.value.trim() === (map.folder || '')) {
@@ -1089,7 +1106,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
           draftStart = current ? JSON.stringify(current) : null
           drawPicker()
         } else {
-          activate(current || maps[0] || null)
+          activate(lastOpenedMap() || current || maps[0] || null)
           if (focused && map.id === focused.mapId) revealSearchResult(focused)
         }
         window.dispatchEvent(new window.CustomEvent('wordmapschanged', { detail: { storageKey } }))
@@ -2026,7 +2043,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     formDefaults = formState(form)
     refreshDraftActions()
   }
-  activate(maps[0] || null)
+  activate(lastOpenedMap() || maps[0] || null)
   setMode(map.nodes.length ? 'read' : 'edit')
   dialog.showModal()
   scale(window.innerWidth < 700 ? -0.65 : -0.45)

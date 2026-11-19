@@ -79,6 +79,31 @@ test('edit, connect, save and reopen; appearance and lookup survive', () => {
   click('Find vocabulary & clips')
   assert.equal(lookup, 'Lodrät')
 })
+test('reopens the last saved map per scope, with a fallback for missing maps', () => {
+  setup()
+  const maps = ['first', 'second'].map(id => ({
+    version: 1, id, name: id, nodes: [], edges: [],
+  }))
+  const open = storageKey => openWordMaps({ storageKey, onLookup() {} })
+  const picker = () => document.querySelector('[aria-label="Saved word map"]')
+  localStorage.setItem('maps', JSON.stringify(maps))
+  localStorage.setItem('other-maps', JSON.stringify(maps))
+  open('maps')
+  picker().value = 'second'
+  picker().dispatchEvent(new window.Event('change'))
+  click('Close')
+  open('other-maps')
+  assert.equal(picker().value, 'first')
+  click('Close')
+  open('maps')
+  assert.equal(picker().value, 'second')
+  click('Close')
+
+  localStorage.setItem('maps', JSON.stringify([maps[0]]))
+  open('maps')
+  assert.equal(picker().value, 'first')
+})
+
 test('invalid JSON leaves current map intact; JSON can be cancelled', () => {
   setup()
   openWordMaps({ storageKey: 'maps', onLookup() {} })
