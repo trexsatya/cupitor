@@ -157,7 +157,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   fullscreenButton.setAttribute('aria-pressed', 'false')
   fullscreenButton.title = 'Enter fullscreen'
   iconButton(close, 'M6 6l12 12M6 18L18 6')
-  header.append(title, close)
+  close.classList.add('wm-close')
+  header.append(title)
   const syncButton = button('Sync', () => runSync(false))
   syncButton.className = 'wm-sync'
   const toolbar = el('div', null, 'wm-toolbar wm-main-toolbar'),
@@ -282,7 +283,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     }
   }
   work.append(hint, viewport, script, scriptTools)
-  layout.append(library, work, detailsButton, inspector)
+  layout.append(library, work, inspector)
   const file = el('input')
   file.type = 'file'
   file.accept = '.json,application/json'
@@ -325,7 +326,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   zoomOut.setAttribute('aria-label', 'Zoom out'); zoomOut.title = 'Zoom out'
   zoomIn.setAttribute('aria-label', 'Zoom in'); zoomIn.title = 'Zoom in'
   zoomControls.append(fitButton, zoomOut, zoomLevel, zoomIn, fullscreenButton)
-  work.append(zoomControls)
+  const canvasActions = el('div', null, 'wm-canvas-actions')
+  canvasActions.append(detailsButton, zoomControls, close)
   toolbar.append(
     picker,
     name,
@@ -410,7 +412,9 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   footer.append(el('small', sync
     ? 'Save your edits, then sync to GitHub to use your maps on other devices.'
     : 'Save your edits to keep them on this device.'), status)
-  dialog.append(header, toolbar, layout, draftActions, footer, file)
+  const top = el('div', null, 'wm-top')
+  top.append(header, toolbar)
+  dialog.append(top, layout, draftActions, canvasActions, footer, file)
   document.body.append(dialog)
   dialog.addEventListener('click', e => {
     if (moreButton.contains(e.target)) return

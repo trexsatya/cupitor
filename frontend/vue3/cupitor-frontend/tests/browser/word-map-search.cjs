@@ -160,7 +160,22 @@ async function checkLibrary(browser, width) {
     assert.equal(overlap, false, 'draft actions must leave zoom controls accessible')
     await dialog.getByRole('button', {name:'Discard changes', exact:true}).click()
     assert.equal(await dialog.locator('[data-node]').count(), 3)
+    const checkCanvasActions = async () => {
+      const { details, zoom, close, dialogWidth } = await dialog.evaluate(el => {
+        const bounds = selector => el.querySelector(selector).getBoundingClientRect().toJSON()
+        return {
+          details: bounds('.wm-details-toggle'),
+          zoom: bounds('.wm-zoom-controls'),
+          close: bounds('.wm-close'),
+          dialogWidth: el.getBoundingClientRect().right,
+        }
+      })
+      assert.ok(details.width > 0 && close.width > 0, 'both controls must be visible')
+      assert.ok(details.right <= zoom.left && zoom.right <= close.left && close.right <= dialogWidth)
+      assert.ok(details.bottom > zoom.top && close.bottom > zoom.top, 'controls share a row')
+    }
     await dialog.getByRole('switch', {name:'Edit mode'}).uncheck()
+    await checkCanvasActions()
     await dialog.getByRole('button', {name:'Enter fullscreen', exact:true}).click()
     await page.waitForFunction(() => document.querySelector('#wordMapsDialog').classList.contains('wm-fullscreen'))
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
@@ -172,9 +187,13 @@ async function checkLibrary(browser, width) {
     assert.ok(Math.abs(await svg.evaluate(s => parseFloat(s.style.width)) - before) < 1)
     await dialog.getByRole('button', {name:'Fit map', exact:true}).click()
     await dialog.locator('[data-node="c"]').click()
+    await checkCanvasActions()
     await screenshot('fullscreen')
     await dialog.getByRole('button', {name:'Exit fullscreen', exact:true}).click()
     await page.waitForFunction(() => !document.querySelector('#wordMapsDialog').classList.contains('wm-fullscreen'))
+    await dialog.getByRole('button', {name:'Enter fullscreen', exact:true}).click()
+    await dialog.getByRole('button', {name:'Close', exact:true}).click()
+    await dialog.waitFor({state:'detached'})
     await page.reload({waitUntil:'networkidle'})
     await page.evaluate(() => window.openWordMaps())
     assert.equal(await page.locator('[aria-label="Saved word map"] optgroup[label="Swedish/People/Conflict"]').count(), 1)
