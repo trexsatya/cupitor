@@ -216,3 +216,11 @@ describe("expansion markers in highlighted vocab lines", () => {
       .toBe('(big) | <mark class="vocab-hl">stor</mark>(t) | <mark class="vocab-hl">stor</mark>a');
   });
 });
+
+test("whole-token vocabulary highlights skip shared prefixes and accept complete phrases", () => {
+  const opts = { wholeToken: true, stripBracketHints };
+  expect(highlightSearchInVocabLine("sprätta|sprida|spreta (åt olika håll)|spretande", "spreta", opts))
+    .toBe('sprätta | sprida | <mark class="vocab-hl">spreta</mark> (åt olika håll) | spretande');
+  expect(highlightSearchInVocabLine("rik som ett  troll", "ett troll", opts))
+    .toBe('rik som <mark class="vocab-hl">ett  troll</mark>');
+});

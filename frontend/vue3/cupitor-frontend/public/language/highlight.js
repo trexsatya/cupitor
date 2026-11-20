@@ -14,6 +14,7 @@
 //     flips to strict mode: only highlight when a search part is FULLY a
 //     prefix-or-suffix of the segment (used by the Different-prefixes
 //     dialog so candidates like "förråt" don't grab "förrå" of "förråd").
+//     `opts.wholeToken` requires a complete search term and candidate token.
 //     `opts.stripBracketHints(text) -> text` removes "(sl-pl)", "(ngt)",
 //     etc. — defaults to identity. Pass language.js's `removeHintsInBrackets`
 //     for production behaviour.
@@ -59,13 +60,18 @@ function _resolveStripper(opts) {
 
 export function highlightSearchInVocabLine(rawText, searchText, opts = {}) {
   const exactPrefix = opts.exactPrefix === true
+  const wholeToken = opts.wholeToken === true
   const stripBracketHints = _resolveStripper(opts)
   if (!rawText) return ''
   if (!searchText) return escapeHtml(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
   const searchParts = String(searchText).toLowerCase()
-    .split(SEPARATOR_PIPE).map(s => s.trim()).filter(s => s.length >= 3)
+    .split(SEPARATOR_PIPE).map(s => s.trim()).filter(s => s.length >= (wholeToken ? 1 : 3))
   if (!searchParts.length) return escapeHtml(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
 
+  const wholeMatch = wholeToken && new RegExp(
+    `(?<![\\p{L}\\p{M}\\p{N}_])(?:${searchParts.map(term =>
+      term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')).join('|')})(?![\\p{L}\\p{M}\\p{N}_])`, 'u'
+  )
   const segments = String(rawText).split(SEPARATOR_PIPE)
   const html = segments.map(seg => {
     // Work against a marker-free view of the segment ("för<*se" → "förse"),
@@ -76,7 +82,7 @@ export function highlightSearchInVocabLine(rawText, searchText, opts = {}) {
     let stripped
     try { stripped = stripExpansionMarkers(stripBracketHints(seg.toLowerCase())).trim() }
     catch (_) { stripped = segNoMark.toLowerCase().trim() }
-    if (stripped.length < 2) return escapeHtml(seg)
+    if (stripped.length < (wholeToken ? 1 : 2)) return escapeHtml(seg)
     const segLower = segNoMark.toLowerCase()
 
     // Candidate tokens: the whole stripped segment, plus each whitespace-
@@ -84,6 +90,10 @@ export function highlightSearchInVocabLine(rawText, searchText, opts = {}) {
     // can match the single token "troll").
     const candidates = []
     const fullIdx = segLower.indexOf(stripped)
+    if (wholeMatch) {
+      const hit = fullIdx >= 0 && wholeMatch.exec(stripped)
+      return hit ? renderVocabMark(seg, markMap, fullIdx + hit.index, hit[0].length) : escapeHtml(seg)
+    }
     if (fullIdx >= 0) candidates.push({ token: stripped, idx: fullIdx })
     if (/\s/.test(stripped)) {
       let cursor = 0
@@ -135,17 +145,19 @@ export function highlightSearchInVocabLine(rawText, searchText, opts = {}) {
     }
 
     const markStart = bestKind === 'prefix' ? bestTokenIdx : bestTokenIdx + bestToken.length - bestLen
-    const markEnd = markStart + bestLen
-    // Back to raw-text offsets. A span that straddles a marker swallows it,
-    // which is right: the marker is part of how that word is written.
-    const rawStart = markMap[markStart]
-    const rawEnd = markMap[markEnd - 1] + 1
-    if (rawStart === undefined || !(rawEnd > rawStart)) return escapeHtml(seg)
-    return escapeHtml(seg.slice(0, rawStart)) +
-           '<mark class="vocab-hl">' + escapeHtml(seg.slice(rawStart, rawEnd)) + '</mark>' +
-           escapeHtml(seg.slice(rawEnd))
+    return renderVocabMark(seg, markMap, markStart, bestLen)
   })
   return html.join(' | ')
+}
+
+function renderVocabMark(seg, markMap, start, length) {
+  // Convert the marker-free offsets back to the original vocabulary text.
+  const rawStart = markMap[start]
+  const rawEnd = markMap[start + length - 1] + 1
+  if (rawStart === undefined || !(rawEnd > rawStart)) return escapeHtml(seg)
+  return escapeHtml(seg.slice(0, rawStart)) +
+         '<mark class="vocab-hl">' + escapeHtml(seg.slice(rawStart, rawEnd)) + '</mark>' +
+         escapeHtml(seg.slice(rawEnd))
 }
 
 export function highlightStemInPrefixMatch(rawText, candidate, stem, opts = {}) {

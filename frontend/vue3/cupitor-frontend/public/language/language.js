@@ -3979,7 +3979,7 @@ export function renderVocabularyLineByText(lineText) {
   // Keep the matched line at its original position inside the body so the
   // surrounding-context ordering is preserved when expanded.
   surroundings.forEach(it => {
-    const $line = _buildVocabLine(it);
+    const $line = _buildVocabLine(it, undefined, it.index === idx ? undefined : '');
     if (it.index === idx) $line.addClass('highlighted');
     $body.append($line);
   });
@@ -8678,7 +8678,7 @@ function _openDifferentPrefixDialog(searchText, lang) {
         vocabItemContent.append($header)
         const $body = $('<div class="similar-segment-body" hidden></div>')
         surroundings.forEach(it => {
-          const $line = _buildVocabLine(it)
+          const $line = _buildVocabLine(it, undefined, it.index === idx ? undefined : '')
           if (it.index === idx) $line.addClass('highlighted')
           $body.append($line)
         })
@@ -8730,7 +8730,7 @@ function _openDifferentPrefixDialog(searchText, lang) {
       vocabItemContent.append($header)
       const $body = $('<div class="similar-segment-body" hidden></div>')
       surroundings.forEach(it => {
-        const $line = _buildVocabLine(it)
+        const $line = _buildVocabLine(it, undefined, it.index === lineIdx ? undefined : '')
         if (it.index === lineIdx) $line.addClass('highlighted')
         $body.append($line)
       })
@@ -8908,6 +8908,7 @@ function _highlightWordInLine(text, word) {
 function _highlightSearchInVocabLine(rawText, searchText, opts = {}) {
   return _coreHighlightSearchInVocabLine(rawText, searchText, {
     exactPrefix: opts.exactPrefix === true,
+    wholeToken: opts.wholeToken === true,
     stripBracketHints: removeHintsInBrackets,
   })
 }
@@ -8963,7 +8964,7 @@ function _displayVocabularyLine(line, index, matches = []) {
 // _buildSimilarSegment all share the same line shape (icon + escaped text +
 // data-text). `highlight` may be a candidate word to bold-blue inside the
 // matched line.
-function _buildVocabLine(it, highlight, searchOverride, hintForms, localizedHints) {
+function _buildVocabLine(it, highlight, searchOverride, hintForms, localizedHints, wholeToken = false) {
   let txt = it.item
   const $line = $('<div class="vocabulary-line"></div>')
   if (txt.trim().length) {
@@ -8999,7 +9000,7 @@ function _buildVocabLine(it, highlight, searchOverride, hintForms, localizedHint
     // partial overlaps (e.g. "förrå" of "förråd") don't get a false hit.
     const hasOverride = (searchOverride !== undefined && searchOverride !== null)
     const searchTerm = hasOverride ? searchOverride : (window.searchText || '')
-    displayHtml = _highlightSearchInVocabLine(displayed, searchTerm, { exactPrefix: hasOverride })
+    displayHtml = _highlightSearchInVocabLine(displayed, searchTerm, { exactPrefix: hasOverride, wholeToken })
   }
   $line.append(`<span>${displayHtml}</span>`)
   $line.data({ text: txt })
@@ -9193,11 +9194,13 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
   const entry = surroundings.find(it => it.index === match.index) || { item: match.line, index: match.index }
   const $item = $('<div class="vocabulary-segment"></div>').attr('data-vocab-match-kind', match.kind)
   const $content = $('<div class="vocabulary-segment-content"></div>').appendTo($item)
-  const hintForms = match.hint?.forms
+  const hintForms = match.kind === 'exact' && !match.hint?.localizedHints?.length
+    ? undefined : match.hint?.forms
   const localizedHints = match.hint?.localizedHints
-  const $header = match.kind === 'exact' && !localizedHints?.length
-    ? _buildVocabLine(entry)
-    : _buildVocabLine(entry, undefined, match.matched, hintForms, localizedHints)
+  const wholeToken = match.kind === 'exact' || match.kind === 'token'
+  const buildMatchLine = it =>
+    _buildVocabLine(it, undefined, match.matched, hintForms, localizedHints, wholeToken)
+  const $header = buildMatchLine(entry)
   $header.find('.vocab-entry-search').remove()
   $header.addClass('highlighted similar-segment-header')
     .attr({ role: 'button', tabindex: '0', 'aria-expanded': 'false' })
@@ -9207,9 +9210,7 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
   const $body = $('<div class="similar-segment-body" hidden></div>').appendTo($content)
   surroundings.forEach(it => {
     const isMatch = it.index === match.index
-    const $line = isMatch && localizedHints?.length
-      ? _buildVocabLine(it, undefined, undefined, hintForms, localizedHints)
-      : _buildVocabLine(it)
+    const $line = isMatch ? buildMatchLine(it) : _buildVocabLine(it, undefined, '')
     if (isMatch) $line.addClass('highlighted')
     $body.append($line)
   })
