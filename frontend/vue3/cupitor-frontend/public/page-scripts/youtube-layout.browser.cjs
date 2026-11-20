@@ -170,6 +170,35 @@ test('dragging the divider up and down keeps the whole picture inside the mobile
   });
 });
 
+test('dragging the bottom grip preserves the top edge and saves the new height', async () => {
+  await boot(async (page, tick) => {
+    await page.evaluate(() => window.__cupOpenSubtitlePanel());
+    await tick();
+    const panel = page.locator('.cup-sub-sidebar');
+    const grip = page.locator('.cup-sub-drag-bottom');
+    const drag = async distance => {
+      const box = await grip.boundingBox();
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x, y + distance, {steps: 4});
+      await page.mouse.up();
+    };
+    const before = await panel.boundingBox();
+    await drag(-100);
+    const smaller = await panel.boundingBox();
+    assert.ok(Math.abs(smaller.y - before.y) < 1);
+    assert.ok(Math.abs(smaller.height - (before.height - 100)) < 1);
+    assert.ok(await page.evaluate(() => Number(localStorage.getItem('cupSubBottomOffset'))) > 0);
+    await drag(50);
+    const larger = await panel.boundingBox();
+    assert.ok(Math.abs(larger.y - before.y) < 1);
+    assert.ok(Math.abs(larger.height - (before.height - 50)) < 1);
+    await assertWholePicture(page);
+  });
+});
+
 test('touch dragging and later inline player rewrites cannot crop the video', async () => {
   await boot(async (page, tick) => {
     await tick();

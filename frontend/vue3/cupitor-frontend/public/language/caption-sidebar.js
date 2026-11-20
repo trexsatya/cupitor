@@ -178,11 +178,11 @@
 
     function injectCss() {
       const existing = document.getElementById('cup-sub-css');
-      if (existing && existing.dataset.version === '24') return;
+      if (existing && existing.dataset.version === '25') return;
       if (existing) existing.remove();
       const s = document.createElement('style');
       s.id = 'cup-sub-css';
-      s.dataset.version = '24';
+      s.dataset.version = '25';
       // Build per-site CSS. The host module also marks the player wrapper
       // at runtime with .cup-shrink-target so we shrink the *container*
       // (which holds overlay controls) rather than just the <video>
@@ -205,9 +205,13 @@
 
         .cup-sub-sidebar {
           display: none;
-          position: fixed; left: 0; right: 0; bottom: 0;
+          --cup-sub-footer: 0px;
+          --cup-sub-bottom: clamp(var(--cup-sub-footer), var(--cup-sub-bottom-offset, 0vh),
+            calc(85vh - var(--cup-vid-h, 50vh)));
+          position: fixed; left: 0; right: 0; bottom: var(--cup-sub-bottom);
+          box-sizing: border-box;
           width: 100vw;
-          height: calc(100vh - var(--cup-vid-h, 50vh));
+          height: calc(100vh - var(--cup-vid-h, 50vh) - var(--cup-sub-bottom));
           z-index: 2147483646;
           background: #111; color: #eee;
           font-family: system-ui, -apple-system, sans-serif;
@@ -222,8 +226,7 @@
           user-select: none; flex: 0 0 auto;
         }
         body.cup-sub-spotify .cup-sub-sidebar {
-          bottom: var(--cup-spotify-footer-h, 96px);
-          height: calc(100vh - var(--cup-vid-h, 50vh) - var(--cup-spotify-footer-h, 96px));
+          --cup-sub-footer: var(--cup-spotify-footer-h, 96px);
         }
         .cup-sub-head button {
           background: none; border: 1px solid rgba(255,255,255,0.18);
@@ -293,19 +296,21 @@
         .cup-w:hover, .cup-w:active {
           background: rgba(255,220,80,0.45); border-radius: 2px; color: #fff;
         }
-        .cup-sub-drag {
+        .cup-sub-drag, .cup-sub-drag-bottom {
           position: absolute; top: -6px; left: 0; right: 0;
           height: 12px; cursor: ns-resize;
           z-index: 2; touch-action: none;
           display: flex; justify-content: center; align-items: center;
         }
-        .cup-sub-drag::before {
+        .cup-sub-drag-bottom {
+          position: relative; inset: auto; flex: 0 0 16px;
+        }
+        :is(.cup-sub-drag, .cup-sub-drag-bottom)::before {
           content: ''; width: 60px; height: 4px;
           background: rgba(255,255,255,0.35); border-radius: 2px;
           transition: background 0.15s ease;
         }
-        .cup-sub-drag:hover::before,
-        .cup-sub-drag.cup-dragging::before { background: rgba(120,200,255,0.7); }
+        :is(.cup-sub-drag, .cup-sub-drag-bottom):is(:hover, .cup-dragging)::before { background: rgba(120,200,255,0.7); }
         body.cup-sub-dragging { cursor: ns-resize !important; user-select: none !important; }
       `;
       (document.head || document.documentElement).appendChild(s);
@@ -335,6 +340,7 @@
         node('div', {'data-r': 'notice', class: 'cup-nolookup', hidden: true,
           style: 'padding:10px 14px;flex:0 0 auto;font-size:14px'}),
         node('div', {class: 'cup-sub-list'}),
+        node('div', {class: 'cup-sub-drag-bottom', title: 'Drag the bottom edge to resize'}),
       );
       (document.body || document.documentElement).appendChild(sb);
       state.sidebar = sb;
@@ -403,6 +409,7 @@
         for (let i = 0; i < state.cues.length; i++) renderCue(state.cues[i], i);
       }
       installDragHandle(sb.querySelector('.cup-sub-drag'));
+      installDragHandle(sb.querySelector('.cup-sub-drag-bottom'), true);
       // Reflect persisted prefs in the button states.
       sb.querySelector('[data-act="translate"]').classList.toggle('cup-on', state.translationEnabled);
     }
@@ -415,6 +422,7 @@
     }
 
     const SPLIT_KEY = 'cupSubVidH';
+    const BOTTOM_KEY = 'cupSubBottomOffset';
     const MIN_VID_VH = 20, MAX_VID_VH = 85;
     function applySplitVh(vh) {
       vh = Math.max(MIN_VID_VH, Math.min(MAX_VID_VH, vh));
@@ -426,16 +434,31 @@
       try {
         const saved = parseFloat(localStorage.getItem(SPLIT_KEY));
         if (isFinite(saved) && saved > 0) applySplitVh(saved);
+        const bottom = parseFloat(localStorage.getItem(BOTTOM_KEY));
+        if (Number.isFinite(bottom) && bottom >= 0) {
+          document.body.style.setProperty('--cup-sub-bottom-offset', bottom + 'vh');
+        }
       } catch (_) {}
     }
-    function installDragHandle(handleEl) {
+    function installDragHandle(handleEl, bottomEdge = false) {
       if (!handleEl) return;
       let dragging = false;
+      let bottomGrabOffset = 0;
       function onMove(clientY) {
         if (!dragging) return;
-        applySplitVh((clientY / window.innerHeight) * 100);
+        if (bottomEdge) {
+          const offset = (window.innerHeight - clientY - bottomGrabOffset) / window.innerHeight * 100;
+          document.body.style.setProperty('--cup-sub-bottom-offset', Math.max(0, offset) + 'vh');
+        } else {
+          applySplitVh((clientY / window.innerHeight) * 100);
+        }
       }
       function onDown(e) {
+        if (dragging || (e.button != null && e.button !== 0)) return;
+        if (bottomEdge) {
+          const clientY = e.touches?.[0]?.clientY ?? e.clientY;
+          bottomGrabOffset = state.sidebar.getBoundingClientRect().bottom - clientY;
+        }
         dragging = true;
         handleEl.classList.add('cup-dragging');
         document.body.classList.add('cup-sub-dragging');
@@ -447,6 +470,14 @@
         handleEl.classList.remove('cup-dragging');
         document.body.classList.remove('cup-sub-dragging');
         try {
+          if (bottomEdge) {
+            const bottom = parseFloat(getComputedStyle(state.sidebar).bottom) / window.innerHeight * 100;
+            if (Number.isFinite(bottom)) {
+              document.body.style.setProperty('--cup-sub-bottom-offset', bottom + 'vh');
+              localStorage.setItem(BOTTOM_KEY, String(bottom));
+            }
+            return;
+          }
           const v = parseFloat(getComputedStyle(document.body).getPropertyValue('--cup-vid-h'));
           if (isFinite(v) && v > 0) localStorage.setItem(SPLIT_KEY, String(v));
         } catch (_) {}
