@@ -3806,7 +3806,8 @@
         button.className = 'cup-nolookup';
         button.style.cssText = 'position:fixed;right:12px;top:12px;z-index:2147483647;' +
           'background:#151515;color:#fff;border:1px solid #1ed760;border-radius:16px;' +
-          'padding:9px 14px;font:bold 14px system-ui;cursor:grab;touch-action:none;user-select:none';
+          'padding:9px 14px;font:bold 14px system-ui;cursor:grab;touch-action:none;user-select:none;' +
+          'width:max-content;max-width:calc(100vw - 24px);white-space:nowrap;box-sizing:border-box';
         button.onclick = () => {
           spotifyPanelOpen = !(spotifyPanelOpen ?? isWatchPage());
           ui.buildSidebar();
