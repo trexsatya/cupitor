@@ -85,7 +85,13 @@ async function check(browser, mobile) {
       window.openPracticeMode({ single: true, queue: stored.map((it, idx) => ({...it, _recName: 'Speak', _st: 'Manual', _w: 'Card', _idx: idx})) })
     })
     await page.locator('#spotifyClipPlayer iframe').waitFor({ state: 'visible' })
-    await click('#practiceMode .practice-edit')
+    const settings = page.locator('#practiceMode .practice-settings-panel')
+    if (!await settings.isVisible()) await click('#practiceMode .practice-settings')
+    await settings.waitFor({state: 'visible'})
+    // Edit lives inside Settings. Keyboard activation also avoids conflating
+    // this save regression with mobile study-chrome tap/wake behavior.
+    await page.locator('#practiceMode .practice-edit').focus()
+    await page.keyboard.press('Enter')
     await page.locator('#manualEntryEditor #meeSource').fill('Corrected Spotify caption')
     await page.locator('#manualEntryEditor #meeTarget').fill('Updated translation')
     const editor = page.locator('#manualEntryEditor').locator('..')
@@ -94,6 +100,8 @@ async function check(browser, mobile) {
     await page.locator('#manualEntryEditor').waitFor({state: 'hidden'})
     assert.deepEqual(await page.evaluate(() => window._recordings.Speak.items.Manual.Card[0].spotifyClipRanges),
       [{url: 'https://open.spotify.com/episode/1ITvLBQG5IMWcE4BD0V49f', start: 30, end: 50}])
+    if (await settings.isVisible()) await click('#practiceMode .practice-settings')
+    await settings.waitFor({state: 'hidden'})
     await page.locator('#spotifyClipPlayer iframe').waitFor({state: 'visible'})
     await page.locator('.prec-toggle').waitFor({ state: 'visible' })
     await click('.practice-play'); await playing()
