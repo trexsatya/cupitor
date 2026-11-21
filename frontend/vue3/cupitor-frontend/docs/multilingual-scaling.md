@@ -8,6 +8,15 @@ support call metadata; they do not automatically acquire morphology or the
 full subtitle/vocabulary study pipeline. Existing language directory keys
 remain independent of locale aliases.
 
+The production build publishes `language/language-catalog.json` directly from
+this registry. Flutter's Tools → Language picker refreshes that catalog each
+time it opens and caches valid responses for offline use. It displays the
+registry's names and uses its codes, data keys and speech locales, without a
+separate native language list. Only entries with `capabilities.study: true`
+become study choices; hint/call-only metadata does not enable the study app.
+Adding a supported language to the registry and deploying Cupitor makes it
+available to updated native clients without another native release.
+
 `data-source.js` resolves each own/shared source to an owner, repository,
 branch, language and data root. Repository overrides remain disabled. This
 change migrates device data; it does not move files between GitHub repositories.
