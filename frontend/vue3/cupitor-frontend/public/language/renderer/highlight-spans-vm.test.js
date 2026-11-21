@@ -36,20 +36,32 @@ describe('buildHighlightSpans — multi-word phrase priority', () => {
   })
 })
 
-describe('buildHighlightSpans — phrase fallback to single-word', () => {
+describe('buildHighlightSpans — explicit single-word alternatives', () => {
   test('when no phrase matches, single-word alternations apply (unbounded)', () => {
     const text = 'I love designing webpages'
     const spans = buildHighlightSpans(text, 'design|love')
     expect(spans).toHaveLength(2)
     expect(spans.map(s => slice(text, s))).toEqual(['love', 'designing'])
   })
-  test('when no phrase matches, sub-words split from multi-word are BOUNDED', () => {
-    // "i" comes only from "i förväg" (multi-word). Bounded matching should
-    // NOT light up "i" inside "vi"/"vilken".
-    const text = 'vi vilken i'
-    const spans = buildHighlightSpans(text, 'i förväg')
-    expect(spans).toHaveLength(1)
-    expect(slice(text, spans[0])).toBe('i')
+  test('an unmatched phrase never highlights its individual words', () => {
+    expect(buildHighlightSpans('vi vilken i', 'i förväg')).toEqual([])
+  })
+  test('only the complete Swedish phrase is highlighted across surrounding cues', () => {
+    const phrase = 'så länge det finns liv finns det hopp'
+    for (const cue of ['för det här', 'det finns nåd.', 'så finns det hopp', 'liv och hopp']) {
+      expect(buildHighlightSpans(cue, phrase)).toEqual([])
+    }
+    const cue = 'så så länge det finns liv finns det hopp'
+    expect(buildHighlightSpans(cue, phrase).map(s => slice(cue, s))).toEqual([phrase])
+  })
+  test('plain phrases cannot match inside longer words', () => {
+    expect(buildHighlightSpans('leta efter och tänkta efter', 'ta efter')).toEqual([])
+    const cue = 'Att ta efter, i förväg.'
+    expect(buildHighlightSpans(cue, 'ta efter').map(s => slice(cue, s))).toEqual(['ta efter'])
+  })
+  test('an explicit single-word alternative still works when the phrase is absent', () => {
+    const cue = 'det finns hopp'
+    expect(buildHighlightSpans(cue, 'länge leve livet|hopp').map(s => slice(cue, s))).toEqual(['hopp'])
   })
   test('overlapping spans merge into a single span', () => {
     const text = 'abcdef'
