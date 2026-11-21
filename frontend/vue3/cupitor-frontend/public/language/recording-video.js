@@ -2,6 +2,12 @@
 // playback. In particular, BUFFERING is not permission to wait indefinitely.
 export const VIDEO_RECOVERY_MS = 20000
 export const VIDEO_STALL_RETRY_MS = 4000
+export const VIDEO_AD_WAIT_MS = 180000
+
+export function isYoutubeAdPlaying(player = window.ytPlayer) {
+  try { return window.CupitorYouTubeAds?.isPlaying(player?.getIframe?.()) === true }
+  catch (_) { return false }
+}
 
 export function getYoutubeVideoId(player) {
   try {
@@ -21,12 +27,13 @@ export function getYoutubeVideoId(player) {
 // reload at startSeconds within the attempt's shared recovery budget.
 export function confirmRecordingSeek({ player, videoId, start, requirePlaying = false,
   isCurrent, isForeground = () => true, now = () => Date.now(),
+  isAdPlaying = () => isYoutubeAdPlaying(player),
   setTimer = setTimeout, clearTimer = clearTimeout, timeoutMs = 3000 }) {
   const target = Number(start)
   return new Promise((resolve, reject) => {
     let timer, settled = 0, lastSeek = -Infinity, lastTime = null
     const began = now()
-    let lastProgress = began, bestDistance = Infinity
+    let lastProgress = began, bestDistance = Infinity, lastCheck = began, wasAd = false, adWait = 0
     const finish = (error, success = false) => {
       clearTimer(timer)
       if (error) reject(error)
@@ -38,6 +45,18 @@ export function confirmRecordingSeek({ player, videoId, start, requirePlaying = 
       if (!Number.isFinite(target) || target < 0) {
         return finish(Object.assign(new Error('Invalid clip timestamp'), { kind: 'invalid-clip' }))
       }
+      const checkTime = now(), ad = isAdPlaying()
+      if (ad || wasAd) lastProgress += checkTime - lastCheck
+      if (ad) {
+        adWait += checkTime - lastCheck
+        settled = 0; lastTime = null; lastSeek = -Infinity; bestDistance = Infinity
+      }
+      lastCheck = checkTime
+      wasAd = ad
+      if (adWait >= VIDEO_AD_WAIT_MS) {
+        return finish(Object.assign(new Error('Advertisement did not finish'), { kind: 'ad-timeout' }))
+      }
+      if (ad) { timer = setTimer(tick, 100); return }
       let state, time, loaded = false
       try {
         state = player.getPlayerState()
@@ -91,10 +110,12 @@ export function confirmRecordingSeek({ player, videoId, start, requirePlaying = 
 }
 
 export function createRecordingVideoAttempt({ videoId, isCurrent, isPaused = () => false, now = Date.now,
+  isAdPlaying = () => isYoutubeAdPlaying(),
   setTimer = setTimeout, clearTimer = clearTimeout, timeoutMs = VIDEO_RECOVERY_MS }) {
   let ended = null, timer = null, lastProgress = now(), lastCheck = now(), lastSample = now(), lastTime = null, played = false, requested = false, recovering = false
   let finishWait
   let mutedPlayer = null, wasMuted = true
+  let adWait = 0, wasAd = false
   const releaseMute = (pause = false) => {
     const player = mutedPlayer
     mutedPlayer = null
@@ -116,8 +137,12 @@ export function createRecordingVideoAttempt({ videoId, isCurrent, isPaused = () 
   const tick = () => {
     if (!isCurrent()) { finish('cancelled'); return }
     const time = now()
-    if (isPaused()) { lastProgress += time - lastCheck; lastTime = null }
+    const ad = isAdPlaying()
+    if (isPaused() || ad || wasAd) { lastProgress += time - lastCheck; lastTime = null }
+    if (ad && !isPaused()) adWait += time - lastCheck
+    wasAd = ad
     lastCheck = time
+    if (adWait >= VIDEO_AD_WAIT_MS) { finish('ad-timeout'); return }
     if (now() - lastProgress >= timeoutMs) { finish('timeout'); return }
     timer = setTimer(tick, 100)
   }
@@ -148,7 +173,7 @@ export function createRecordingVideoAttempt({ videoId, isCurrent, isPaused = () 
     // from the requested video while it reports PLAYING, not a stale timestamp
     // from a previous clip, a paused error screen or a seek in progress.
     observe(time, state, loadedId) {
-      if (!active() || isPaused() || state !== 1 || loadedId !== videoId || !Number.isFinite(time)) { lastTime = null; return }
+      if (!active() || isPaused() || isAdPlaying() || state !== 1 || loadedId !== videoId || !Number.isFinite(time)) { lastTime = null; return }
       const maxStep = Math.max(2, (now() - lastSample) / 1000 * 4 + 1)
       if (lastTime == null || time < lastTime || time - lastTime > maxStep) {
         lastTime = time

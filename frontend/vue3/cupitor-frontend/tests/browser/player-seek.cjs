@@ -23,14 +23,15 @@ async function checkPlayerSeek(browser) {
     const start = async (mode, options = {}) => page.evaluate(({ mode, options }) => {
       Object.assign(window._appSettings, { recPlayShuffle: false, recPlayLoop: 'off', recPlayGapSeconds: 30 })
       const s = window.__seek = { mode, startedAt: Date.now(), id: 'testVideo01', time: 0, state: 2, rate: 1, muted: !!options.muted,
-        loads: [], seeks: {}, events: [], audible: [] }
+        ad: false, loads: [], seeks: {}, events: [], audible: [] }
+      window.CupitorYouTubeAds = { isPlaying: () => s.ad }
       const currentTime = () => s.time + (s.mode === 'keyframe' && s.state === 1 ? (Date.now() - s.positionedAt) / 1000 : 0)
       const log = action => {
         s.events.push({ action, id: s.id, time: currentTime(), muted: s.muted })
         if (s.state === 1 && !s.muted) s.audible.push({ action, id: s.id, time: currentTime() })
       }
       window.ytPlayer = {
-        getVideoData: () => s.mode === 'url-only' ? {} : ({ video_id: s.id }),
+        getVideoData: () => s.mode === 'url-only' ? {} : ({ video_id: s.ad ? 'advertisement' : s.id }),
         getVideoUrl: () => 'https://youtube.com/watch?v=' + s.id,
         getIframe: () => document.getElementById('youtubePlayer'), getCurrentTime: currentTime,
         getPlayerState: () => s.state, getDuration: () => 1000,
@@ -39,6 +40,7 @@ async function checkPlayerSeek(browser) {
         pauseVideo: () => { s.state = 2; log('pause') }, playVideo: () => { s.state = 1; log('play') },
         seekTo: target => {
           s.seeks[target] = (s.seeks[target] || 0) + 1
+          if (s.ad) { log('ad-seek'); return }
           const broken = s.id === 'testVideo02' &&
             (s.mode === 'never' || s.mode === 'buffering' || (s.mode === 'retry' && s.seeks[target] < 3) ||
               (s.mode === 'reload' && s.loads.filter(v => v.videoId === s.id).length < 2) ||
@@ -52,6 +54,7 @@ async function checkPlayerSeek(browser) {
         },
         loadVideoById: value => {
           s.loads.push(value); s.id = value.videoId; s.state = 1
+          if (s.mode === 'ad') { s.ad = true; s.time = 0; log('load'); return }
           const first = s.id === 'testVideo02' && s.loads.filter(v => v.videoId === s.id).length === 1
           s.time = s.id === 'testVideo02' && (s.mode === 'never' || s.mode === 'retry' || (s.mode === 'reload' && first)) ? 0 : value.startSeconds || 0
           if (s.mode === 'keyframe') { s.time -= 2; s.positionedAt = Date.now() }
@@ -91,6 +94,40 @@ async function checkPlayerSeek(browser) {
         if (mode === 'reload') assert((await page.evaluate(() => window.__seek.loads.length)) >= 2, 'ignored seeks reload at startSeconds')
         await stop()
       }
+
+      // An ad can report a different video ID and a clock shorter than the
+      // target clip. Let it finish without reloading/rewinding it, even when
+      // it lasts longer than the ordinary recovery budget.
+      await start('ad')
+      await loaded()
+      await page.clock.runFor(45000)
+      assert.equal(await page.evaluate(() => window.__seek.loads.length), 1)
+      assert.deepEqual(await page.evaluate(() => window.__seek.seeks), {})
+      assert.equal(await page.evaluate(() => window._recPlayIndex), 0)
+      await page.evaluate(() => { window.__seek.ad = false; window.__seek.mode = 'good' })
+      await page.clock.runFor(300)
+      await ready()
+      assert.equal(await page.evaluate(() => window.__seek.loads.length), 1)
+
+      // Mid-roll ads also park the end/stall watchers. Resume the previous
+      // content timestamp with a seek, without loading another pre-roll.
+      await page.evaluate(() => { window.__seek.ad = true; window.__seek.time = 1; window.__seek.seeks = {} })
+      await page.clock.runFor(45000)
+      assert.equal(await page.evaluate(() => window.__seek.loads.length), 1)
+      assert.deepEqual(await page.evaluate(() => window.__seek.seeks), {})
+      await page.evaluate(() => { window.__seek.ad = false })
+      await page.clock.runFor(300)
+      await ready()
+      assert.equal(await page.evaluate(() => window.__seek.loads.length), 1)
+      await stop()
+
+      await start('ad')
+      await loaded()
+      await page.clock.runFor(5000)
+      await stop()
+      const adCommands = await page.evaluate(() => window.__seek.events.length)
+      await page.clock.runFor(5000)
+      assert.equal(await page.evaluate(() => window.__seek.events.length), adCommands)
 
       // YouTube's documented seek behavior can land before the requested
       // timestamp. Rewinding each second made these clips fail every time.

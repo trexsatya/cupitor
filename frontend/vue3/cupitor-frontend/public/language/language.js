@@ -45,7 +45,7 @@ import { installRichCardPasteControl } from './rich-card-paste.js';
 import { installMobileRichToolbar } from './rich-card-mobile-toolbar.js';
 import { cardCanUseTts, cardTtsText, ttsFaceSequence, speakTts } from './card-tts.js';
 import { createPracticeVideoCues } from './practice-video.js';
-import { createRecordingVideoAttempt, confirmRecordingSeek, getYoutubeVideoId, VIDEO_RECOVERY_MS, VIDEO_STALL_RETRY_MS } from './recording-video.js';
+import { createRecordingVideoAttempt, confirmRecordingSeek, getYoutubeVideoId, isYoutubeAdPlaying, VIDEO_RECOVERY_MS, VIDEO_STALL_RETRY_MS, VIDEO_AD_WAIT_MS } from './recording-video.js';
 import { createAppLifecycleClock } from './app-lifecycle.js';
 import { DEFAULT_STUDY_TIMEOUT_MINUTES, createStudySessionTimeout, studyTimeoutMinutes } from './study-session-timeout.js';
 import { installStudyDivider } from './study-divider.js';
@@ -4047,6 +4047,8 @@ const displayMessage = function (message, isError) {
 const ontimeupdate = e => {
   updatePlayBtn()
 
+  if (window.playingYoutubeVideo && isYoutubeAdPlaying()) return
+
   if (isNotPlaying() || !window.syncSubtitle) {
     return
   }
@@ -5261,7 +5263,8 @@ async function seekToYoutubeTime(t, { isCurrent = () => true, confirmVideoId, re
       return landed
     } finally { finish() }
   }
-  try { window.ytPlayer.seekTo(target, true) } catch (_) {}
+  let waitingForAd = isYoutubeAdPlaying()
+  if (!waitingForAd) { try { window.ytPlayer.seekTo(target, true) } catch (_) {} }
 
   // Bounded poll: every 100ms for up to 3s, looking for the playhead to land
   // within TOLERANCE of the target. The old code used `Math.max(6, |gap|)`
@@ -5276,9 +5279,19 @@ async function seekToYoutubeTime(t, { isCurrent = () => true, confirmVideoId, re
   const TOLERANCE = 1.5       // seconds — close enough that playback will be visibly at the right spot
   const REISSUE_AT = 10       // ticks (~1s): if still far, re-issue the seek once
   return new Promise(resolve => {
-    let ticks = 0
+    let ticks = 0, adTicks = 0
     const id = setInterval(() => {
       if (!isCurrent() || request !== window._youtubeSeekToken) { clearInterval(id); finish(); resolve(); return }
+      if (isYoutubeAdPlaying()) {
+        waitingForAd = true
+        if (++adTicks * TICK_MS >= VIDEO_AD_WAIT_MS) { clearInterval(id); finish(); resolve(); }
+        return
+      }
+      if (waitingForAd) {
+        waitingForAd = false
+        ticks = 0
+        try { window.ytPlayer.seekTo(target, true) } catch (_) {}
+      }
       ticks++
       let ct = 0
       try { ct = window.ytPlayer.getCurrentTime() || 0 } catch (_) {}
@@ -6853,6 +6866,7 @@ function isNotPlaying() {
 }
 
 function markIntervalPlayDone(ct) {
+  if (isYoutubeAdPlaying()) return
   if (!window._recVideoAttempt && !window._practiceClipTimer && !window._practicePlayPending &&
       !window.seekRequestProcessing && window.youtubePlayInterval && window.playingYoutubeVideo) {
     const s = window.youtubePlayInterval.start
@@ -19161,13 +19175,35 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt, r
     }, 50)
   }
   return new Promise((resolve, reject) => {
-    let observedBelowEnd = false
+    let observedBelowEnd = false, wasAd = false
     let lastPosition = start, lastProgress = _playerLifecycle.now(), retried = false
     const tick = () => {
       if (!current()) return resolve()
       // A host-paused iframe is not a headset pause or a stalled clip while
       // the app is in the background. Leave progress/end checks parked too.
       if (!_playerLifecycle.isForeground()) return setTimeout(tick, 100)
+      if (isYoutubeAdPlaying()) {
+        wasAd = true
+        observedBelowEnd = false
+        lastProgress = _playerLifecycle.now()
+        return setTimeout(tick, 100)
+      }
+      if (wasAd) {
+        wasAd = false
+        lastProgress = _playerLifecycle.now()
+        attempt.preparePlayer(window.ytPlayer)
+        // Resume the content clock without loading the video again: a reload
+        // can start a new pre-roll and trap this item in repeating ads.
+        seekToYoutubeTime(lastPosition, { isCurrent: current, confirmVideoId: expectedVideoId,
+          requirePlaying: true, now: _playerLifecycle.now, isForeground: _playerLifecycle.isForeground })
+          .then(() => {
+            if (!current()) return resolve()
+            attempt.releaseMute()
+            window.ytPlayer?.playVideo()
+            tick()
+          }, reject)
+        return
+      }
       let playerState = -1
       try { playerState = window.ytPlayer?.getPlayerState() } catch (_) {}
       // Only a moving PLAYING playhead proves this clip started. A failed
@@ -22185,6 +22221,7 @@ async function playRecording(opts) {
       window._recPlayGapGuard = true
       window._recPlayForceVideoReload = true
       const reason = videoFailure.kind === 'timeout' ? 'no playback progress for 20s'
+        : videoFailure.kind === 'ad-timeout' ? 'YouTube ad did not finish'
         : videoFailure.code === 153 ? 'YouTube player configuration error'
         : videoFailure.code === 2 ? 'invalid video request'
         : videoFailure.kind === 'invalid-clip' ? 'invalid clip range' : 'video unavailable'
@@ -23779,7 +23816,7 @@ async function _practiceClipRange(it, before, after) {
 // clip starts, the card changes, or practice closes (via the token).
 function _watchPracticeClipEnd(stop, token, { videoId, start, recover } = {}) {
   clearInterval(window._practiceClipTimer)
-  let lastPosition = start, lastProgress = _playerLifecycle.now()
+  let lastPosition = start, lastProgress = _playerLifecycle.now(), wasAd = false, adBegan = null
   const clear = () => {
     clearInterval(timer)
     if (window._practiceClipTimer === timer) window._practiceClipTimer = null
@@ -23789,6 +23826,20 @@ function _watchPracticeClipEnd(stop, token, { videoId, start, recover } = {}) {
     if (!_playerLifecycle.isForeground()) return
     try {
       const player = window.ytPlayer
+      if (isYoutubeAdPlaying(player)) {
+        wasAd = true
+        if (adBegan == null) adBegan = _playerLifecycle.now()
+        lastProgress = _playerLifecycle.now()
+        if (_playerLifecycle.now() - adBegan >= VIDEO_AD_WAIT_MS) { player.pauseVideo(); clear(); }
+        return
+      }
+      if (wasAd) {
+        wasAd = false
+        adBegan = null
+        lastProgress = _playerLifecycle.now()
+        player.seekTo(lastPosition, true)
+        return
+      }
       if (!player || (videoId && getYoutubeVideoId(player) !== videoId)) return
       const time = player.getCurrentTime()
       const duration = player.getDuration?.()
@@ -24362,6 +24413,7 @@ function _pracRecLoopClearAudio(st) {
 
 function _pracRecLoopSeek(st, { preserveAudio = false, start = Number(st.clipStart) || 0 } = {}) {
   if (_pracRec !== st || !st.loop || window._practiceMinimized || !window._practiceActive) return
+  if (!spotifyClips(st.item).length && isYoutubeAdPlaying()) { st.adWaiting = true; return }
   _practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes)
   st.loopSuspended = false
   _pracRecTakeOverPlayhead()
@@ -24527,6 +24579,17 @@ function _pracRecWatch() {
   st.timer = setInterval(() => {
     if (_pracRec !== st) { clearInterval(st.timer); st.timer = null; return }
     if (window._practiceMinimized) { st.watchPos = null; return }
+    if (!spotifyClips(st.item).length && isYoutubeAdPlaying()) {
+      st.adWaiting = true
+      st.watchPos = null
+      return
+    }
+    if (st.adWaiting) {
+      st.adWaiting = false
+      st.watchPos = null
+      if (st.loop && !st.loopSuspended) _pracRecLoopSeek(st)
+      return
+    }
     const ct = _pracRecNow()
     if (!Number.isFinite(ct)) return // no clock while Spotify is seeking
     const prev = st.watchPos

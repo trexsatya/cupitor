@@ -26,6 +26,7 @@ function fixture({ pauseOnRecordStart = false } = {}) {
   }
   const context = {
     _pracRec:state,
+    isYoutubeAdPlaying:()=>false,
     window: { _practiceActive:true, _practiceMinimized:false, _appSettings:{},
       ytPlayer: {seekTo:(t, play)=>{calls.push(['seek',t,play]); position=t}} },
     _pracRecTakeOverPlayhead:()=>calls.push(['takeover']),
@@ -70,6 +71,19 @@ function fixture({ pauseOnRecordStart = false } = {}) {
 }
 
 describe('continuous Practice Speak Over loop', () => {
+  test('an ad parks loop seeks until content returns', async () => {
+    const h = fixture()
+    h.context.isYoutubeAdPlaying = () => true
+    h.context._pracRecLoopToggle()
+    await flush()
+    h.context._pracRecWatch()
+    h.setPosition(20)
+    h.tick()
+    expect(h.calls.filter(([op]) => op === 'seek')).toHaveLength(0)
+    h.context.isYoutubeAdPlaying = () => false
+    h.tick()
+    expect(h.calls.filter(([op]) => op === 'seek')).toEqual([['seek', 10, true]])
+  })
   test('Spotify keeps playing through loop recording and pauses for timestamped recording', () => {
     const h = fixture()
     const start = source.indexOf('function _practiceSpotifyOptions(it)')
