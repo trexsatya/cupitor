@@ -203,6 +203,10 @@ test('SRT launcher ignores corrupt saved positions and clamps cancelled drags an
     p.window.innerWidth = 320; p.window.innerHeight = 240;
     p.window.dispatchEvent(new p.window.Event('resize'));
     assert.deepEqual(l.position(), [248, 188]);
+    Object.defineProperty(p.doc.documentElement, 'clientWidth', {value: 320});
+    p.window.innerWidth = 844;
+    p.window.dispatchEvent(new p.window.Event('resize'));
+    assert.deepEqual(l.position(), [248, 188], 'wide player overflow cannot move the button off the CSS viewport');
     l.pointer('pointerdown', 270, 210);
     l.pointer('pointermove', -500, -500);
     l.pointer('pointerup', -500, -500);

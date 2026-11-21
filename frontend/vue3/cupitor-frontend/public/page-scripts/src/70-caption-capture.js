@@ -158,9 +158,14 @@
       function bounds() {
         const left = (viewport?.offsetLeft || 0) + 12;
         const top = (viewport?.offsetTop || 0) + 12;
+        // A wide player left over during mobile rotation can temporarily
+        // expand innerWidth and the visual viewport beyond the CSS viewport.
+        const root = document.documentElement;
+        const width = Math.min(viewport?.width || window.innerWidth, root.clientWidth || window.innerWidth);
+        const height = Math.min(viewport?.height || window.innerHeight, root.clientHeight || window.innerHeight);
         return {left, top,
-          right: Math.max(left, left + (viewport?.width || window.innerWidth) - 24 - button.offsetWidth),
-          bottom: Math.max(top, top + (viewport?.height || window.innerHeight) - 24 - button.offsetHeight)};
+          right: Math.max(left, left + width - 24 - button.offsetWidth),
+          bottom: Math.max(top, top + height - 24 - button.offsetHeight)};
       }
       function layout() {
         if (button.hidden) return;

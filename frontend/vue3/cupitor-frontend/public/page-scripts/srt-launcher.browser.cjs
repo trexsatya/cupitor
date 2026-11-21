@@ -54,10 +54,17 @@ async function drag(page, button, dx, dy, touch, cancel = false) {
 }
 
 async function visible(page, button, size) {
-  await page.waitForFunction(({id, size}) => {
-    const r = document.getElementById(id).getBoundingClientRect();
-    return r.x >= 11 && r.y >= 11 && r.right <= size.width - 11 && r.bottom <= size.height - 11;
-  }, {id: await button.getAttribute('id'), size});
+  try {
+    await page.waitForFunction(({id, size}) => {
+      const r = document.getElementById(id).getBoundingClientRect();
+      return r.x >= 11 && r.y >= 11 && r.right <= size.width - 11 && r.bottom <= size.height - 11;
+    }, {id: await button.getAttribute('id'), size}, {timeout: 5000});
+  } catch (error) {
+    const viewport = await button.evaluate(el => ({box: el.getBoundingClientRect().toJSON(),
+      inner: [innerWidth, innerHeight], root: [document.documentElement.clientWidth, document.documentElement.clientHeight],
+      visual: [visualViewport.width, visualViewport.height, visualViewport.offsetLeft, visualViewport.offsetTop]}));
+    assert.fail(error.message + '\nViewport: ' + JSON.stringify(viewport));
+  }
   const box = await button.boundingBox();
   assert.ok(box.x >= 11 && box.y >= 11, 'button stays inside the top and left edges');
   assert.ok(box.x + box.width <= size.width - 11, 'button stays inside the right edge');
