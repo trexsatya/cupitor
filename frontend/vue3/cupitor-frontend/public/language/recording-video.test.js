@@ -1,11 +1,11 @@
-import { createRecordingVideoAttempt, confirmRecordingSeek, getYoutubeVideoId, VIDEO_RECOVERY_MS } from './recording-video'
+import { createRecordingVideoAttempt, confirmRecordingSeek, getYoutubeVideoId, isYoutubeAdPlaying, VIDEO_RECOVERY_MS, VIDEO_AD_WAIT_MS } from './recording-video'
 
 beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(0) })
 afterEach(() => jest.useRealTimers())
 
-function setup() {
+function setup(options = {}) {
   const state = { current: true, paused: false }
-  const attempt = createRecordingVideoAttempt({ videoId: 'wanted', isCurrent: () => state.current, isPaused: () => state.paused })
+  const attempt = createRecordingVideoAttempt({ videoId: 'wanted', isCurrent: () => state.current, isPaused: () => state.paused, ...options })
   const result = attempt.wait(new Promise(() => {})).catch(e => e)
   return { attempt, result, state }
 }
@@ -273,4 +273,66 @@ test('small forward steps at slow playback count as genuine progress', () => {
   expect(attempt.played).toBe(true)
   expect(attempt.active()).toBe(true)
   attempt.dispose()
+})
+
+test('ads cannot settle a seek, trigger retries or consume its content timeout', async () => {
+  let ad = true
+  const { result, state, player } = seekSetup({ isAdPlaying: () => ad })
+  state.time = 120 // Even a coincidentally matching ad timestamp is not content.
+  jest.advanceTimersByTime(45000)
+  expect(player.seekTo).not.toHaveBeenCalled()
+  ad = false
+  jest.advanceTimersByTime(200)
+  expect(await result).toBe(true)
+  expect(player.seekTo).toHaveBeenCalledTimes(1)
+})
+
+test('an ad interrupting a pending seek parks retries and Stop still cancels', async () => {
+  let ad = false
+  const { result, state, player } = seekSetup({ acceptAfter: Infinity, isAdPlaying: () => ad })
+  jest.advanceTimersByTime(500)
+  ad = true
+  jest.advanceTimersByTime(45000)
+  expect(player.seekTo).toHaveBeenCalledTimes(1)
+  state.current = false
+  jest.advanceTimersByTime(100)
+  expect(await result).toBe(false)
+  expect(jest.getTimerCount()).toBe(0)
+})
+
+test('an ad freezes the shared recovery budget and cannot prove content progress', async () => {
+  let ad = false
+  const { attempt, result } = setup({ isAdPlaying: () => ad })
+  jest.advanceTimersByTime(5000)
+  ad = true
+  for (let i = 0; i < 45; i++) {
+    attempt.observe(i, 1, 'wanted')
+    jest.advanceTimersByTime(1000)
+  }
+  expect(attempt.active()).toBe(true)
+  expect(attempt.played).toBe(false)
+  ad = false
+  jest.advanceTimersByTime(14000)
+  expect(attempt.active()).toBe(true)
+  jest.advanceTimersByTime(1200)
+  expect((await result).kind).toBe('timeout')
+})
+
+test('a stuck ad fails once after a separate bounded wait without a seek', async () => {
+  const { result, player } = seekSetup({ isAdPlaying: () => true })
+  const { result: attemptResult } = setup({ isAdPlaying: () => true })
+  jest.advanceTimersByTime(VIDEO_AD_WAIT_MS)
+  expect((await result).kind).toBe('ad-timeout')
+  expect((await attemptResult).kind).toBe('ad-timeout')
+  expect(player.seekTo).not.toHaveBeenCalled()
+  expect(jest.getTimerCount()).toBe(0)
+})
+
+test('ad detection uses the current iframe and tolerates hosts without the bridge', () => {
+  const frame = document.createElement('iframe')
+  const player = { getIframe: () => frame }
+  expect(isYoutubeAdPlaying(player)).toBe(false)
+  window.CupitorYouTubeAds = { isPlaying: jest.fn(value => value === frame) }
+  try { expect(isYoutubeAdPlaying(player)).toBe(true) }
+  finally { delete window.CupitorYouTubeAds }
 })
