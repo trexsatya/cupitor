@@ -126,6 +126,11 @@ jobs:
             echo "CUPITOR_CHROME_PATH=$chrome_path"
           } >> "$GITHUB_ENV"
 
+      - name: Test native page script buttons, captions and layout
+        env:
+          SCREENSHOT_DIR: test-results/dialog-browser-results
+        run: node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
+
       - name: Test search, scrolling and dialogs on desktop and mobile
         env:
           SCREENSHOT_DIR: test-results/dialog-browser-results
@@ -146,7 +151,6 @@ jobs:
           node tests/browser/local-media-subtitles.cjs
           node tests/browser/youtube-media-subtitles.cjs
           node tests/browser/youtube-return.cjs
-          node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
           node tests/browser/search-result-counts.cjs
           node tests/browser/search-sources.cjs
           node tests/browser/dictionary-lookup.cjs

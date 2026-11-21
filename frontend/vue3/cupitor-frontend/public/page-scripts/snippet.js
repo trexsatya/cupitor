@@ -3586,16 +3586,18 @@
     // Version tag: bump whenever the snippet changes in a way that requires
     // tearing down the previous install (new UI, new state shape, etc).
     // The previous install's tear-down hook clears its sidebar + intervals.
-    const CAPS_VERSION = 32;
+    const CAPS_VERSION = 33;
     const prev = window.__cupCapsInstalled;
     if (prev && typeof prev === 'object' && prev.version >= CAPS_VERSION) return;
     if (prev && typeof prev === 'object' && typeof prev.teardown === 'function') {
       try { prev.teardown(); } catch (_) {}
     }
     const intervalIds = [];
+    let launcherControls = null;
     const installToken = { version: CAPS_VERSION, intervalIds, teardown };
     window.__cupCapsInstalled = installToken;
     function teardown() {
+      if (launcherControls) launcherControls.dispose();
       for (const id of intervalIds) { try { clearInterval(id); } catch (_) {} }
       intervalIds.length = 0;
       const oldSidebar = document.querySelector('.cup-sub-sidebar');
@@ -3689,6 +3691,106 @@
     }
     window.__cupOpenSubtitlePanel = openSubtitlePanel;
 
+    function makeLauncherMovable(button) {
+      const storageKey = 'cupSrtLauncherPosition';
+      let position = {x: 1, y: 0}, gesture = null, suppressClick = false;
+      try {
+        const saved = JSON.parse(localStorage.getItem(storageKey));
+        if (saved && [saved.x, saved.y].every(v => Number.isFinite(v) && v >= 0 && v <= 1)) {
+          position = saved;
+        }
+      } catch (_) {}
+      const viewport = window.visualViewport;
+      function bounds() {
+        const left = (viewport?.offsetLeft || 0) + 12;
+        const top = (viewport?.offsetTop || 0) + 12;
+        // A wide player left over during mobile rotation can temporarily
+        // expand innerWidth and the visual viewport beyond the CSS viewport.
+        const root = document.documentElement;
+        const width = Math.min(viewport?.width || window.innerWidth, root.clientWidth || window.innerWidth);
+        const height = Math.min(viewport?.height || window.innerHeight, root.clientHeight || window.innerHeight);
+        return {left, top,
+          right: Math.max(left, left + width - 24 - button.offsetWidth),
+          bottom: Math.max(top, top + height - 24 - button.offsetHeight)};
+      }
+      function layout() {
+        if (button.hidden) return;
+        const b = bounds();
+        button.style.right = 'auto';
+        button.style.left = (b.left + position.x * (b.right - b.left)) + 'px';
+        button.style.top = (b.top + position.y * (b.bottom - b.top)) + 'px';
+      }
+      function finish() {
+        if (!gesture) return;
+        const {pointerId, moved} = gesture;
+        gesture = null;
+        suppressClick = moved;
+        button.style.cursor = 'grab';
+        try { button.releasePointerCapture(pointerId); } catch (_) {}
+        if (moved) {
+          try { localStorage.setItem(storageKey, JSON.stringify(position)); } catch (_) {}
+        }
+      }
+      button.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || e.isPrimary === false || gesture) return;
+        const rect = button.getBoundingClientRect();
+        gesture = {pointerId: e.pointerId, x: e.clientX, y: e.clientY,
+          left: rect.left, top: rect.top, moved: false};
+        suppressClick = false;
+        e.stopPropagation();
+        try { button.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      button.addEventListener('pointermove', e => {
+        if (!gesture || e.pointerId !== gesture.pointerId) return;
+        const dx = e.clientX - gesture.x, dy = e.clientY - gesture.y;
+        if (!gesture.moved && Math.hypot(dx, dy) < 6) return;
+        gesture.moved = true;
+        e.preventDefault();
+        e.stopPropagation();
+        button.style.cursor = 'grabbing';
+        const b = bounds();
+        const x = Math.max(b.left, Math.min(b.right, gesture.left + dx));
+        const y = Math.max(b.top, Math.min(b.bottom, gesture.top + dy));
+        // Store proportions so rotation and window resizing keep it reachable.
+        position = {x: (x - b.left) / (b.right - b.left || 1),
+          y: (y - b.top) / (b.bottom - b.top || 1)};
+        layout();
+      });
+      function endPointer(e) {
+        if (!gesture || e.pointerId !== gesture.pointerId) return;
+        const touchTap = e.type === 'pointerup' && e.pointerType === 'touch' && !gesture.moved;
+        finish();
+        if (touchTap) {
+          // Chromium can omit its click for a tap immediately after a drag.
+          // Activate on release and consume any subsequent native click.
+          suppressClick = true;
+          button.click();
+        }
+      }
+      button.addEventListener('pointerup', endPointer);
+      button.addEventListener('pointercancel', endPointer);
+      button.addEventListener('lostpointercapture', endPointer);
+      button.addEventListener('click', e => {
+        if (!suppressClick || e.detail === 0) return;
+        suppressClick = false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }, true);
+      button.addEventListener('contextmenu', e => e.preventDefault());
+      window.addEventListener('blur', finish);
+      window.addEventListener('resize', layout);
+      viewport?.addEventListener('resize', layout);
+      viewport?.addEventListener('scroll', layout);
+      layout();
+      return {layout, dispose() {
+        finish();
+        window.removeEventListener('blur', finish);
+        window.removeEventListener('resize', layout);
+        viewport?.removeEventListener('resize', layout);
+        viewport?.removeEventListener('scroll', layout);
+      }};
+    }
+
     function updateSpotifyControls() {
       const youtube = site.id === 'youtube';
       if (!adaptedPlayer && !youtube) return;
@@ -3699,12 +3801,13 @@
         button.id = id;
         button.type = 'button';
         button.textContent = youtube ? 'SRT · Capture' : 'SRT';
-        button.title = 'Show or hide the SRT subtitle panel';
+        button.title = 'Tap to show or hide subtitles; drag to move';
         button.setAttribute('aria-label', 'SRT subtitle panel');
         button.className = 'cup-nolookup';
         button.style.cssText = 'position:fixed;right:12px;top:12px;z-index:2147483647;' +
           'background:#151515;color:#fff;border:1px solid #1ed760;border-radius:16px;' +
-          'padding:9px 14px;font:bold 14px system-ui;cursor:pointer';
+          'padding:9px 14px;font:bold 14px system-ui;cursor:grab;touch-action:none;user-select:none;' +
+          'width:max-content;max-width:calc(100vw - 24px);white-space:nowrap;box-sizing:border-box';
         button.onclick = () => {
           spotifyPanelOpen = !(spotifyPanelOpen ?? isWatchPage());
           ui.buildSidebar();
@@ -3712,9 +3815,12 @@
           updateSpotifyControls();
         };
         document.body.appendChild(button);
+        if (launcherControls) launcherControls.dispose();
+        launcherControls = makeLauncherMovable(button);
       }
       button.setAttribute('aria-expanded', String(spotifyPanelOpen ?? isWatchPage()));
       button.hidden = youtube && !isWatchPage();
+      if (launcherControls) launcherControls.layout();
       if (youtube) {
         ui.showNotice(!window.YouTubeSubtitles
           ? 'Update Cupitor to download a full YouTube SRT. Live captions can still be selected and sent.'
