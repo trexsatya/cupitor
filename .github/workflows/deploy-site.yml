@@ -129,7 +129,9 @@ jobs:
       - name: Test native page script buttons, captions and layout
         env:
           SCREENSHOT_DIR: test-results/dialog-browser-results
-        run: node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
+        run: |
+          node tests/browser/practice-timeout.cjs
+          node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
 
       - name: Test search, scrolling and dialogs on desktop and mobile
         env:
@@ -222,6 +224,7 @@ jobs:
           node tests/browser/spotify-practice.cjs
           node tests/browser/notification-practice.cjs
           node tests/browser/practice-log.cjs
+          node tests/browser/practice-timeout.cjs
           node tests/browser/study-calls.cjs
           node tests/browser/practice-controls.cjs
           node tests/browser/practice-manual-video.cjs

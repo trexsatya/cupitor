@@ -2788,6 +2788,20 @@ body.practice-mode #recPlayingMinimizeBtn,
 body.practice-mode #recPlayingCloseBtn,
 body.practice-mode #recPlayingRestorePill,
 body.practice-mode #recPlayNavToast:not(.session-timeout) { display: none !important; }
+.study-timeout-prompt {
+    width: min(360px, calc(100vw - 64px));
+    padding: 24px;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    color: #17202b;
+    background: #fff;
+    font: inherit;
+    box-shadow: 0 16px 64px #0005;
+}
+.study-timeout-prompt::backdrop { background: #0009; }
+.study-timeout-prompt h2 { margin: 0 0 12px; font-size: 1.2rem; }
+.study-timeout-prompt p { margin: 0 0 20px; }
+.study-timeout-prompt button { display: block; margin-left: auto; padding: 8px 20px; }
 body.rec-playing #mainControlInputs,
 body.rec-playing #vocabularyResult,
 body.rec-playing #result,
