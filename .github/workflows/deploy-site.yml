@@ -104,7 +104,7 @@ jobs:
         run: |
           npx jest public/language public/github-utils.test.js --runInBand --silent
           node --test public/page-scripts/*.test.mjs
-          node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs
+          node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs scripts/build-language-catalog.test.cjs
           node --test tests/whiteboard/composites.unit.test.cjs
           node --test public/language/data-source-loading.test.mjs
           node --test public/language/user-data*.test.mjs
