@@ -13,11 +13,12 @@ const lines = [
   {start: 12.52, end: 14.16, text: 'Second cue'},
   {start: 14.42, end: 17.96, text: 'Third cue'},
 ];
-export function boot({session = false, url = address} = {}) {
+export function boot({session = false, url = address, launcherPosition} = {}) {
   const dom = new JSDOM('<html><head><title>Episode</title></head><body><main><h1>Episode</h1><button data-testid="play-button" aria-label="Pausa">Pause</button></main></body></html>', {
     url, runScripts: 'outside-only', pretendToBeVisual: true,
   });
   const {window} = dom, doc = window.document;
+  if (launcherPosition !== undefined) window.localStorage.setItem('cupSrtLauncherPosition', launcherPosition);
   window.console = {log(){},warn(){},error(){}};
   let now = 10000; window.Date.now = () => now;
   const timers = new Map(); let id = 0;
@@ -131,4 +132,61 @@ test('removed Media Session seek handlers are not retained as stale controls',()
     assert.equal(p.player.seekTo(14.42),true);assert.equal(first,0);assert.equal(second,1);
     p.ms.setActionHandler('seekto',null);assert.equal(p.player.seekTo(15),false);
   }finally{p.close();}
+});
+
+function launcher(p) {
+  const button = p.doc.getElementById('cup-spotify-srt-toggle');
+  Object.defineProperties(button, {offsetWidth: {value: 60}, offsetHeight: {value: 40}});
+  button.getBoundingClientRect = () => ({left: parseFloat(button.style.left), top: parseFloat(button.style.top)});
+  p.window.dispatchEvent(new p.window.Event('resize'));
+  return {button,
+    position: () => [parseFloat(button.style.left), parseFloat(button.style.top)],
+    pointer(type, x, y) {
+      const event = new p.window.MouseEvent(type, {clientX: x, clientY: y, button: 0, bubbles: true});
+      Object.defineProperty(event, 'pointerId', {value: 1});
+      button.dispatchEvent(event);
+    },
+    click: () => button.dispatchEvent(new p.window.MouseEvent('click', {bubbles: true, detail: 1})),
+  };
+}
+
+test('SRT dragging saves its position, suppresses release clicks and restores after reopening', () => {
+  const p = boot(); let restored;
+  try {
+    const l = launcher(p), initial = l.button.getAttribute('aria-expanded');
+    const [x, y] = l.position();
+    l.pointer('pointerdown', x + 20, y + 20);
+    l.pointer('pointermove', x - 80, y + 220);
+    l.pointer('pointerup', x - 80, y + 220);
+    l.click();
+    assert.ok(Math.abs(l.position()[0] - (x - 100)) < 0.001);
+    assert.ok(Math.abs(l.position()[1] - (y + 200)) < 0.001);
+    assert.equal(l.button.getAttribute('aria-expanded'), initial, 'drag release is not a subtitle toggle');
+    const saved = p.window.localStorage.getItem('cupSrtLauncherPosition');
+    restored = boot({launcherPosition: saved});
+    assert.deepEqual(launcher(restored).position(), l.position());
+    l.pointer('pointerdown', x - 80, y + 220);
+    l.pointer('pointerup', x - 80, y + 220);
+    l.click();
+    assert.notEqual(l.button.getAttribute('aria-expanded'), initial, 'a normal tap after dragging works');
+  } finally { p.close(); restored?.close(); }
+});
+
+test('SRT launcher ignores corrupt saved positions and clamps cancelled drags and resizes', () => {
+  const p = boot({launcherPosition: '{"x":-10,"y":9999}'});
+  try {
+    const l = launcher(p);
+    assert.deepEqual(l.position(), [p.window.innerWidth - 72, 12]);
+    l.pointer('pointerdown', p.window.innerWidth - 42, 32);
+    l.pointer('pointermove', 5000, 5000);
+    l.pointer('pointercancel', 5000, 5000);
+    assert.deepEqual(l.position(), [p.window.innerWidth - 72, p.window.innerHeight - 52]);
+    p.window.innerWidth = 320; p.window.innerHeight = 240;
+    p.window.dispatchEvent(new p.window.Event('resize'));
+    assert.deepEqual(l.position(), [248, 188]);
+    l.pointer('pointerdown', 270, 210);
+    l.pointer('pointermove', -500, -500);
+    l.pointer('pointerup', -500, -500);
+    assert.deepEqual(l.position(), [12, 12]);
+  } finally { p.close(); }
 });
