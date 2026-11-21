@@ -141,9 +141,10 @@ function launcher(p) {
   p.window.dispatchEvent(new p.window.Event('resize'));
   return {button,
     position: () => [parseFloat(button.style.left), parseFloat(button.style.top)],
-    pointer(type, x, y) {
+    pointer(type, x, y, pointerType = 'mouse') {
       const event = new p.window.MouseEvent(type, {clientX: x, clientY: y, button: 0, bubbles: true});
       Object.defineProperty(event, 'pointerId', {value: 1});
+      Object.defineProperty(event, 'pointerType', {value: pointerType});
       button.dispatchEvent(event);
     },
     click: () => button.dispatchEvent(new p.window.MouseEvent('click', {bubbles: true, detail: 1})),
@@ -170,6 +171,24 @@ test('SRT dragging saves its position, suppresses release clicks and restores af
     l.click();
     assert.notEqual(l.button.getAttribute('aria-expanded'), initial, 'a normal tap after dragging works');
   } finally { p.close(); restored?.close(); }
+});
+
+test('touch taps activate on release after a drag and ignore duplicate native clicks', () => {
+  const p = boot();
+  try {
+    const l = launcher(p), initial = l.button.getAttribute('aria-expanded');
+    const [x, y] = l.position();
+    l.pointer('pointerdown', x + 20, y + 20, 'touch');
+    l.pointer('pointermove', x - 80, y + 220, 'touch');
+    l.pointer('pointerup', x - 80, y + 220, 'touch');
+    assert.equal(l.button.getAttribute('aria-expanded'), initial);
+    l.pointer('pointerdown', x - 80, y + 220, 'touch');
+    l.pointer('pointerup', x - 80, y + 220, 'touch');
+    const toggled = l.button.getAttribute('aria-expanded');
+    assert.notEqual(toggled, initial, 'a tap works even when Chromium omits its click');
+    l.click();
+    assert.equal(l.button.getAttribute('aria-expanded'), toggled, 'a native click cannot toggle it twice');
+  } finally { p.close(); }
 });
 
 test('SRT launcher ignores corrupt saved positions and clamps cancelled drags and resizes', () => {

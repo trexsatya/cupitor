@@ -206,7 +206,15 @@
         layout();
       });
       function endPointer(e) {
-        if (e.pointerId === gesture?.pointerId) finish();
+        if (!gesture || e.pointerId !== gesture.pointerId) return;
+        const touchTap = e.type === 'pointerup' && e.pointerType === 'touch' && !gesture.moved;
+        finish();
+        if (touchTap) {
+          // Chromium can omit its click for a tap immediately after a drag.
+          // Activate on release and consume any subsequent native click.
+          suppressClick = true;
+          button.click();
+        }
       }
       button.addEventListener('pointerup', endPointer);
       button.addEventListener('pointercancel', endPointer);
@@ -255,6 +263,7 @@
           updateSpotifyControls();
         };
         document.body.appendChild(button);
+        if (launcherControls) launcherControls.dispose();
         launcherControls = makeLauncherMovable(button);
       }
       button.setAttribute('aria-expanded', String(spotifyPanelOpen ?? isWatchPage()));

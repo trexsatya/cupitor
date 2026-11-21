@@ -130,6 +130,7 @@ jobs:
         env:
           SCREENSHOT_DIR: test-results/dialog-browser-results
         run: |
+          node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
           node tests/browser/page-find.cjs
           node tests/browser/card-tts.cjs
           node tests/browser/rich-card-scroll.cjs
@@ -146,7 +147,6 @@ jobs:
           node tests/browser/local-media-subtitles.cjs
           node tests/browser/youtube-media-subtitles.cjs
           node tests/browser/youtube-return.cjs
-          node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
           node tests/browser/search-result-counts.cjs
           node tests/browser/search-sources.cjs
           node tests/browser/dictionary-lookup.cjs
