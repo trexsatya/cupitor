@@ -19,6 +19,14 @@ async function install(page) {
     window.setInterval = fn => window.ticks.push(fn);
     window.LocalSubtitles = {postMessage() {}};
     window.YouTubeSubtitles = {postMessage() {}};
+    window.launcherEvents = [];
+    for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'lostpointercapture', 'click']) {
+      document.addEventListener(type, e => {
+        if (!e.target.id?.endsWith('-srt-toggle')) return;
+        window.launcherEvents.push({type, pointerId: e.pointerId, button: e.button, detail: e.detail,
+          x: e.clientX, y: e.clientY, expanded: e.target.getAttribute('aria-expanded')});
+      }, true);
+    }
   });
   await page.evaluate(snippet);
   await page.evaluate(() => window.ticks.forEach(fn => fn()));
@@ -45,10 +53,26 @@ async function drag(page, button, dx, dy, touch, cancel = false) {
   }
 }
 
-function visible(box, size) {
+async function visible(page, button, size) {
+  await page.waitForFunction(({id, size}) => {
+    const r = document.getElementById(id).getBoundingClientRect();
+    return r.x >= 11 && r.y >= 11 && r.right <= size.width - 11 && r.bottom <= size.height - 11;
+  }, {id: await button.getAttribute('id'), size});
+  const box = await button.boundingBox();
   assert.ok(box.x >= 11 && box.y >= 11, 'button stays inside the top and left edges');
   assert.ok(box.x + box.width <= size.width - 11, 'button stays inside the right edge');
   assert.ok(box.y + box.height <= size.height - 11, 'button stays inside the bottom edge');
+}
+
+async function expectToggle(page, button, before) {
+  // Chromium may deliver a touch-generated click after the tap command returns.
+  try {
+    await page.waitForFunction(({id, before}) =>
+      document.getElementById(id)?.getAttribute('aria-expanded') !== before,
+    {id: await button.getAttribute('id'), before}, {timeout: 5000});
+  } catch (error) {
+    assert.fail(error.message + '\nLauncher events: ' + JSON.stringify(await page.evaluate(() => window.launcherEvents)));
+  }
 }
 
 for (const youtube of [false, true]) for (const touch of [true, false]) {
@@ -68,7 +92,7 @@ for (const youtube of [false, true]) for (const touch of [true, false]) {
       const tap = () => touch ? button.tap() : button.click();
       const initial = await button.getAttribute('aria-expanded');
       await tap();
-      assert.notEqual(await button.getAttribute('aria-expanded'), initial, 'a tap still toggles subtitles');
+      await expectToggle(page, button, initial);
       await button.focus();
       await button.press('Enter');
       assert.equal(await button.getAttribute('aria-expanded'), initial, 'keyboard activation still works');
@@ -84,7 +108,7 @@ for (const youtube of [false, true]) for (const touch of [true, false]) {
       await page.evaluate(() => window.ticks.forEach(fn => fn()));
       assert.deepEqual(await button.boundingBox(), moved, 'polling leaves the button in place');
       await tap();
-      assert.notEqual(await button.getAttribute('aria-expanded'), initial, 'the next tap after a drag works');
+      await expectToggle(page, button, initial);
 
       await page.reload();
       await install(page);
@@ -97,20 +121,20 @@ for (const youtube of [false, true]) for (const touch of [true, false]) {
 
       const rotated = {width: size.height, height: size.width};
       await page.setViewportSize(rotated);
-      visible(await button.boundingBox(), rotated);
+      await visible(page, button, rotated);
       await drag(page, button, -2000, -2000, touch);
       const topLeft = await button.boundingBox();
-      visible(topLeft, rotated);
+      await visible(page, button, rotated);
       assert.ok(Math.abs(topLeft.x - 12) < 1 && Math.abs(topLeft.y - 12) < 1);
       await drag(page, button, 4000, 4000, touch);
-      visible(await button.boundingBox(), rotated);
+      await visible(page, button, rotated);
       await page.setViewportSize(size);
-      visible(await button.boundingBox(), size);
+      await visible(page, button, size);
       if (touch) {
         const expanded = await button.getAttribute('aria-expanded');
         await drag(page, button, -70, -70, true, true);
         await tap();
-        assert.notEqual(await button.getAttribute('aria-expanded'), expanded, 'a cancelled drag does not block the next tap');
+        await expectToggle(page, button, expanded);
       }
     } finally { await context.close(); }
   });
