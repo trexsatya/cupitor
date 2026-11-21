@@ -6,7 +6,7 @@ export function studyTimeoutMinutes(value) {
     ? minutes : DEFAULT_STUDY_TIMEOUT_MINUTES
 }
 
-export function createStudySessionTimeout(onExpire) {
+export function createStudySessionTimeout(onExpire, { canStart = () => true } = {}) {
   let deadline = null
   let timer = null
   let expired = false
@@ -37,11 +37,13 @@ export function createStudySessionTimeout(onExpire) {
   }
 
   function start(value) {
+    if (!canStart()) return false
     cancel()
     const minutes = studyTimeoutMinutes(value)
-    if (!minutes) return
+    if (!minutes) return true
     deadline = Date.now() + minutes * 60000
     check()
+    return true
   }
 
   return {
@@ -49,8 +51,11 @@ export function createStudySessionTimeout(onExpire) {
     cancel,
     check,
     get expired() { return expired },
+    get blocked() { return !canStart() },
     ensure(value) {
-      if (deadline == null) start(value)
+      if (!canStart()) return false
+      if (deadline == null) return start(value)
+      return true
     },
   }
 }
