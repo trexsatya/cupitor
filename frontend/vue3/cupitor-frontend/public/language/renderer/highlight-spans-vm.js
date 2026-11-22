@@ -7,10 +7,9 @@
 // two search-result-specific rules:
 //   • plain stem matches expand to the enclosing whitespace boundary, so
 //     "design" still covers "designing"; regexes keep their exact spans
-//   • multi-word phrases have priority over their constituent single
-//     words — if any phrase matches, ONLY phrase spans are emitted, so
-//     the "x y z|x|y|z" pattern doesn't light up the whole phrase AND
-//     every standalone letter.
+//   • plain multi-word phrases match as complete phrases, never as their
+//     individual words in surrounding subtitle cues. Phrase matches take
+//     priority over separately supplied single-word alternatives.
 //
 // Pure: no DOM, no globals, no HTML emission. The caller composes the HTML.
 
@@ -20,7 +19,7 @@ function tryRe(src, flags) {
   try { return compileRegex(src, flags) } catch (_) { return null }
 }
 function tryBoundedRe(src) {
-  try { return new RegExp(`(?<![\\p{L}\\p{N}])(?:${src})(?![\\p{L}\\p{N}])`, 'giu') }
+  try { return new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_])(?:${src})(?![\\p{L}\\p{M}\\p{N}_])`, 'giu') }
   catch (_) { return tryRe(src, 'gi') }
 }
 
@@ -70,29 +69,19 @@ export function buildHighlightSpans(text, pattern, regexMode = false) {
   const multiWord  = tokens.filter(hasPhraseWhitespace)
   const singleWord = tokens.filter(t => !hasPhraseWhitespace(t))
 
-  // 1) Multi-word phrases first. Internal spaces relax to \s+.
+  // 1) Plain phrases require complete word boundaries. Regex phrases retain
+  // their exact expression semantics and spans.
   let spans = multiWord.length
-    ? multiWord.flatMap(t => collect(tryRe(relaxRegexSpaces(t), 'gi'), text, !hasRegexSyntax(t)))
+    ? multiWord.flatMap(t => collect(
+      hasRegexSyntax(t) ? tryRe(relaxRegexSpaces(t), 'gi') : tryBoundedRe(relaxRegexSpaces(t)),
+      text, false))
     : []
 
-  // 2) Fall back to single-word matches when no phrase was found:
-  //    • singleWord alts — UNBOUNDED so stems still highlight derived forms
-  //    • sub-words split from multi-word phrases — BOUNDED via Unicode
-  //      lookaround so short tokens like "i" don't light up inside "vi"
-  if (!spans.length) {
-    if (singleWord.length) {
-      spans = spans.concat(singleWord.flatMap(t => collect(tryRe(t, 'gi'), text, !hasRegexSyntax(t))))
-    }
-    const subFromMulti = multiWord
-      // Only plain phrases can fall back to individual words. Splitting a
-      // regex such as "foo [^ ]+ bar" can turn its fragments into a new regex.
-      .filter(t => !hasRegexSyntax(t))
-      .flatMap(t => t.split(/\s+/))
-      .map(s => s.trim())
-      .filter(Boolean)
-    if (subFromMulti.length) {
-      spans = spans.concat(collect(tryBoundedRe(subFromMulti.join('|')), text))
-    }
+  // 2) Only separately supplied single-word alternatives may be highlighted
+  // when no phrase matches. Splitting a phrase into words here marked common
+  // words such as "det" and "finns" in unrelated surrounding subtitle cues.
+  if (!spans.length && singleWord.length) {
+    spans = singleWord.flatMap(t => collect(tryRe(t, 'gi'), text, !hasRegexSyntax(t)))
   }
   if (!spans.length) return []
   return mergeSpans(spans)
