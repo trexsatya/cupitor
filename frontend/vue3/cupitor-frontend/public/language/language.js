@@ -14586,6 +14586,10 @@ function updateManualEntry(playlistName, manualId, patch) {
       const arr = rec.items[st][w] || []
       const it = arr.find(x => x && x.manual && x.id === manualId)
       if (!it) continue
+      // Keep linked playback independent of caption-to-text row attribution.
+      // Correcting text or swapping faces must not turn a Spotify clip into a
+      // text-only card when the provenance below is invalidated.
+      const spotifyBefore = spotifyClips(it)
       // Caption provenance pairs `captionStarts` with the rows of ONE face by
       // position. Editing that face breaks the pairing, and stale starts would
       // make the caption de-dupe skip lines the card no longer holds — so drop
@@ -14608,6 +14612,13 @@ function updateManualEntry(playlistName, manualId, patch) {
         const m = _parseMediaUrl(patch.mediaUrl)
         if (m) { it.mediaUrl = m.url; it.mediaKind = m.kind; if (m.kind === 'youtube') it.mediaVideoId = m.id; else delete it.mediaVideoId }
         else   { delete it.mediaUrl; delete it.mediaKind; delete it.mediaVideoId }
+      }
+      if (spotifyBefore.length || Array.isArray(it.spotifyClipRanges)) {
+        const media = _parseMediaUrl(Object.prototype.hasOwnProperty.call(patch, 'mediaUrl')
+          ? patch.mediaUrl : (it.mediaUrl || it.captionUrl))
+        const ranges = media?.kind === 'spotify' ? spotifyBefore.filter(segment => segment.id === media.id) : []
+        if (ranges.length) it.spotifyClipRanges = ranges.map(({url, start, end}) => ({url, start, end}))
+        else delete it.spotifyClipRanges
       }
       // Which face the caption rows live in. Only a swap sends this, and it is
       // applied after the loop above so that loop's drop-detection still reads
@@ -17547,10 +17558,13 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
     if (translating) { if (activeNote) activeNote('Wait for the translation to finish.', '#a00'); return }
     if (_speechListening) { alert('Stop dictation first.'); return }
     if (anyRecording()) { alert('Stop the recording first.'); return }
-    // Replacing the caption-bearing face's text is what costs the card its
-    // per-line timings, and a swap replaces both faces.
+    // A swap invalidates caption-to-row attribution on both faces. Spotify
+    // playback bounds are retained independently by updateManualEntry.
+    const swapTimingNote = spotifyClips(existing).length
+      ? "The text's subtitle-line links will be cleared. The Spotify clip will remain playable."
+      : "This card's text was captured from subtitles — swapping the faces drops its line timings."
     if (existing && (existing.captionStarts || (existing.captionBlocks || []).length)
-      && !confirm("Swap Source and Target?\n\nThis card's text was captured from subtitles — swapping the faces drops its line timings.")) return
+      && !confirm("Swap Source and Target?\n\n" + swapTimingNote)) return
     const $src = $d.find('#meeSource'), $tgt = $d.find('#meeTarget')
     const sv = $src.val(), tv = $tgt.val()
     $src.val(tv); $tgt.val(sv)

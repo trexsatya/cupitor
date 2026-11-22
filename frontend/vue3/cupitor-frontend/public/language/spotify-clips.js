@@ -18,9 +18,15 @@ export function spotifyClipSegments(item) {
   if (!item) return [];
   const episode = spotifyEpisode(item.mediaUrl || item.captionUrl);
   if (!episode) return [];
-  const blocks = Array.isArray(item.captionBlocks) ? item.captionBlocks : [{
+  const captionBlocks = Array.isArray(item.captionBlocks) ? item.captionBlocks : [{
     url: item.captionUrl, starts: item.captionStarts, ends: item.captionEnds,
   }];
+  // Text edits invalidate caption-to-row attribution, but the linked audio
+  // passage still has the same bounds. Combine those retained playback ranges
+  // with any newly captured cues, validating their episode and times alike.
+  const blocks = captionBlocks.concat(Array.isArray(item.spotifyClipRanges)
+    ? item.spotifyClipRanges.map(range => ({url: range?.url, starts: [range?.start], ends: [range?.end]}))
+    : []);
   const ranges = [];
   for (const block of blocks) {
     if (spotifyEpisode(block?.url)?.id !== episode.id || !Array.isArray(block.starts) ||

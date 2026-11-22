@@ -5,6 +5,11 @@ Captured captions retain `start` and `end` in seconds. New cards store aligned
 `captionBlocks` entry. Text fields, translations and duplicate detection keep
 their existing behavior.
 
+Editing a captured card retains its linked Spotify passage in
+`spotifyClipRanges`, independently of caption-to-row attribution. Text edits
+and face swaps keep playback bounds; changing the linked episode clears the
+old retained ranges. Newly captured passages combine with retained ranges.
+
 A card linked to a Spotify podcast episode with valid cue bounds is playable
 in the same playlist as YouTube clips. Play All seeks to each passage, stops
 at its end and advances through the normal queue, gaps and loop settings.
