@@ -193,8 +193,15 @@ test('Practice keeps Flip visible and interactive when the other controls auto-h
 test('actual Practice navigation clears only the previous card selection', () => {
   const p = boot('practice');
   try {
-    Object.assign(p.window, {_practiceActive: true, _practiceCards: [{}, {}], _practiceIdx: 0});
+    Object.assign(p.window, {_practiceActive: true, _practiceCards: [{}, {}], _practiceIdx: 0,
+      _practiceSessionTimeout: {blocked: true}});
     p.window.eval('const _preferredPracticeSpeed = () => 1; const _renderPracticeCard = () => {};\n' + app.slice(navigation.start, navigation.end));
+    p.select();
+    const selected = p.window.getSelection().toString();
+    p.window.practiceNav(1);
+    assert.equal(p.window._practiceIdx, 0, 'timeout must be dismissed before navigation');
+    assert.equal(p.window.getSelection().toString(), selected);
+    p.window._practiceSessionTimeout.blocked = false;
     p.select(); p.window.practiceNav(1);
     assert.equal(p.window.getSelection().toString(), '');
     assert.equal(p.window._practiceIdx, 1);
