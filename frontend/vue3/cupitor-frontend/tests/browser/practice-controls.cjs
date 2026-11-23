@@ -68,6 +68,27 @@ async function checkPracticeControls(browser) {
       assert.equal((await state()).events.filter(e => ['play', 'load', 'seek'].includes(e.action)).length, 0,
         'cold ready, rapid navigation and returning to the same card must stay silent')
 
+      // Card subtitle lines stay readable on a phone: no line under 14px or
+      // fainter than 0.75 opacity, none spills past the card face, and the
+      // timestamp sits on its own row above the text.
+      await page.locator('#practiceMode .practice-front .practice-line .study-srt-timestamp').first().waitFor()
+      const lines = await page.evaluate(() => [...document.querySelectorAll('#practiceMode .practice-front .practice-line')].map(row => {
+        const t = row.querySelector('.practice-line-text')
+        const ts = row.querySelector('.study-srt-timestamp')
+        const cs = getComputedStyle(t)
+        const face = row.closest('.practice-face').getBoundingClientRect()
+        return { size: parseFloat(cs.fontSize), opacity: Number(cs.opacity), inside: t.getBoundingClientRect().right <= face.right,
+          time: ts ? ts.textContent : '', above: !!ts && ts.getBoundingClientRect().bottom <= t.getBoundingClientRect().top + 1 }
+      }))
+      assert(lines.length > 1, 'card shows the matched line with context')
+      assert.equal(lines[0].time, '[00:00:01-00:00:03]', 'each line shows its cue time')
+      for (const l of lines) {
+        assert(l.size >= 14, `practice line font ${l.size}px is too small to read`)
+        assert(l.opacity >= 0.75, `practice context line opacity ${l.opacity} is too faint`)
+        assert(l.inside, 'practice line text spills past the card face')
+        assert(l.above, 'practice line timestamp sits above its text')
+      }
+
       // An old playing card stops in the navigation handler, before any
       // subtitle/range lookup can complete. The new card is only cued.
       await page.evaluate(() => { window.__yt.state = 1; window.__yt.events = [] })
