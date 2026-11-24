@@ -72,7 +72,11 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     return minutes + ':' + seconds;
   };
   const current = session => active === session && session.isCurrent();
-  const rangeOf = session => session.segments[session.index];
+  const rangeOf = session => {
+    const range = session.segments[session.index];
+    return session.padding?.after > 0 && session.duration > range.start && session.duration < range.end
+      ? {...range, end: session.duration} : range;
+  };
   function playbackTime(session) {
     if (session.mode !== 'practice') return session.position;
     if (session.pendingSeek) return NaN;
@@ -218,8 +222,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     const session = active, state = event?.data || {};
     logPlayback(state);
     if (!session || !current(session)) {if (!state.isPaused) pauseController(); return;}
-    const range = rangeOf(session);
-    if (state.playingURI && spotifyEpisode(state.playingURI)?.id !== range.id) return;
+    if (state.playingURI && spotifyEpisode(state.playingURI)?.id !== session.segments[session.index].id) return;
     if (session.complete) {if (!state.isPaused) pauseController(); return;}
     if (state.position == null) return;
     const position = Number(state.position) / 1000;
@@ -234,6 +237,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     const wasPaused = session.paused, wasBuffering = session.buffering;
     const reportedPaused = !!state.isPaused;
     session.duration = Number(state.duration) / 1000;
+    const range = rangeOf(session);
     session.buffering = !!state.isBuffering;
     if (session.buffering && !wasBuffering) {
       session.recovering = true; session.resumePending = false; session.resumeAttempts = 0;
@@ -377,8 +381,8 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     }
   }
   function cue(item, {mode = 'practice', isCurrent = () => true, isPaused = () => false,
-    onExternalPause = () => {}, autoplay = false} = {}) {
-    const segments = spotifyClipSegments(item);
+    onExternalPause = () => {}, autoplay = false, padding} = {}) {
+    const segments = spotifyClipSegments(item, padding);
     stop({hide: !segments.length});
     if (!segments.length) return null;
     show(); message('Loading Spotify…');
@@ -387,7 +391,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     // Practice cues need no awaiting caller; they must not leave a rejected
     // promise behind if the listener opens a different card while loading.
     done.catch(() => {});
-    const session = active = {item, mode, segments, index: 0, isCurrent, isPaused, onExternalPause,
+    const session = active = {item, mode, segments, padding, index: 0, isCurrent, isPaused, onExternalPause,
       resolve, reject, done, settled: false, complete: false, paused: true, pendingSeek: true,
       desiredPaused: !autoplay, userPaused: false, position: NaN, positionAt: NaN, duration: NaN, buffering: false, everPlayed: false,
       recovering: false, resumePending: false, resumeAttempts: 0, seekAttempts: 0, seekTarget: segments[0].start, loadedForRange: false, initializing: false,
@@ -425,7 +429,10 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
   }
   function togglePractice(item, options = {}) {
     let session = active;
-    if (!session || session.item !== item || session.mode !== 'practice' || session.complete) {
+    const paddingChanged = session?.padding?.before !== options.padding?.before ||
+      session?.padding?.after !== options.padding?.after;
+    if (!session || session.item !== item || session.mode !== 'practice' || session.complete ||
+        (session.desiredPaused && paddingChanged)) {
       session = cue(item, {...options, mode: 'practice', autoplay: true});
     } else {
       setPaused(session, !session.desiredPaused);

@@ -113,7 +113,7 @@ jobs:
           node --test public/language/spotify-*.test.mjs public/language/card-selection-search.test.mjs public/language/recordings-sync-state.test.mjs
           node --test public/language/word-map-search.test.mjs public/language/word-map-model.test.mjs public/language/word-maps.test.mjs public/language/word-maps-sync.test.mjs public/language/word-maps-store.test.mjs public/language/word-maps-github.test.mjs
           node --test public/language/study-calls.test.mjs
-          node --test public/language/subtitle-bundles.test.mjs public/language/subtitle-pack-loading.test.mjs tools/language/subtitle-bundles.test.mjs tools/language/srt-import.test.mjs tools/language/bundle-repair.test.mjs
+          node --test public/language/subtitle-bundles.test.mjs public/language/subtitle-pack-loading.test.mjs tools/language/subtitle-bundles.test.mjs tools/language/srt-import.test.mjs tools/language/bundle-repair.test.mjs tools/language/data-freshness.test.mjs
           npx jest tools/language --runInBand --silent
 
       - name: Configure runner Chrome for browser tests

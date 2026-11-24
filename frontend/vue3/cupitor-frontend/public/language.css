@@ -3060,6 +3060,7 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 #practiceMode .practice-close:hover { background: rgba(0,0,0,0.85); }
 #practiceMode .practice-info,
 #practiceMode .practice-shuffle,
+#practiceMode .practice-playback-settings,
 #practiceMode .practice-settings {
     width: 32px;
     height: 32px;

@@ -288,6 +288,13 @@ Overlapping context lines are deduplicated by start timestamp, and an identical
 rerun leaves the store unchanged. An existing filename and index metadata are
 retained even if Filmot later supplies a different video title/channel.
 
+Before writing subtitles or progress, `srt` fetches the upstream of the Git branch
+that contains `srtsDir` (or `dataDir/srts`). Run it on a tracked data checkout,
+such as a local `gh-pages` branch tracking `origin/gh-pages`. If the upstream is
+unreachable or contains commits missing locally, the command stops. Integrate
+the upstream changes before retrying. Local commits and uncommitted edits
+can remain in place.
+
 If two captured cues disagree at the same timestamp, `srtConflict: "keep"`
 (the default) preserves the earlier cue instead of writing competing SRT blocks.
 Use `--srtConflict replace` to accept the new cue or

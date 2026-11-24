@@ -2,7 +2,7 @@ const fs = require('node:fs')
 const vm = require('node:vm')
 const path = require('node:path')
 const source = fs.readFileSync(path.join(__dirname, 'language.js'), 'utf8')
-const begin = source.indexOf('function _pracRecLoopClearAudio(st)')
+const begin = source.indexOf('function _practiceLoopSilenceSeconds(')
 const end = source.indexOf('// Watch the playhead for the whole time', begin)
 const watchBegin = source.indexOf('function _pracRecWatch()', end)
 const watchEnd = source.indexOf('// Rewind to the take before', watchBegin)
@@ -17,7 +17,7 @@ function fixture({ pauseOnRecordStart = false } = {}) {
     timer:null, token:0, watchPos:null, awaiting:null,
   }
   const calls = [], deleted = [], audioPlays = [], audios = []
-  let tick = () => {}, position = 11, next = 0, sourcePaused = false
+  let tick = () => {}, position = 11, next = 0, sourcePaused = false, now = 1000
   class AudioMock {
     constructor(url) { this.url = url; this.listeners = {}; this.paused = false; audios.push(this) }
     addEventListener(key, listener) { this.listeners[key] = listener }
@@ -31,7 +31,9 @@ function fixture({ pauseOnRecordStart = false } = {}) {
       ytPlayer: {seekTo:(t, play)=>{calls.push(['seek',t,play]); position=t}} },
     _pracRecTakeOverPlayhead:()=>calls.push(['takeover']),
     _pracRecPlayVideo:()=>{ sourcePaused = false; calls.push(['play']) },
-    _pracRecPauseVideo:()=>calls.push(['pause']),
+    _pracRecPauseVideo:()=>{ sourcePaused = true; calls.push(['pause']) },
+    practicePaddingSeconds:value=>Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0,
+    _practicePadding:()=>({before:0, after:0}),
     _pracRecNow:()=>position,
     _pracRecRefreshClip:async()=>{},
     _practiceSpeakOverShown:()=>true,
@@ -60,13 +62,13 @@ function fixture({ pauseOnRecordStart = false } = {}) {
     setTimeout:()=>1,
     clearInterval:()=>{},
     setInterval:cb=>{tick=cb;return 1},
-    Date, Math, Number, Promise, Audio:AudioMock, console,
+    Date: { now: () => now }, Math, Number, Promise, Audio:AudioMock, console,
   }
   vm.createContext(context)
   vm.runInContext(source.slice(begin,end) + '\n' + source.slice(watchBegin,watchEnd),context)
   return {
     context,state,calls,deleted,audios,audioPlays,
-    tick:()=>tick(),setPosition:t=>{position=t},sourcePaused:()=>sourcePaused,flush,
+    tick:()=>tick(),advance:ms=>{now+=ms;tick()},setPosition:t=>{position=t},sourcePaused:()=>sourcePaused,flush,
   }
 }
 
@@ -172,6 +174,64 @@ describe('continuous Practice Speak Over loop', () => {
     await flush()
     expect(h.audioPlays).toHaveLength(2)
     expect(st.loopTake.url).toBe('webrec://take_2')
+  })
+
+  test('a fractional gap starts when the take ends and cannot restart a disabled loop', async () => {
+    const h = fixture()
+    const { context: ctx, state: st } = h
+    ctx.window._appSettings.practiceLoopSilenceSeconds = 1.25
+    ctx._pracRecLoopToggle()
+    await flush()
+    ctx._pracRecWatch()
+    h.setPosition(10.2)
+    h.tick()
+    st.loopTake = { url: 'webrec://take_1', t1: 11 }
+    h.setPosition(11.1)
+    h.tick()
+    await flush()
+    expect(h.audioPlays).toHaveLength(1)
+
+    h.setPosition(16)
+    h.tick()
+    expect(h.sourcePaused()).toBe(true)
+    const seeks = () => h.calls.filter(([op]) => op === 'seek').length
+    const initialSeeks = seeks()
+    h.advance(3000)
+    expect(seeks()).toBe(initialSeeks)
+    expect(h.audios[0].paused).toBe(false)
+    h.audios[0].listeners.ended()
+    h.tick()
+    h.advance(1249)
+    expect(seeks()).toBe(initialSeeks)
+    h.advance(1)
+    expect(seeks()).toBe(initialSeeks + 1)
+    expect(h.sourcePaused()).toBe(false)
+
+    h.setPosition(10.2)
+    h.tick()
+    h.setPosition(16)
+    h.tick()
+    expect(h.sourcePaused()).toBe(true)
+    ctx._pracRecLoopToggle()
+    h.advance(2000)
+    expect(seeks()).toBe(initialSeeks + 1)
+  })
+
+  test('microphone startup during the gap leaves the source paused until the next repeat', async () => {
+    const h = fixture()
+    const ctx = h.context
+    ctx.window._appSettings.practiceLoopSilenceSeconds = 1
+    ctx._pracRecLoopToggle()
+    await flush()
+    ctx._pracRecWatch()
+    h.setPosition(10.2)
+    h.tick()
+    h.setPosition(16)
+    h.tick()
+    expect(await ctx._pracRecLoopStart()).toBe(true)
+    expect(h.sourcePaused()).toBe(true)
+    h.advance(1000)
+    expect(h.sourcePaused()).toBe(false)
   })
 
   test('a late stop after minimizing cannot resurrect or leak a take', async () => {
