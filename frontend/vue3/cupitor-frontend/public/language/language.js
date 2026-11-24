@@ -184,7 +184,7 @@ import {
   captureSourceContext as _dsCaptureSourceContext,
   writeTarget as _dsWriteTarget,
   hasSelf as _dsHasSelf,
-  hasOther as _dsHasOther,
+  hasOtherData as _dsHasOtherData,
   langFromLocation as _dsLangFromLocation,
   readLayers as _dsReadLayers,
   mergeIndexLayers as _dsMergeIndexLayers,
@@ -3701,7 +3701,7 @@ async function _loadVocabularyCatalog() {
     catch (_) { return parseVocabularyCatalog(null) }
   }
   _vocabularyCatalogSelf = _dsHasSelf() ? readSaved('self') : parseVocabularyCatalog(null)
-  _vocabularyCatalogOther = _dsHasOther() ? readSaved('other') : parseVocabularyCatalog(null)
+  _vocabularyCatalogOther = _dsHasOtherData('vocabulary') ? readSaved('other') : parseVocabularyCatalog(null)
   _installVocabularyCatalog()
   const languagesReady = _dsReadLayers(SHARED_HINTS_DIRECTORY + '/languages.txt', {
     lang: 'shared', retry: { tries: 1, timeoutMs: 4000 },
@@ -4130,7 +4130,7 @@ window.marginEndSubtitle = 1
 window.starredLines = []
 window.allSubtitles = {}
 const _subtitleSearchContext = _dsCaptureSourceContext()
-const _subtitleSearchScope = JSON.stringify([_userData.scope, _dsHasOther() ? _dsSourceIdentity('other') : null])
+const _subtitleSearchScope = JSON.stringify([_userData.scope, _dsHasOtherData('subtitles') ? _dsSourceIdentity('other') : null])
 const _subtitleSearch = createSubtitleSearchClient({
   scope: _subtitleSearchScope,
   storage: new URLSearchParams(window.location.search).get('subtitleSearch') === 'indexeddb' ? 'indexeddb' : 'memory',
@@ -13631,7 +13631,7 @@ function _adoptRecordings(persistable) {
 // shapes their entries so a malformed file cannot break the dialog, and
 // drops their device-only keys (notification list, app playlist id).
 async function _loadOtherRecordings() {
-  if (!_dsHasOther()) return
+  if (!_dsHasOtherData('playlists')) return
   let coll = null
   try {
     coll = await _readRecordingsCollection('other')

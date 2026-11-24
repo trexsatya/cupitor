@@ -345,3 +345,12 @@ describe('missingRepo (a recorded data repo that cannot be found)', () => {
     expect('missingRepo' in JSON.parse(s.getItem(ACCOUNT_KEY))).toBe(false)
   })
 })
+
+test('stores only valid shared-library exclusions and keeps legacy all-on defaults', () => {
+  const storage = GUEST_REC()
+  const state = loadAccount(storage)
+  expect(saveAccount({ ...state, otherData: { playlists: false, subtitles: true, foreign: false } }, storage)).toBe(true)
+  expect(loadAccount(storage).otherData).toEqual({ playlists: false })
+  expect(saveAccount({ ...state, otherData: {} }, storage)).toBe(true)
+  expect(loadAccount(storage).otherData).toBeUndefined()
+})

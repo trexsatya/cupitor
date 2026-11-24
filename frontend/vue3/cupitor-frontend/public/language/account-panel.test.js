@@ -599,6 +599,7 @@ describe('actions', () => {
     const { deps } = setup({ state: aliceReady })
     initAccountPanel(); openAccountDialog()
     jq('#acctOther').val('bob').trigger('change')
+    jq('#acctApplyOther').trigger('click')
     expect(deps.saveAccount).toHaveBeenCalledWith({ ...aliceReady, other: bob })
     expect(deps.reload).toHaveBeenCalledTimes(1)
     // Reloading: the panel takes no further changes.
@@ -607,6 +608,7 @@ describe('actions', () => {
     const again = setup({ state: aliceReady }).deps
     initAccountPanel(); openAccountDialog()
     jq('#acctOther').val('').trigger('change')
+    jq('#acctApplyOther').trigger('click')
     expect(again.saveAccount).toHaveBeenCalledWith({ ...aliceReady, other: null })
     expect(again.reload).toHaveBeenCalledTimes(1)
   })
@@ -614,6 +616,7 @@ describe('actions', () => {
     const { deps } = setup({ state: legacy })
     initAccountPanel(); openAccountDialog()
     jq('#acctOther').val('alice').trigger('change')
+    jq('#acctApplyOther').trigger('click')
     expect(deps.saveAccount).toHaveBeenCalledWith({ ...ownerState, other: alice })
   })
   test('picking: a save that fails shows a message, no reload', () => {
@@ -621,8 +624,23 @@ describe('actions', () => {
     deps.saveAccount.mockReturnValue(false)
     initAccountPanel(); openAccountDialog()
     jq('#acctOther').val('bob').trigger('change')
+    jq('#acctApplyOther').trigger('click')
     expect(deps.reload).not.toHaveBeenCalled()
     expect(jq('.acct-msg').text()).toMatch(/Couldn't save your choice/)
+  })
+  test('selects vocabulary and subtitles while hiding shared playlists', async () => {
+    const { deps } = setup({ state: aliceReady })
+    initAccountPanel(); openAccountDialog()
+    const box = key => jq('.acct-other-data input[value="' + key + '"]')
+    expect(box('vocabulary').prop('checked')).toBe(true)
+    expect(box('subtitles').prop('checked')).toBe(true)
+    box('playlists').prop('checked', false).trigger('change')
+    await flush()
+    expect(box('playlists').prop('checked')).toBe(false)
+    expect(deps.reload).not.toHaveBeenCalled()
+    jq('#acctApplyOther').trigger('click')
+    expect(deps.saveAccount).toHaveBeenCalledWith({ ...aliceReady, otherData: { playlists: false } })
+    expect(deps.reload).toHaveBeenCalledTimes(1)
   })
   test('setup: progress shown per step, reload at the end', async () => {
     const { deps } = setup({ state: aliceNoRepo })

@@ -15,9 +15,10 @@ import { LANGUAGE_KEY, languageKeyFromLocation, defaultDataRoot } from './langua
 // and writes follow the new account. configure(null) drops the kept state
 // so the next use reads localStorage again.
 
-import { loadAccount, sources } from './account-state.js'
+import { loadAccount, normalizeOtherData, sources } from './account-state.js'
 import { fetchWithRetry } from './net.js'
 import { parseVocabularyFile } from './vocab-merge.js'
+import { GENERATED_HINDI_HINTS_FILE, SHARED_HINTS_DIRECTORY, VOCABULARY_CATALOG_FILE } from './vocabulary-hints.js'
 
 // ---- layered reads ----
 let _layerStats = { other: { hits: 0, misses: 0, errors: 0 } }
@@ -30,12 +31,12 @@ let _sourceNoticeSent = false
 function configuredIdentity(value) {
   const s = sources(value)
   const key = src => src && [String(src.owner).toLowerCase(), String(src.repo).toLowerCase(), src.branch]
-  return JSON.stringify([String(value.login || '').toLowerCase(), key(s.self), key(s.other)])
+  return JSON.stringify([String(value.login || '').toLowerCase(), key(s.self), key(s.other), normalizeOtherData(value.otherData)])
 }
 // Copy both source settings so later caller mutations cannot redirect a read.
 export function configure(state) {
   const before = configuredIdentity(_state || loadAccount())
-  _state = state ? { ...state, ...(state.other ? { other: { ...state.other } } : {}) } : null
+  _state = state ? { ...state, other: state.other && { ...state.other }, otherData: normalizeOtherData(state.otherData) } : null
   if (configuredIdentity(_state || loadAccount()) !== before) _generation++
   _sourceNoticeSent = false
   resetLayerStats()
@@ -124,6 +125,16 @@ export function source(who) {
 }
 export function hasSelf() { return !!currentSources().self }
 export function hasOther() { return !!currentSources().other }
+export function hasOtherData(key) { return hasOther() && state().otherData?.[key] !== false }
+
+function layeredDataType(topLevelPath) {
+  if (topLevelPath === 'srts') return 'subtitles'
+  if (topLevelPath === 'recordings.json' || topLevelPath === 'recordings') return 'playlists'
+  if (['vocabulary.txt', GENERATED_HINDI_HINTS_FILE, SHARED_HINTS_DIRECTORY, VOCABULARY_CATALOG_FILE].includes(topLevelPath)) {
+    return 'vocabulary'
+  }
+  return null
+}
 
 // Raw URL under db/language/<lang>/ for the given source. `path` may be ''
 // for the directory itself. `path` is raw, not URL-encoded: each '/'-separated
@@ -243,7 +254,8 @@ export async function readLayers(path, { lang = langFromLocation(), fetchFn, onN
     for (const m of sourceProblems()) { try { onNotice(m) } catch (_) {} }
   }
   const out = []
-  for (const [src, cfg] of [['self', s.self], ['other', s.other]]) {
+  const other = hasOtherData(layeredDataType(segments[0])) ? s.other : null
+  for (const [src, cfg] of [['self', s.self], ['other', other]]) {
     if (!cfg) continue
     context.assertCurrent()
     const url = urlFor(cfg, segments, lang)
