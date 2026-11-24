@@ -313,14 +313,16 @@
    * receives the file's current text (or null if it doesn't yet exist) and
    * must return the new text. On a 422 (someone pushed between our ref read
    * and ref update), the whole sequence is re-run with fresh current-content
-   * so transforms re-apply cleanly.
+   * so transforms re-apply cleanly. Transforms run concurrently; their optional
+   * second argument supplies { headSha, read(path) } for dependent files from
+   * the same commit. These reads are cached and never follow a moving branch.
    *
    * @param {object} options
    * @param {string} options.owner
    * @param {string} options.repo
    * @param {string} options.branch
    * @param {string} options.commitMessage
-   * @param {Array<{path: string, getContent: (current: string|null) => Promise<string>|string}>} options.files
+   * @param {Array<{path: string, getContent: (current: string|null, snapshot: {headSha: string, read: (path: string) => Promise<string|null>}) => Promise<string>|string}>} options.files
    * @param {number} [options.maxAttempts]
    */
   async function commitMultipleFiles({ owner, repo, branch, commitMessage, files, maxAttempts = 5 }) {
@@ -394,7 +396,10 @@
             // failure aborts: building on "nothing" would overwrite the file.
             if (!isNotFound(e)) throw e;
           }
-          const newText = await f.getContent(currentText);
+          const newText = await f.getContent(currentText, {
+            headSha,
+            read: async path => (await read(path))?.content ?? null,
+          });
           if (newText === null || newText === undefined) {
             console.log(`[commitMultipleFiles] skip ${f.path}: getContent returned null/undefined`);
             return { f, action: 'skip' };

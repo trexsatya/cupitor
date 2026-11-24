@@ -1,3 +1,4 @@
+import { vocabularyEntries } from './vocabulary-entries.js'
 import { stripBracketHints, stripExpansionMarkers } from './vocab-search.js'
 import { isProperlyBracketed, ownLines, parseVocabularyFile } from './vocab-merge.js'
 
@@ -116,6 +117,10 @@ export function parseVocabularyCatalog(raw) {
       validLanguage(language) && typeof text === 'string'))
   const validGroup = (id, item) => validId(id) && record(item) &&
     validLanguage(item.language) && typeof item.category === 'string' && typeof item.line === 'string' &&
+    (item.entryId === undefined || validId(item.entryId)) &&
+    (item.deleted === undefined || typeof item.deleted === 'boolean') &&
+    (item.reviewRequired === undefined || typeof item.reviewRequired === 'boolean') &&
+    (item.reviewedHints === undefined || (Array.isArray(item.reviewedHints) && item.reviewedHints.every(validLanguage))) &&
     (item.hintOverrides === undefined || entriesAre(item.hintOverrides, (language, hints) =>
       validLanguage(language) && strings(hints))) &&
     (item.meanings === undefined || (Array.isArray(item.meanings) && item.meanings.every(validId))) &&
@@ -208,10 +213,87 @@ export function reviseVocabularyGroup(group, previousLine, { category, line }) {
     const text = byName.get(name) ?? (correction?.oldName === name ? correction.text : undefined)
     return text === undefined ? [] : [{ ...form, text }]
   })
-  const next = { language: group.language, category, line, forms }
+  const next = { ...group, category, line, forms }
+  delete next.id
+  delete next.row
+  delete next.deleted
+  if (group.entryId && vocabularyHintContentChanged(previousLine, line)) {
+    next.reviewRequired = true
+    next.reviewedHints = []
+  }
   if (group.meanings) next.meanings = group.meanings
   if (group.hintOverrides) next.hintOverrides = group.hintOverrides
   return next
+}
+
+// A text change cannot be classified reliably as a spelling correction or a
+// new meaning. Keep the translation, but require review before using it again.
+export function vocabularyHintContentChanged(before, after) {
+  const signature = line => {
+    const { hints, forms } = vocabularyLineParts(line)
+    return JSON.stringify([hints.map(h => normalizeHint(h, 'en')).sort(), forms.map(formKey).sort()])
+  }
+  return signature(before) !== signature(after)
+}
+
+export function vocabularyGroupLinks(rows, language, catalog) {
+  const exact = new Map(), byId = new Map(), byCategory = new Map()
+  const put = (map, key, item) => {
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(item)
+  }
+  for (const row of rows) {
+    put(exact, rowKey(row.category, row.line), row)
+    put(byCategory, row.category, row)
+    if (row.entryId) put(byId, row.entryId, row)
+  }
+  const signature = texts => JSON.stringify(texts.map(formKey).sort())
+  const cues = texts => JSON.stringify(texts.map(h => normalizeHint(h, 'en')).sort())
+  return Object.entries(catalog.groups).filter(([, group]) => group.language === language).map(([id, group]) => {
+    if (group.deleted) return [id, group, undefined]
+    // Once bound, never fall back to text: a deleted ID must not find a new row.
+    let candidates = group.entryId ? byId.get(group.entryId) : exact.get(rowKey(group.category, group.line))
+    if (!group.entryId && !candidates?.length) {
+      const { hints, forms } = vocabularyLineParts(group.line)
+      const linked = new Set((group.meanings?.length || group.hintOverrides
+        ? forms : group.forms.filter(form => form.meanings.length).map(form => form.text)).map(formKey))
+      candidates = (byCategory.get(group.category) || []).filter(row => {
+        const parts = vocabularyLineParts(row.line)
+        return signature(parts.forms) === signature(forms) ||
+          (hints.length && cues(parts.hints) === cues(hints) && parts.forms.some(form => linked.has(formKey(form))))
+      })
+    }
+    return [id, group, candidates?.length === 1 ? candidates[0] : undefined]
+  })
+}
+
+// Migrate existing packs without changing their IDs, overrides or attribution.
+// The file markers provide identity; category/line are readable snapshots only.
+export function synchronizeVocabularyGroups(catalog, language, previous, next) {
+  const rows = vocab => vocabularyEntries(vocab).filter(entry => entry.line.trim()).map((entry, index) =>
+    ({ ...entry, entryId: entry.id, index }))
+  const nextById = new Map(rows(next).filter(row => row.entryId).map(row => [row.entryId, row]))
+  const groups = {}
+  const covered = new Set()
+  for (const [id, group, row] of vocabularyGroupLinks(rows(previous), language, catalog)) {
+    if (group.deleted) continue
+    const entryId = group.entryId || row?.entryId
+    if (!entryId) continue // Ambiguous legacy rows need explicit reconciliation.
+    const updatedRow = nextById.get(entryId)
+    if (!updatedRow && !row) continue // An unloaded/other vocabulary is not a deletion.
+    const bound = { ...group, entryId }
+    // First adoption preserves already-curated legacy hints. Review is for
+    // changes to the live row, not old spelling differences in a seed pack.
+    const previousLine = group.entryId ? group.line : row.line
+    const updated = updatedRow ? reviseVocabularyGroup(bound, previousLine, updatedRow) : { ...bound, deleted: true }
+    if (updatedRow) covered.add(entryId)
+    if (JSON.stringify(group) !== JSON.stringify(updated)) groups[id] = updated
+  }
+  for (const row of rows(next)) {
+    if (!row.entryId || covered.has(row.entryId) || !vocabularyLineParts(row.line).hints.length) continue
+    groups[row.entryId] = { language, category: row.category, line: row.line, forms: [], entryId: row.entryId }
+  }
+  return groups
 }
 
 export async function vocabularyHintGroupId(language, row) {
@@ -225,8 +307,6 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
   const byPhrase = new Map()
   const byMeaning = new Map()
   const byRow = new Map()
-  const exactRows = new Map()
-  const rowsByCategory = new Map()
   const sharedEdits = new Map(Object.entries(catalog.sharedHints?.[source] || {}))
   const sharedForLine = hints => {
     if (!sharedEdits.size) return undefined
@@ -242,41 +322,29 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
   for (const row of rows) {
     const { hints, forms } = vocabularyLineParts(row.line)
     if (!forms.length) continue
-    put(exactRows, rowKey(row.category, row.line), row)
-    put(rowsByCategory, row.category, { row, hints, forms })
     const edited = sharedForLine(hints)
     if (edited) editedRows.set(row.index, edited)
     for (const hint of hints) put(byEnglish, normalizeHint(hint, 'en'), row)
   }
-  const groups = Object.entries(catalog.groups).filter(([, group]) => group.language === target)
-  // A saved group can override a seeded group on the same row.
-  for (const [id, group] of groups) {
-    const exact = exactRows.get(rowKey(group.category, group.line))
-    let row = exact?.[0]
-    if (!row) {
-      // Text-file edits can change the cue or the forms. Recover the link
-      // when the unchanged parts uniquely identify the same row.
-      const { hints, forms } = vocabularyLineParts(group.line)
-      const phraseKey = phrases => JSON.stringify(phrases.map(phrase => normalizeHint(phrase, 'en')).sort())
-      const hintKey = phraseKey(hints)
-      const formSignature = texts => JSON.stringify(texts.map(formKey).sort())
-      const previousForms = formSignature(forms)
-      const linkTexts = group.meanings?.length || group.hintOverrides
-        ? forms : group.forms.filter(form => form.meanings.length).map(form => form.text)
-      const linkedForms = new Set(linkTexts.map(formKey).filter(Boolean))
-      const candidates = (rowsByCategory.get(group.category) || []).filter(entry =>
-        formSignature(entry.forms) === previousForms ||
-        (hints.length && phraseKey(entry.hints) === hintKey && entry.forms.some(form => linkedForms.has(formKey(form)))))
-      if (candidates.length === 1) row = candidates[0].row
-    }
-    if (row && (group.hintOverrides || !byRow.get(row.index)?.hintOverrides)) {
-      byRow.set(row.index, { id, ...group, row })
+  for (const [id, group, row] of vocabularyGroupLinks(rows, target, catalog)) {
+    const previous = row && byRow.get(row.index)
+    const preferred = !previous || (!!group.entryId !== !!previous.entryId
+      ? !!group.entryId : group.hintOverrides || !previous.hintOverrides)
+    if (row && preferred) {
+      const current = group.entryId ? reviseVocabularyGroup(group, group.line, row) : group
+      byRow.set(row.index, { id, ...current, row })
     }
   }
+  const usable = group => group && (!group.reviewRequired || group.reviewedHints?.includes(source))
   const overrides = new Map()
   if (source !== 'en') {
     for (const row of rows) {
-      const aliases = byRow.get(row.index)?.hintOverrides?.[source] ?? editedRows.get(row.index)
+      const group = byRow.get(row.index)
+      if (group && !usable(group)) {
+        overrides.set(row.index, { aliases: [], keys: new Set() })
+        continue
+      }
+      const aliases = group?.hintOverrides?.[source] ?? editedRows.get(row.index)
       if (!aliases) continue
       const keys = new Set(aliases.map(alias => normalizeHint(alias, source)))
       overrides.set(row.index, { aliases, keys })
@@ -292,13 +360,15 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
     if (!aliases) continue
     for (const row of matchingRows) {
       if (overrides.has(row.index)) continue
-      const local = byRow.get(row.index)?.meanings
+      const group = byRow.get(row.index)
+      const local = usable(group) ? group.meanings : undefined
       // An explicit group hint can give this row a narrower meaning.
       if (local?.some(id => catalog.meanings[id]?.hints[source] !== undefined)) continue
       for (const alias of aliases) put(byPhrase, normalizeHint(alias, source), { row, sharedAliases: aliases })
     }
   }
   for (const group of byRow.values()) {
+    if (!usable(group)) continue
     for (const meaning of group.meanings || []) put(byMeaning, meaning, { row: group.row })
     const available = new Set(vocabularyLineParts(group.row.line).forms.map(text => normalizeHint(text)))
     for (const form of group.forms) {
@@ -328,7 +398,9 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
   function hintsFor(line, index) {
     if (source === 'en') return []
     const groups = groupsByLine.get(line)
-    const group = indexedRows.get(index) === line ? byRow.get(index) : groups?.length === 1 ? groups[0] : undefined
+    const candidate = indexedRows.get(index) === line ? byRow.get(index) : groups?.length === 1 ? groups[0] : undefined
+    if (candidate && !usable(candidate)) return []
+    const group = candidate
     if (group?.hintOverrides?.[source]) return group.hintOverrides[source]
     const own = linkedHints(group?.meanings)
     const { hints, forms } = vocabularyLineParts(line)

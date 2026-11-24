@@ -32,7 +32,7 @@ const splitLocalizedHints = value => [...new Set(value.split('|').map(hint => hi
 const equalHints = (left, right) => left.length === right.length && left.every((hint, index) => hint === right[index])
 
 export function openVocabularyEditor({
-  row, language, lookup, hints, hasOverride = false, sharedHints = [], languageName, save,
+  row, language, lookup, hints, hasOverride = false, sharedHints = [], needsReview = false, languageName, save,
 }) {
   if (document.getElementById('vocabularyMeaningEditor')) return
   const dialog = control('dialog')
@@ -53,6 +53,7 @@ export function openVocabularyEditor({
   const input = hintInput(hints, lookup)
   const lineLabel = label(english ? 'English hints' : name + ' hints for this line', input)
   const help = control('small', english ? 'Separate hints with commas.' : 'Separate hints with |.')
+  if (needsReview) help.textContent += ' This entry changed. Check the translation before saving; it is hidden until reviewed.'
   help.id = 'vocabularyHintEditorHelp'
   const useCatalog = button('Use catalog hints')
   useCatalog.hidden = !hasOverride
@@ -93,7 +94,7 @@ export function openVocabularyEditor({
     event.preventDefault()
     if (saving) return
     const next = english ? splitVocabularyHints(input.value) : splitLocalizedHints(input.value)
-    const lineHints = reset ? null : equalHints(next, hints) ? undefined : next
+    const lineHints = reset ? null : !needsReview && equalHints(next, hints) ? undefined : next
     const sharedChanges = translations.map(({ cue, field, hints }) => ({ cue, hints, next: splitLocalizedHints(field.value) }))
       .filter(({ hints, next }) => !equalHints(hints, next))
       .map(({ cue, next }) => [cue, next])

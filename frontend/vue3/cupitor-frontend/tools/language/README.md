@@ -532,3 +532,44 @@ each key means).
   (`filmotDelayMs` / `translateDelayMs`) and retry with backoff; on failure a unit
   is left pending for the next run.
 - Tests: `npx jest "(public/language|tools/language)/.*\.test\.js$"`.
+
+## Vocabulary entry identity and translated hints
+
+The app now saves an invisible identity marker with each row:
+
+```text
+#Everyday Life
+(wake early)|uppe med tuppen|\t[entry:entry-0123456789abcdef]
+```
+
+Here `\t` represents an actual tab. `parseVocabularyFile` removes the marker
+from display/search text and retains it as metadata; `vocabularyToText` restores
+it. CLI vocabulary readers use the same parser. Keep the marker when moving or
+correcting a row by hand. Omit it when adding a new entry; copying an existing
+marker to a second row is rejected.
+
+The first save in the updated app adopts legacy rows and binds existing catalog
+groups to `entryId`, without regenerating any translation. Existing group keys,
+meanings, language overrides and attribution remain. Shared-pack rows also get
+a catalog snapshot, so later edits can be checked. Migration happens in the same
+Git commit as the vocabulary save; there is no separate live data migration.
+
+Both the vocabulary dialog and hint editor save vocabulary and the shared
+catalog together. Every retry reads the same commit for both files. Unrelated
+remote changes are retained; competing edits to the same identified entry stop
+the save. Pending edits keep their identities and original baseline across a
+reload. An old text-only client cannot maintain this metadata; refresh clients
+before their next vocabulary edit after deploying this change.
+
+Moving categories, reordering forms and changing capitalization/spacing retain
+reviewed hints. Changing cues or forms retains the translations but marks them
+for review, since software cannot distinguish a spelling correction from a new
+meaning. Pending translations are hidden from display and native-language search
+until approved in **Edit vocabulary hints**. Approval applies only to the chosen
+hint language. It does not claim to retranslate the other packs automatically.
+
+Deletion retains a tombstone for the old identity. Adding identical text later
+creates a different identity, so the deleted entry's overrides cannot reattach.
+A one-to-many replacement also creates new identities; the app does not guess
+which new row should inherit a translation. Legacy entries that match multiple
+rows remain unbound rather than being attached to an arbitrary row.

@@ -76,3 +76,10 @@ test('can remove an explicit empty override to use the catalog', async () => {
   await submit(form)
   expect(save).toHaveBeenCalledWith(null, [])
 })
+
+test('reviewing an unchanged translation still records approval for this language', async () => {
+  const { form, save } = openEditor({ needsReview: true })
+  expect(form.querySelector('#vocabularyHintEditorHelp').textContent).toContain('hidden until reviewed')
+  await submit(form)
+  expect(save).toHaveBeenCalledWith(['पीना', 'peena'], [])
+})
