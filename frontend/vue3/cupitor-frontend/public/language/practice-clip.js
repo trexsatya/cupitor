@@ -1,7 +1,7 @@
 // The stretch of video a practice card plays.
 //
 // A card shows the matched subtitle line plus however many lines the ↑+ / ↓+
-// buttons have added either side, and playback covers exactly those lines:
+// buttons have added either side. The default playback range covers those lines:
 // from just before the first one starts to just after the last one ends. What
 // is heard is what is on the card — no line before it, no line after it.
 //
@@ -45,6 +45,15 @@ export const CLIP_TAIL_SECONDS = 0.6;
 const timeOf = (t) => (t == null ? null : num(t, null));
 const startOf = (l) => timeOf(l && l.start && l.start.ordinal);
 const endOf = (l) => timeOf(l && l.end && l.end.ordinal);
+
+export function practicePaddingSeconds(value) {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+}
+
+export function padPracticeClip({ start, stop }, { before, after }) {
+  return { start: Math.max(0, start - before), stop: stop + after };
+}
 
 export function clipRange(lines, pos, before, after, fallback, opts = {}) {
   const src = Array.isArray(lines) ? lines : [];

@@ -14,7 +14,7 @@ export function spotifyEpisode(value) {
   return id ? {id, uri: 'spotify:episode:' + id, url: 'https://open.spotify.com/episode/' + id} : null;
 }
 
-export function spotifyClipSegments(item) {
+export function spotifyClipSegments(item, { before = 0, after = 0 } = {}) {
   if (!item) return [];
   const episode = spotifyEpisode(item.mediaUrl || item.captionUrl);
   if (!episode) return [];
@@ -34,7 +34,9 @@ export function spotifyClipSegments(item) {
     block.starts.forEach((value, i) => {
       if (value == null || block.ends[i] == null) return;
       const start = Number(value), end = Number(block.ends[i]);
-      if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start) ranges.push({start, end});
+      if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start) {
+        ranges.push({start: Math.max(0, start - before), end: end + after});
+      }
     });
   }
   ranges.sort((a, b) => a.start - b.start || a.end - b.end);

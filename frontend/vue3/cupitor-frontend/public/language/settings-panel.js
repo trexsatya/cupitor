@@ -30,7 +30,7 @@ export function organizeSettingsPanel(panel) {
   for (const [key, title, hint] of [
     ['tools', 'Tools', 'Vocabulary, recordings and subtitle maintenance.'],
     ['search', 'Search', 'Results, context and vocabulary searches.'],
-    ['playback', 'Playback', 'Timing and media for playlist playback.'],
+    ['playback', 'Playback', 'Timing and media for Playlist and Practice.'],
     ['practice', 'Practice', 'Your practice plan and study reminders.'],
     ['data', 'Data & account', 'Account, synchronization and diagnostics.']
   ]) {
@@ -86,6 +86,8 @@ export function organizeSettingsPanel(panel) {
     ['search', 'clipMaxDurationSec', 'Maximum clip (seconds)', 'Limit automatically built practice clips.', true],
     ['search', 'minWordsAround', 'Words around a match', 'Context for automatic random captures.', true],
     ['playback', 'playbackSpeed', 'Speed', 'Applies to every audio and YouTube item; videos use the closest supported rate.'],
+    ['playback', 'practiceClipPaddingBefore', 'Clip padding before (seconds)', 'Start Practice clips earlier.'],
+    ['playback', 'practiceClipPaddingAfter', 'Clip padding after (seconds)', 'Let Practice clips play longer.'],
     ['playback', 'ttsReplacements', 'TTS replacements', 'One literal from=spoken text per line. An empty right side omits the symbol.'],
     ['playback', 'ttsNewlinePauseMs', 'TTS newline pause (ms)', 'Silence between lines, from 0 to 10000 milliseconds.'],
     ['playback', 'recPlayGapSeconds', 'Between cards (seconds)', 'Time to read and recall before the next card.'],

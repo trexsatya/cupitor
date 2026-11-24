@@ -50,6 +50,13 @@ test('separate passages skip unselected gaps and invalid or absent end times sta
   assert.deepEqual(spotifyClipSegments({...card(), captionUrl: 'https://open.spotify.com/episode/' + otherId}), []);
 });
 
+test('practice padding clamps to zero, merges overlapping ranges and leaves the card intact', () => {
+  const item = card([1, 7, 20], [4, 9, 22]);
+  const ranges = options => spotifyClipSegments(item, options).map(({start, end}) => [start, end]);
+  assert.deepEqual(ranges({before: 2, after: 2}), [[0, 11], [18, 24]]);
+  assert.deepEqual(ranges(), [[1, 4], [7, 9], [20, 22]]);
+});
+
 test('resending a previously captured cue upgrades its end time without changing text or identity', () => {
   const old = card(); delete old.captionEnds;
   const updated = retainCaptionEnds(old, {url, timeParam: 't'}, [{start: 12.52, end: 14.16, text: 'Line 0'}]);

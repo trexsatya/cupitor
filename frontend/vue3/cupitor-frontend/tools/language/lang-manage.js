@@ -32,6 +32,7 @@ import { parseSearchResults, parseTranscript, findMatchWithContext } from "../..
 
 import { parseArgs, coerceFlags, matchCategory, mergeRareByCategory } from "./args.js";
 import { loadConfig } from "./config.js";
+import { verifyDataFreshness } from "./data-freshness.js";
 import { selectChunk, progressSummary, loadProgress, markDone } from "./progress.js";
 import {
   buildSearchUrl,
@@ -552,6 +553,9 @@ async function cmdFilmot(cfg) {
 // --- step 3: srt -----------------------------------------------------------
 
 async function cmdSrt(cfg) {
+  const srtsDir = cfg.srtsDir || (cfg.dataDir && join(cfg.dataDir, 'srts'));
+  if (!srtsDir) throw new Error('Configure srtsDir or dataDir to point to the local subtitle data checkout.');
+  verifyDataFreshness(srtsDir);
   const hits = readJson(join(cfg.outDir, "filmot-hits.json"), null);
   if (!hits) throw new Error("Run `filmot` first — out/filmot-hits.json not found.");
   // word -> category (for optional --category scoping).
@@ -582,7 +586,7 @@ async function cmdSrt(cfg) {
             delayMs: cfg.translateDelayMs,
           })
         : null;
-      const { baseName } = await saveHit(cfg.srtsDir, hit, translations, {
+      const { baseName } = await saveHit(srtsDir, hit, translations, {
         sourceLang: cfg.lang,
         targetLang: cfg.targetLang,
         defaultDurSec: cfg.defaultDurSec,
@@ -596,7 +600,7 @@ async function cmdSrt(cfg) {
     }
   }
   const after = progressSummary(allKeys, loadProgress(progressPath).doneKeys);
-  log(`\nsrt: ${after.done}/${after.total} done. Updated ${join(cfg.srtsDir, "index.json")}`);
+  log(`\nsrt: ${after.done}/${after.total} done. Updated ${join(srtsDir, "index.json")}`);
 }
 
 // --- categories: list vocab categories present in rare-words.json ----------

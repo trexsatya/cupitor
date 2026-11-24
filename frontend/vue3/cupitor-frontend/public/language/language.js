@@ -358,6 +358,7 @@ import {
 } from './music-bed.js';
 import {
   clipRange as _clipRange,
+  padPracticeClip, practicePaddingSeconds,
   contiguousLineWindow as _contiguousLineWindow,
   wordContextLineWindow as _wordContextLineWindow,
   formatGap as _formatGap,
@@ -1833,12 +1834,16 @@ function _syncVocabInsertText(position) {
 // #settingsPanel div lets us keep the inputs and their wiring intact —
 // jQuery UI just relocates the element into a dialog wrapper on first
 // open. Clicking the gear again closes the dialog (toggle).
-function openSettingsDialog() {
+function openSettingsDialog(section) {
   const $panel = $('#settingsPanel')
   organizeSettingsPanel($panel[0])
+  if (section === 'playback') $panel.find('[data-settings-section="playback"]').trigger('click')
   $('#practiceRevealMode').val(window._appSettings.practiceRevealMode || 'flip')
   if ($panel.hasClass('ui-dialog-content') && $panel.dialog('isOpen')) {
-    $panel.dialog('close')
+    if (section === 'playback') {
+      _liftDialogAboveOverlay($panel.dialog('widget'))
+      $panel.dialog('option', { modal: true, title: 'Playback controls' }).dialog('widget').trigger('focus')
+    } else $panel.dialog('close')
     return
   }
   // Don't clear the original `display:none` inline style here — jQuery
@@ -1847,9 +1852,9 @@ function openSettingsDialog() {
   // flash where the panel rendered inline before being moved.
   const w = Math.min(760, $(window).width() - 40)
   const opts = {
-    title: 'Settings',
+    title: section === 'playback' ? 'Playback controls' : 'Settings',
     width: w,
-    modal: false,
+    modal: section === 'playback' && _screenOverlayOpen(),
     autoOpen: true,
     position: { my: 'center top', at: 'center top+20', of: window },
     // jQuery UI auto-focuses the first tabbable element — on mobile that's
@@ -2681,6 +2686,8 @@ window._appSettings = {
   ttsReplacements: [{ from: "->", to: "could be" }, { from: "→", to: "could be" }],
   ttsNewlinePauseMs: 700,
   practicePlaybackRate: 1,
+  practiceClipPaddingBefore: 0,
+  practiceClipPaddingAfter: 0,
   practiceSpeedOptions: [1, 0.75, 0.5],
   // Seconds the recording-playback waits between items.
   recPlayGapSeconds: 30,
@@ -3105,6 +3112,9 @@ function loadAppSettings() {
   $('#recPlayYouTubeClipSeconds').val(clipFallbackSeconds(window._appSettings.recPlayYouTubeClipSeconds))
   $('#recManualPlaybackMode').val(_manualPlaybackPreference())
   $('#playbackSpeed').val(_preferredRecordingAudioRate())
+  for (const field of ['practiceClipPaddingBefore', 'practiceClipPaddingAfter']) {
+    $('#' + field).val(practicePaddingSeconds(window._appSettings[field]))
+  }
   $('#studySessionTimeoutMinutes').val(studyTimeoutMinutes(window._appSettings.studySessionTimeoutMinutes))
   $('#ttsReplacements').val((window._appSettings.ttsReplacements || []).map(r => `${r.from}=${r.to}`).join('\n'))
   $('#ttsNewlinePauseMs').val(window._appSettings.ttsNewlinePauseMs ?? 700)
@@ -4555,6 +4565,12 @@ $('document').ready(e => {
     const minutes = studyTimeoutMinutes(this.value)
     this.value = minutes
     window._appSettings.studySessionTimeoutMinutes = minutes
+    saveAppSettings()
+  })
+  $('#practiceClipPaddingBefore, #practiceClipPaddingAfter').on('change', function () {
+    const seconds = practicePaddingSeconds(this.value)
+    this.value = seconds
+    window._appSettings[this.id] = seconds
     saveAppSettings()
   })
   $('#playbackSpeed').on('change', function () {
@@ -23025,6 +23041,7 @@ function openPracticeMode(opts) {
         <span class="practice-count"></span>
         <button type="button" class="practice-info" aria-label="Show item details" title="Show item details" aria-expanded="false">ℹ</button>
         <button type="button" class="practice-shuffle" aria-label="Shuffle" title="Shuffle order" aria-pressed="false">🔀</button>
+        <button type="button" class="practice-playback-settings" aria-label="Playback controls" title="Playback controls">⚙</button>
         <button type="button" class="practice-settings" aria-label="Practice settings" title="Reveal mode / direction / delete" aria-expanded="false">⋯</button>
         <button type="button" class="practice-search" aria-label="Search this word" title="Search this word (minimizes)">🔎</button>
         <button type="button" class="practice-minimize" aria-label="Minimize" title="Minimize">⌄</button>
@@ -23141,6 +23158,7 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-info', _togglePracticeInfoPanel)
     $p.on('click', '.practice-shuffle', _togglePracticeShuffle)
     $p.on('click', '.practice-settings', _togglePracticeSettingsPanel)
+    $p.on('click', '.practice-playback-settings', () => openSettingsDialog('playback'))
     $p.on('change', '.practice-speakover-toggle', function () {
       // Hiding Speak Over must also stop the active looping source/take.
       // Otherwise a hidden mode keeps playing even though its controls vanish.
@@ -23804,17 +23822,23 @@ function revealPracticeCard() {
   $p.find('.practice-back').show()
   $p.find('.practice-reveal').hide()
 }
+function _practicePadding() {
+  return {
+    before: practicePaddingSeconds(window._appSettings.practiceClipPaddingBefore),
+    after: practicePaddingSeconds(window._appSettings.practiceClipPaddingAfter),
+  }
+}
+
 // The stretch of video a card plays: the lines it is showing (see
 // ./practice-clip.js). The ↑+ / ↓+ buttons widen the card by whole subtitle
 // lines, and playback follows them. The window is the same one
-// _practiceCardLines draws, resolved the same way, so what plays is what is on
-// the card.
+// _practiceCardLines draws, with optional padding applied before playback.
 async function _practiceClipRange(it, before, after) {
   if (it.manual && _cardHasVideoLink(it)) {
     const clip = _runtimeYouTubeClip(it)
     return { start: clip.timeStart, stop: clip.timeEnd }
   }
-  const segments = spotifyClips(it)
+  const segments = spotifyClips(it, _practicePadding())
   if (segments.length) return { start: segments[0].start, stop: segments[segments.length - 1].end }
   const fallback = {
     start: (typeof it.timeStart === 'number') ? it.timeStart : 0,
@@ -23886,13 +23910,13 @@ function _watchPracticeClipEnd(stop, token, { videoId, start, recover } = {}) {
   }, 50)
 }
 
-async function playPracticeClip(range = null, { retryStall = true, forceLoad = false } = {}) {
+async function playPracticeClip(range = null, { retryStall = true, forceLoad = false, padded = false } = {}) {
   const idx = window._practiceIdx
   const it = window._practiceCards && window._practiceCards[idx]
   if (!it) return
   if (_practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes) === false) return
   if (_pracRec?.loop && _pracRec.key === _pracRecKey(it)) {
-    _pracRecLoopSeek(_pracRec, range ? { start: range.start } : undefined)
+    _pracRecLoopSeek(_pracRec, range ? { start: padPracticeClip(range, _practicePadding()).start } : undefined)
     return
   }
   // The visible Play button uses this entry point. Dispatch before creating
@@ -23908,8 +23932,9 @@ async function playPracticeClip(range = null, { retryStall = true, forceLoad = f
   const attempt = createRecordingVideoAttempt({ videoId: it.id, isCurrent, now: _playerLifecycle.now })
   _practiceSeekAttempt = attempt
   try {
-    const { start, stop } = range || await attempt.wait(_practiceClipRange(
+    const bounds = range || await attempt.wait(_practiceClipRange(
       it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0))
+    const { start, stop } = padded ? bounds : padPracticeClip(bounds, _practicePadding())
     if (!isCurrent()) return
     // Speaking over runs on the same clip: its first rewind lands here, and
     // the pass after a take stops where the card's lines end.
@@ -23954,7 +23979,7 @@ async function playPracticeClip(range = null, { retryStall = true, forceLoad = f
     window._practicePlaybackCard = it
     _watchPracticeClipEnd(clipEnd, token, {
       videoId: it.id, start,
-      recover: retryStall ? resume => playPracticeClip({ start: resume, stop }, { retryStall: false, forceLoad: true }) : null,
+      recover: retryStall ? resume => playPracticeClip({ start: resume, stop }, { retryStall: false, forceLoad: true, padded: true }) : null,
     })
   } catch (e) {
     if (e.kind !== 'cancelled' && isCurrent()) {
@@ -23994,8 +24019,9 @@ async function _pracRecRefreshClip(st) {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it || _pracRecKey(it) !== st.key) return
   try {
-    const { start, stop } = await _practiceClipRange(
+    const range = await _practiceClipRange(
       it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0)
+    const { start, stop } = spotifyClips(it).length ? range : padPracticeClip(range, _practicePadding())
     st.clipStart = start
     st.clipStop = stop
   } catch (_) {}
@@ -24960,6 +24986,7 @@ async function _playPracticeManualVideo(it) {
   if (_practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes) === false) return
   const video = _manualCardVideo(it)
   if (!video) return
+  const { start, stop } = padPracticeClip({ start: video.timeStart, stop: video.timeEnd }, _practicePadding())
   _stopPracticeAudio()
   const request = _newPracticeVideoRequest({ mute: true })
   const ownsRequest = () => _practiceVideoCues.isCurrent(request)
@@ -24975,7 +25002,7 @@ async function _playPracticeManualVideo(it) {
     // A cued iframe can report zero, or a cached time from the previous
     // card. Confirm the linked moment while PLAYING and still muted; retry
     // ignored seeks by loading at startSeconds, within one bounded request.
-    await playMediaSlice(video.id, video.timeStart, video.timeEnd, 'YouTube', {
+    await playMediaSlice(video.id, start, stop, 'YouTube', {
       isCurrent, confirmSeek: true, requirePlaying: true,
     })
     if (!ownsRequest()) return
@@ -24983,7 +25010,7 @@ async function _playPracticeManualVideo(it) {
     try { window.ytPlayer?.setPlaybackRate(_practiceVideoRate()) } catch (_) {}
     _practiceVideoCues.beginPlayback(request)
     window._practicePlaybackCard = it
-    _watchPracticeClipEnd(video.timeEnd, clipToken, { videoId: video.id })
+    _watchPracticeClipEnd(stop, clipToken, { videoId: video.id, start })
   } catch (e) {
     if (ownsRequest()) {
       try { window.ytPlayer.pauseVideo() } catch (_) {}
@@ -25186,7 +25213,7 @@ async function _cuePracticeVideo(it, request) {
     window.mediaSelected = { link: it.id, source: 'link' }
     window.playingYoutubeVideo = true
     window.syncSubtitle = false
-    await _practiceVideoCues.cue(it.id, it.timeStart, request)
+    await _practiceVideoCues.cue(it.id, Math.max(0, (Number(it.timeStart) || 0) - _practicePadding().before), request)
   } catch (e) { console.warn('practice: cue video failed', e) }
 }
 
@@ -25271,6 +25298,7 @@ $(document).on('click', '.keyboard-shortcuts-btn', openKeyboardShortcuts)
 function _practiceSpotifyOptions(it) {
   return {
     mode: 'practice',
+    padding: _practicePadding(),
     isCurrent: () => window._practiceActive && window._practiceCards?.[window._practiceIdx] === it,
     isPaused: () => window._practiceMinimized || _practiceSessionTimeout.expired || (_pracRec?.key === _pracRecKey(it) &&
       (_pracRec.loop
@@ -25295,7 +25323,7 @@ function _togglePracticePlayback() {
     const restarting = !media || media.ended || !Number.isFinite(media.currentTime)
     if (st) {
       st.awaiting = null; st.token++
-      st.watchPos = restarting ? spotifyClips(it)[0].start - 0.001 : null
+      st.watchPos = restarting ? spotifyClips(it, _practicePadding())[0].start - 0.001 : null
       if (st.audio) { try { st.audio.pause() } catch (_) {} st.audio = null }
       if (st.phase === 'playback') st.phase = 'idle'
       _renderPracticeRecBar()
