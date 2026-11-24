@@ -243,10 +243,15 @@ async function checkMultilingualVocabulary(browser, mobile) {
       const original = window.GitHubUtils.commitMultipleFiles
       window.GitHubUtils.commitMultipleFiles = async options => {
         if (!options.commitMessage.startsWith('vocab:')) return original(options)
-        for (const file of options.files) {
-          const next = await file.getContent(file.path.endsWith('/vocabulary.txt') ? vocabulary : null)
-          if (next != null) window.__hintWrites.push([file.path, JSON.parse(next)])
+        const snapshot = {
+          headSha: 'hint-save-snapshot',
+          read: async path => path.endsWith('/vocabulary.txt') ? vocabulary : null,
         }
+        // Catalog can finish first in the real parallel GitHub writer.
+        await Promise.all([...options.files].reverse().map(async file => {
+          const next = await file.getContent(await snapshot.read(file.path), snapshot)
+          if (next != null) window.__hintWrites.push([file.path, next])
+        }))
         return {committed:true}
       }
     }, swedishVocabulary)
@@ -255,12 +260,17 @@ async function checkMultilingualVocabulary(browser, mobile) {
     await editor.getByRole('button', {name:'Save changes'}).click()
     await editor.waitFor({state:'detached'})
     const writes = await page.evaluate(() => window.__hintWrites)
-    assert.equal(writes.length, 1)
-    assert.match(writes[0][0], /vocabulary-meanings\.json$/)
-    const [updated] = Object.values(writes[0][1].groups)
+    assert.equal(writes.length, 2, 'hints and vocabulary identities are saved together')
+    const vocabularyWrite = writes.find(([path]) => path.endsWith('/vocabulary.txt'))
+    const catalogWrite = writes.find(([path]) => /vocabulary-meanings\.json$/.test(path))
+    assert(vocabularyWrite && catalogWrite)
+    assert.match(vocabularyWrite[1], /\t\[entry:[a-z0-9-]+\]/)
+    const savedCatalog = JSON.parse(catalogWrite[1])
+    const updated = Object.values(savedCatalog.groups).find(group => group.line === '(sip)|smutta|smuttar|')
+    assert(vocabularyWrite[1].includes('(sip)|smutta|smuttar|\t[entry:' + updated.entryId + ']'))
     assert.equal(updated.line, '(sip)|smutta|smuttar|')
     assert.deepEqual(updated.hintOverrides, {hi:['घूँट भरना', 'ghoont bharna']})
-    assert.deepEqual(writes[0][1].sharedHints, {hi:{sip:['चुस्की लेना', 'chuski lena']}})
+    assert.deepEqual(savedCatalog.sharedHints, {hi:{sip:['चुस्की लेना', 'chuski lena']}})
     await language.selectOption({label:'Hindi'})
     await search('ghoont bharna')
     await sip.waitFor()
