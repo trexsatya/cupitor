@@ -95,6 +95,13 @@ native `YouTubeSubtitles` JavaScript channel to download the current video's
 subtitles. The app reuses its existing track picker and yt-dlp downloader.
 The button is hidden when that channel is absent.
 
+On other HTTP(S) video pages, a compatible native app exposes the same
+button through the MediaSubtitles channel. The app reads the active page URL,
+asks the user to confirm the lookup, and uses the same yt-dlp track picker.
+WebVTT, SRT and JSON3 tracks can be imported. The shared file-import callback
+checks the request and media identity before replacing the cues.
+The sidebar’s **Save SRT** button saves its timed captions through the native file picker.
+
 The app calls `window.__cupImportYouTubeSubtitles` with:
 
 ```js

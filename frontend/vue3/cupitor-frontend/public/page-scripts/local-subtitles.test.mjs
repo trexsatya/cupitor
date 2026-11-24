@@ -15,7 +15,7 @@ const lines = [
 const track = 'https://open.spotify.com/track/first123';
 const other = 'https://open.spotify.com/episode/next456';
 
-function boot({spotify = true, bridge = true, cache, video = false, translate = false, prefs, home = false, early = false} = {}) {
+function boot({spotify = true, bridge = true, cache, video = false, translate = false, prefs, home = false, early = false, pageUrl, downloadBridge = false} = {}) {
   const html = spotify && home ? '' : spotify ? `<footer data-testid="now-playing-bar"><div data-testid="now-playing-widget">
     <a href="${track}">A track</a></div>
     <button data-testid="control-button-playpause" aria-label="Pause"></button>
@@ -23,7 +23,7 @@ function boot({spotify = true, bridge = true, cache, video = false, translate = 
     <input data-testid="playback-progressbar" type="range" min="0" max="120000" value="0"></footer>`
     : '<div id="movie_player"><video></video></div>';
   const dom = new JSDOM(`<html><head><title>A track</title></head><body>${html}</body></html>`, {
-    url: spotify ? 'https://open.spotify.com/collection/tracks' : 'https://www.youtube.com/watch?v=abcdefghijk',
+    url: pageUrl || (spotify ? 'https://open.spotify.com/collection/tracks' : 'https://www.youtube.com/watch?v=abcdefghijk'),
     runScripts: 'outside-only', pretendToBeVisual: true,
   });
   const {window} = dom, doc = window.document;
@@ -34,6 +34,7 @@ function boot({spotify = true, bridge = true, cache, video = false, translate = 
   window.setTimeout = () => ++timer;
   const requests = [], captures = [], translations = [];
   if (bridge) window.LocalSubtitles = {postMessage: message => requests.push(JSON.parse(message))};
+  if (downloadBridge) window.MediaSubtitles = {postMessage: message => requests.push(JSON.parse(message))};
   window.CaptionCollector = {postMessage: message => captures.push(JSON.parse(message))};
   window.TranslateRequest = {postMessage: message => translations.push(JSON.parse(message))};
   if (translate) window.localStorage.setItem('cupSubPrefs', JSON.stringify({translationEnabled: true}));
@@ -81,6 +82,41 @@ function boot({spotify = true, bridge = true, cache, video = false, translate = 
     close: () => window.close(),
   };
 }
+
+test('SVT uses the generic download bridge and imports the track without starting playback', () => {
+  const p = boot({spotify: false, pageUrl: 'https://www.svtplay.se/video/abc/ett-program', downloadBridge: true});
+  try {
+    const button = p.doc.querySelector('[data-act="download"]');
+    assert.equal(button.style.display, '');
+    p.click('download');
+    assert.equal(p.requests.at(-1).op, 'download');
+    assert.equal(p.requests.at(-1).url, undefined, 'native code owns the download URL');
+    assert.equal(p.result(), true);
+    assert.equal(p.rows().length, lines.length);
+    assert.equal(p.plays, 0);
+    p.click('save-srt');
+    assert.deepEqual(p.requests.at(-1), {
+      op: 'save',
+      srt: '1\n00:00:10,000 --> 00:00:12,000\nFörsta meningen\n\n'
+        + '2\n00:00:20,000 --> 00:00:24,000\nAndra meningen\n',
+    });
+
+    p.click('download');
+    p.window.history.pushState({}, '', '/video/def/nasta-program');
+    assert.equal(p.result(), false, 'late results cannot be attached to another episode');
+    p.tick();
+    assert.equal(p.rows().length, 0);
+  } finally { p.close(); }
+});
+
+test('generic player URLs keep media query parameters in the subtitle identity', () => {
+  const p = boot({spotify: false, pageUrl: 'https://example.com/watch?id=1', downloadBridge: true});
+  try {
+    p.click('download');
+    p.window.history.pushState({}, '', '/watch?id=2');
+    assert.equal(p.result(), false);
+  } finally { p.close(); }
+});
 
 test('Spotify home exposes an SRT launcher before a track has rendered', () => {
   const p = boot({home: true});
