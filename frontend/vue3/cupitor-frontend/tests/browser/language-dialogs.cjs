@@ -26,6 +26,7 @@ async function serveFixtures(route) {
     return route.fulfill({ body: fs.readFileSync(file), contentType: types[path.extname(file)] || 'application/octet-stream' })
   }
   const file = decodeURIComponent(url.pathname)
+  if (file.endsWith('/vocabulary-catalog/index.json')) return route.fulfill({status:404, body:''})
   let body = '{}'
   let contentType = 'application/json'
   if (file.endsWith('/srts/index.json')) body = JSON.stringify(index)
@@ -364,6 +365,11 @@ async function checkVocabInsertPositions(browser, mobile) {
       await page.waitForFunction(() => !document.querySelector('#addVocabAddAnotherBtn').disabled)
     }
     await choices.waitFor()
+    const initialId = await page.evaluate(line => {
+      const raw = window._vocabularyBaselineText.split('\n').find(raw => raw.startsWith(line + '\t[entry:'))
+      return raw?.match(/\[entry:([^\]]+)\]$/)?.[1]
+    }, otherRef)
+    assert(initialId, 'legacy vocabulary has a stable identity before an edit')
     assert.equal(await choices.getByRole('checkbox').count(), 3)
     assert(await choices.getByRole('checkbox', { name: 'Below' }).isChecked())
     const bounds = await choices.locator('label').evaluateAll(labels => labels.map(label => {
@@ -412,6 +418,12 @@ async function checkVocabInsertPositions(browser, mobile) {
     await choose('Inline')
     const edited = '(stain)|färg|fläck|'
     await stage(edited, [ref, hue, edited, shade])
+    const pendingIdentity = await page.evaluate(line => {
+      const values = window.cupitorUserData.exportData().values
+      const key = Object.keys(values).find(key => key.startsWith('cupitor:pendingVocab'))
+      return JSON.parse(values[key]).entries.find(entry => entry.line === line)?.id
+    }, edited)
+    assert.equal(pendingIdentity, initialId, 'editing forms retains the entry ID in the durable pending buffer')
 
     const openCategoryPicker = async term => {
       const select = categoryPicker.getByRole('combobox', { name: /Or add to a category/ })
@@ -446,7 +458,17 @@ async function checkVocabInsertPositions(browser, mobile) {
     await choose('Below')
     const tint = '(tint)|toning|'
     await stage(tint, [ref, hue, edited, shade, tone, tint])
-    console.log(`${mobile ? '320px touch' : 'Desktop'}: vocabulary insertion, existing and new categories, and clearing the category passed`)
+    await page.evaluate(async () => { window.dontConfirmOnRefresh = true; await window.cupitorUserData.flush() })
+    await page.reload({ waitUntil: 'networkidle' })
+    await page.evaluate(async () => { await window._vocabularyReadyPromise })
+    const restored = await page.evaluate(line => {
+      const values = window.cupitorUserData.exportData().values
+      const key = Object.keys(values).find(key => key.startsWith('cupitor:pendingVocab'))
+      return { lines: window.vocabulary.Color, id: JSON.parse(values[key]).entries.find(entry => entry.line === line)?.id }
+    }, edited)
+    assert.deepEqual(restored.lines, [ref, hue, edited, shade, tone, tint])
+    assert.equal(restored.id, initialId, 'reopening unsaved edits retains identity')
+    console.log(`${mobile ? '320px touch' : 'Desktop'}: vocabulary insertion, categories, persistent identities and pending replay passed`)
   } finally {
     await page.close()
   }

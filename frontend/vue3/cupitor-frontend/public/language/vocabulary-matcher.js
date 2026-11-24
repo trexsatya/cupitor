@@ -1,3 +1,4 @@
+import { vocabularyEntryId } from './vocabulary-entries.js'
 // One vocabulary pipeline for ordinary findings and automatic/manual prefix
 // search. Confidence controls ordering; an exact hit never suppresses families.
 import { createWordFormMatcher, normalizeWord } from './word-forms.js'
@@ -32,9 +33,13 @@ export function createVocabularyMatcher(vocabulary, {
   const rows = []
   for (const [category, lines] of Object.entries(vocabulary || {})) {
     if (hiddenCategories.has(category) || !Array.isArray(lines)) continue
+    const occurrences = new Map()
     for (const line of lines) {
       if (typeof line !== 'string') continue
-      rows.push({ line, category, index: rows.length, ...prepare(line) })
+      const occurrence = occurrences.get(line) || 0
+      occurrences.set(line, occurrence + 1)
+      const entryId = vocabularyEntryId(vocabulary, category, line, occurrence)
+      rows.push({ line, category, index: rows.length, ...prepare(line), ...(entryId ? { entryId } : {}) })
     }
   }
   const known = new Set(rows.flatMap(row => row.words).filter(w => w.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(w)))

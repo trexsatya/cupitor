@@ -1,3 +1,9 @@
+import {
+  adoptVocabularyEntryIds, vocabularyEntries, restoreVocabularyEntryIds, spliceVocabularyEntries,
+} from './vocabulary-entries.js'
+import { vocabularyCommitFiles } from './vocabulary-save.js'
+import { createVocabularyCatalogReader, catalogHash, VOCABULARY_STORAGE_INDEX } from './vocabulary-catalog-storage.js'
+import { createVocabularyCatalogCache } from './vocabulary-catalog-cache.js'
 import { wireMobileSearch } from './mobile-search.js'
 import { attributeSubtitleMatches } from './subtitle-search-engine.js';
 import { createSubtitleSearchClient, observeSubtitleCorpus } from './subtitle-search-client.js';
@@ -27,10 +33,10 @@ import { mountPracticeReminders, practiceDate } from './practice-reminders.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import {
-  assertVocabularyRow, changeVocabularyCatalog, createVocabularyHintIndex, mergeVocabularyCatalogs,
+  createVocabularyHintIndex, mergeVocabularyCatalogs, vocabularyCatalogForLanguage,
   GENERATED_HINDI_HINTS_FILE, normalizeHint, parseVocabularyCatalog, parseVocabularyHintLanguages,
   parseVocabularyHintTranslations, replaceEnglishVocabularyHints, reviseVocabularyGroup, sharedVocabularyHints, SHARED_HINTS_DIRECTORY,
-  vocabularyFormKey, vocabularyHintGroupId, vocabularyLineParts, VOCABULARY_CATALOG_FILE, VOCABULARY_CATALOG_PATH,
+  vocabularyFormKey, vocabularyHintGroupId, vocabularyLineParts, VOCABULARY_CATALOG_FILE,
 } from './vocabulary-hints.js';
 import { vocabularyHintSeed } from './vocabulary-hint-seed.js';
 import { openVocabularyEditor } from './vocabulary-meaning-editor.js';
@@ -1640,27 +1646,26 @@ function addToVocab(commitAndClose) {
   }
 
   const categoryWords = ownLines(window.vocabulary, category)
+  Object.defineProperty(window.vocabulary, category, {
+    value: categoryWords, writable: true, enumerable: true, configurable: true,
+  })
   if (!refWord) {
     // No reference word — just append to the (possibly new) category.
-    categoryWords.push(...newWords)
+    spliceVocabularyEntries(window.vocabulary, category, categoryWords.length, 0, newWords)
   } else if (refSlot >= 0 && categoryWords.indexOf(refWord) < 0) {
-    categoryWords.splice(refSlot, 0, ...newWords)
+    spliceVocabularyEntries(window.vocabulary, category, refSlot, 0, newWords)
   } else {
     const idx = categoryWords.indexOf(refWord)
     if (position === 'inline') {
-      if (idx >= 0) categoryWords.splice(idx, 1, ...newWords)
-      else categoryWords.push(...newWords)
+      if (idx >= 0) spliceVocabularyEntries(window.vocabulary, category, idx, 1, newWords)
+      else spliceVocabularyEntries(window.vocabulary, category, categoryWords.length, 0, newWords)
     } else {
       const insertAt = position === 'above'
         ? (idx >= 0 ? idx : 0)
         : (idx >= 0 ? idx + 1 : categoryWords.length)
-      categoryWords.splice(insertAt, 0, ...newWords)
+      spliceVocabularyEntries(window.vocabulary, category, insertAt, 0, newWords)
     }
   }
-  Object.defineProperty(window.vocabulary, category, {
-    value: categoryWords, writable: true, enumerable: true, configurable: true,
-  })
-
   // Preserve the currently-selected line across the rebuild. Both selects
   // honour window.preSelectedSearchedWord in createOptionElement.
   try {
@@ -2100,14 +2105,19 @@ async function commitVocabularyToGithub() {
   try {
     await _userData.flush()
     context.assertCurrent()
-    const finalText = await commitWithMerge({
-      filePath,
-      commitMessage: 'vocab: update vocabulary via language tool',
-      merge: (remoteText) => {
-        const merged = mergeVocabulary(baselineText, localVocab, remoteText || '')
-        return vocabularyToText(merged)
-      }
+    await _vocabularyCatalogReady
+    context.assertCurrent()
+    const commit = vocabularyCommitFiles({
+      path: filePath, baselineText, local: localVocab, language: getLangFromUrl().code,
+      catalog: _ownVocabularyCatalogForWrite(), catalogBaseline: _vocabularyStorageReaders.get('self')?.snapshot().legacyRaw
+        ? parseVocabularyCatalog(_vocabularyStorageReaders.get('self').snapshot().legacyRaw) : _vocabularyCatalogSelf,
+      storageSnapshot: _vocabularyStorageReaders.get('self')?.snapshot(),
+      assertCurrent: () => context.assertCurrent(),
     })
+    const { owner, repo, branch } = _dsWriteTarget()
+    await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch,
+      commitMessage: 'vocab: update vocabulary and linked hints', files: commit.files, prepareFiles: commit.prepareFiles })
+    const { text: finalText, catalog: finalCatalog, storage, storageWrites } = commit.result()
     context.assertCurrent()
     const concurrent = _userData.getItem(PENDING_VOCAB_KEY) !== pendingSnapshot
     const nextText = concurrent
@@ -2118,6 +2128,7 @@ async function commitVocabularyToGithub() {
     if (concurrent) _savePendingVocab()
     else _clearPendingVocab()
     await _userData.flush()
+    await _rememberVocabularyCatalog(finalCatalog, storage, storageWrites)
     console.log('Vocabulary committed to GitHub')
   } catch (e) {
     console.error('Failed to commit vocabulary to GitHub:', e)
@@ -2160,7 +2171,7 @@ function _savePendingVocab() {
     const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || ''
     const pendingCount = parseInt(window._vocabPendingCount, 10) || 0
     const pendingDeleteCount = parseInt(window._vocabPendingDeleteCount, 10) || 0
-    _userData.setItem(PENDING_VOCAB_KEY, JSON.stringify({ lang, categories, pendingCount, pendingDeleteCount, ts: Date.now() }))
+    _userData.setItem(PENDING_VOCAB_KEY, JSON.stringify({ lang, categories, baselineText: window._vocabularyBaselineText, entries: vocabularyEntries(categories).filter(entry => entry.id), pendingCount, pendingDeleteCount, ts: Date.now() }))
   } catch (_) {}
 }
 function _clearPendingVocab() {
@@ -2195,6 +2206,21 @@ function _replayPendingVocab() {
   if (!_dsHasSelf()) return
   if (!window.vocabulary) window.vocabulary = Object.create(null)
   if (!window._vocabDirtyCategories) window._vocabDirtyCategories = Object.create(null)
+  if (buf.baselineText !== undefined) {
+    try {
+      const pending = parseVocabularyFile(buf.baselineText)
+      for (const [category, lines] of Object.entries(buf.categories)) pending[category] = lines
+      restoreVocabularyEntryIds(pending, buf.entries)
+      const rebased = mergeVocabulary(buf.baselineText, pending, window._vocabularyBaselineText || '')
+      buf.categories = rebased
+      buf.entries = vocabularyEntries(rebased).filter(entry => entry.id)
+    } catch (error) {
+      // Restore the original local intent and its baseline. A subsequent save
+      // must still detect this conflict, rather than overwriting the remote.
+      window._vocabularyBaselineText = buf.baselineText
+      alert('Your unsaved vocabulary edits were restored, but conflict with repository changes. Saving will wait for the conflicting entry to be resolved. ' + error.message)
+    }
+  }
   const cats = Object.keys(buf.categories)
   // The buffer holds own lines only. One the other user also has (claimed
   // in addToVocab, not yet saved) is read-only again after a reload; claim
@@ -2216,6 +2242,7 @@ function _replayPendingVocab() {
     }
   })
   if (any) {
+    restoreVocabularyEntryIds(window.vocabulary, buf.entries)
     // A replayed category holds own lines only; add the other user's lines
     // to it again.
     if (window._vocabularyOtherText) {
@@ -2247,8 +2274,7 @@ window.AWS_API = "https://api.satyendra.website/api"
 
 async function makeHttpCallToUpdateVocab() {
   const own = _ownVocabulary()
-  const data = Object.keys(own)
-      .map(k => `#${k}\n${own[k].join("\n")}`).join("\n")
+  const data = vocabularyToText(own)
   try {
     let res = await fetch(`${window.AWS_API}/save-vocab`, {
       method: 'POST',
@@ -3622,6 +3648,7 @@ function _initPracticeLogFrontBanner() {
 let _vocabularyCatalogSelf = parseVocabularyCatalog(null)
 let _vocabularyCatalogOther = parseVocabularyCatalog(null)
 let _generatedVocabularyHints = parseVocabularyCatalog(null)
+let _generatedVocabularyHintsSelf = parseVocabularyCatalog(null)
 let _vocabularyCatalog = vocabularyHintSeed
 let _vocabularyLookupChoices = ['en', 'hi']
 let _sharedHintLanguages = ['hi']
@@ -3629,6 +3656,8 @@ const _sharedHintTranslations = new Map()
 const _sharedHintLoads = new Map()
 let _vocabularyCatalogReady
 const _vocabularyHintIndexes = new Map()
+const _vocabularyStorageReaders = new Map()
+const _vocabularyStorageCaches = new Map()
 
 const _vocabularyLanguageNames = typeof Intl.DisplayNames === 'function'
   ? new Intl.DisplayNames(['en'], { type: 'language' }) : null
@@ -3659,13 +3688,89 @@ function _refreshSearchLanguageChoices() {
   if (wasFamiliar && !hasFamiliar) _setLangToggle(true)
 }
 
+function _ownVocabularyCatalogForWrite() {
+  return mergeVocabularyCatalogs(_generatedVocabularyHintsSelf, vocabularyHintSeed, _vocabularyCatalogSelf)
+}
+
 function _installVocabularyCatalog() {
+  _vocabularyHintIndexes.clear()
   _vocabularyCatalog = mergeVocabularyCatalogs(_generatedVocabularyHints, vocabularyHintSeed, _vocabularyCatalogOther, _vocabularyCatalogSelf)
   _vocabularyLookupChoices = [...new Set(['en', ..._sharedHintLanguages,
     ...Object.keys(_vocabularyCatalog.sharedHints),
     ...Object.values(_vocabularyCatalog.meanings).flatMap(meaning => Object.keys(meaning.hints))])]
   _refreshVocabularyLookupSelect()
   _renderVocabularyForHintLanguage()
+}
+
+let _vocabularyOtherRowsCache
+function _vocabularySourceRows(which) {
+  if (which === 'self') return window._vocabularyReadOnly?.size ? _ownVocabulary() : window.vocabulary || {}
+  const text = window._vocabularyOtherText || ''
+  if (_vocabularyOtherRowsCache?.text !== text) _vocabularyOtherRowsCache = { text, vocab: parseVocabularyFile(text) }
+  return _vocabularyOtherRowsCache.vocab
+}
+
+function _vocabularyStorageCache(which) {
+  const identity = _dsSourceIdentity(which, 'shared')
+  if (!_vocabularyStorageCaches.has(identity)) _vocabularyStorageCaches.set(identity, createVocabularyCatalogCache(identity))
+  return _vocabularyStorageCaches.get(identity)
+}
+
+function _vocabularyStorageRead(which, context) {
+  const cache = _vocabularyStorageCache(which)
+  const missing = '!cupitor:missing-vocabulary-file!'
+  return async (path, lang = 'shared') => {
+    context.assertCurrent()
+    const key = lang + '/' + path
+    const cached = await cache.get(key)
+    const expectedHash = path.match(/\/([a-f0-9]{64})\.json$/)?.[1]
+    if (expectedHash && cached != null && await catalogHash(cached) === expectedHash) return cached
+    try {
+      const response = await fetchWithRetry(_dsReadUrl(which, path, lang), {
+        tries: 2, timeoutMs: 8000, passthrough404: true,
+        init: expectedHash ? {} : { cache: 'no-cache' },
+      })
+      context.assertCurrent()
+      const text = response.status === 404 ? null : await response.text()
+      if (expectedHash && text != null && await catalogHash(text) !== expectedHash) throw new Error('Damaged vocabulary chunk: ' + path)
+      await cache.putAll([[key, text ?? missing]])
+      return text
+    } catch (error) {
+      context.assertCurrent()
+      if (cached === missing) return null
+      if (cached != null && (!expectedHash || await catalogHash(cached) === expectedHash)) return cached
+      if (path === VOCABULARY_STORAGE_INDEX) {
+        const oldKey = _scopedKey('vocabulary-catalog:' + _dsSourceIdentity(which, 'shared'))
+        if (_userData.getItem(oldKey) != null || localStorage.getItem(oldKey) != null) return null
+      }
+      if (path === VOCABULARY_CATALOG_FILE) {
+        const oldKey = _scopedKey('vocabulary-catalog:' + _dsSourceIdentity(which, 'shared'))
+        const old = _userData.getItem(oldKey) ?? localStorage.getItem(oldKey)
+        if (old != null) return old
+      }
+      throw error
+    }
+  }
+}
+
+async function _rememberVocabularyCatalog(catalog, storage, writes) {
+  if (storage) {
+    const context = _dsCaptureSourceContext()
+    const cache = _vocabularyStorageCache('self')
+    if (writes) await cache.putAll([...writes].map(([path, text]) => ['shared/' + path, text]))
+    context.assertCurrent()
+    _vocabularyStorageReaders.set('self', createVocabularyCatalogReader({
+      read: _vocabularyStorageRead('self', context), target: getLangFromUrl().code,
+      vocabulary: () => _vocabularySourceRows('self'), initial: storage,
+    }))
+    const oldKey = _scopedKey('vocabulary-catalog:' + _dsSourceIdentity('self', 'shared'))
+    _userData.removeItem(oldKey)
+    localStorage.removeItem(oldKey)
+  }
+  _vocabularyCatalogSelf = catalog
+  _sharedHintLanguages = [...new Set([..._sharedHintLanguages, ...[..._vocabularyStorageReaders.values()].flatMap(reader => reader.languages)])]
+  _installVocabularyCatalog()
+  await _loadSharedHintTranslations(_vocabularyLookupLanguage())
 }
 
 function _renderVocabularyForHintLanguage() {
@@ -3676,8 +3781,13 @@ function _renderVocabularyForHintLanguage() {
   if (window._vocabularySearchText) renderVocabularyFindings(window._vocabularySearchText)
 }
 
-function _loadSharedHintTranslations(language) {
-  if (!_sharedHintLanguages.includes(language) || _sharedHintTranslations.has(language)) return Promise.resolve()
+function _loadSharedHintTable(language) {
+  if (!_sharedHintLanguages.includes(language)) return Promise.resolve()
+  if (_sharedHintTranslations.has(language)) {
+    const entries = _sharedHintTranslations.get(language)
+    _sharedHintTranslations.delete(language); _sharedHintTranslations.set(language, entries)
+    return Promise.resolve()
+  }
   if (_sharedHintLoads.has(language)) return _sharedHintLoads.get(language)
   const context = _dsCaptureSourceContext()
   const request = _dsReadLayers(SHARED_HINTS_DIRECTORY + '/' + language + '.txt', {
@@ -3687,63 +3797,64 @@ function _loadSharedHintTranslations(language) {
     const entries = [...layers].reverse().flatMap(layer =>
       [...parseVocabularyHintTranslations(layer.text || '', language)])
     _sharedHintTranslations.set(language, new Map(entries))
+    while (_sharedHintTranslations.size > 3) _sharedHintTranslations.delete(_sharedHintTranslations.keys().next().value)
   }).catch(error => console.warn('Shared vocabulary translations unavailable:', error))
     .finally(() => _sharedHintLoads.delete(language))
   _sharedHintLoads.set(language, request)
   return request
 }
 
+async function _loadSharedHintTranslations(language) {
+  const context = _dsCaptureSourceContext()
+  await Promise.all([_loadSharedHintTable(language), ...[..._vocabularyStorageReaders.values()].map(reader => reader.loadLanguage(language))])
+  context.assertCurrent()
+  let changed = false
+  for (const [which, reader] of _vocabularyStorageReaders) {
+    const catalog = await reader.catalog()
+    context.assertCurrent()
+    if (which === 'self' && catalog !== _vocabularyCatalogSelf) { _vocabularyCatalogSelf = catalog; changed = true }
+    if (which === 'other' && catalog !== _vocabularyCatalogOther) { _vocabularyCatalogOther = catalog; changed = true }
+  }
+  if (changed) _installVocabularyCatalog()
+}
+
 async function _loadVocabularyCatalog() {
   const context = _dsCaptureSourceContext()
-  const cacheKey = which => _scopedKey('vocabulary-catalog:' + _dsSourceIdentity(which, 'shared'))
-  const readSaved = which => {
-    try { return parseVocabularyCatalog(localStorage.getItem(cacheKey(which))) }
-    catch (_) { return parseVocabularyCatalog(null) }
-  }
-  _vocabularyCatalogSelf = _dsHasSelf() ? readSaved('self') : parseVocabularyCatalog(null)
-  _vocabularyCatalogOther = _dsHasOther() ? readSaved('other') : parseVocabularyCatalog(null)
-  _installVocabularyCatalog()
+  _vocabularyStorageReaders.clear()
+  _vocabularyCatalogSelf = parseVocabularyCatalog(null)
+  _vocabularyCatalogOther = parseVocabularyCatalog(null)
+  const generated = new Map()
   const languagesReady = _dsReadLayers(SHARED_HINTS_DIRECTORY + '/languages.txt', {
     lang: 'shared', retry: { tries: 1, timeoutMs: 4000 },
   }).then(layers => {
     context.assertCurrent()
-    _sharedHintLanguages = [...new Set(['hi', ...layers.flatMap(layer => parseVocabularyHintLanguages(layer.text || ''))])]
-      .filter(language => language !== 'en')
-  }).catch(error => console.warn('Shared vocabulary languages unavailable:', error))
-  const generatedReady = _dsReadLayers(GENERATED_HINDI_HINTS_FILE, {
-    lang: _dsLangFromLocation(), retry: { tries: 1, timeoutMs: 12000 },
-  }).then(layers => {
-    context.assertCurrent()
-    const catalogs = []
-    for (const layer of [...layers].reverse()) {
-      try { catalogs.push(parseVocabularyCatalog(layer.text)) }
-      catch (error) { console.warn('Ignoring an invalid Hindi vocabulary pack:', error) }
-    }
-    _generatedVocabularyHints = mergeVocabularyCatalogs(...catalogs)
-  }).catch(error => console.warn('Generated Hindi vocabulary hints unavailable:', error))
-  try {
-    const layers = await _dsReadLayers(VOCABULARY_CATALOG_FILE, {
-      lang: 'shared', retry: { tries: 1, timeoutMs: 4000, init: { cache: 'no-cache' } },
-    })
-    context.assertCurrent()
-    for (const layer of layers) {
-      const parsed = parseVocabularyCatalog(layer.text)
-      if (layer.src === 'self') _vocabularyCatalogSelf = parsed
-      else _vocabularyCatalogOther = parsed
-      try {
-        if (layer.text == null) localStorage.removeItem(cacheKey(layer.src))
-        else localStorage.setItem(cacheKey(layer.src), layer.text)
-      } catch (_) { /* keep the in-memory revision */ }
-    }
-  } catch (error) {
-    console.warn('Vocabulary meanings unavailable; using the last loaded copy.', error)
-  }
-  await Promise.all([generatedReady, languagesReady])
-  try { context.assertCurrent() } catch (_) { return }
+    return layers.flatMap(layer => parseVocabularyHintLanguages(layer.text || ''))
+  }).catch(error => { console.warn('Shared vocabulary languages unavailable:', error); return [] })
+  await Promise.all(['self', 'other'].filter(which => which === 'self' ? _dsHasSelf() : _dsHasOther()).map(async which => {
+    try {
+      const read = _vocabularyStorageRead(which, context)
+      const reader = createVocabularyCatalogReader({ read, target: getLangFromUrl().code, vocabulary: () => _vocabularySourceRows(which) })
+      await reader.initialize()
+      context.assertCurrent()
+      _vocabularyStorageReaders.set(which, reader)
+      // Legacy packs are consulted only before this source is migrated.
+      if (!reader.split) {
+        const raw = await read(GENERATED_HINDI_HINTS_FILE, _dsLangFromLocation())
+        if (raw != null) generated.set(which, parseVocabularyCatalog(raw))
+      }
+    } catch (error) { console.warn('Vocabulary hints unavailable from ' + which + ':', error) }
+  }))
+  const languages = await languagesReady
+  await window._vocabularyReadyPromise
+  context.assertCurrent()
+  _generatedVocabularyHintsSelf = generated.get('self') || parseVocabularyCatalog(null)
+  _generatedVocabularyHints = mergeVocabularyCatalogs(...['other', 'self'].map(which => generated.get(which)).filter(Boolean))
+  _sharedHintLanguages = [...new Set(['hi', ...languages, ...[..._vocabularyStorageReaders.values()].flatMap(reader => reader.languages)])]
+    .filter(language => language !== 'en')
   _installVocabularyCatalog()
-  if (window._appSettings.vocabularyLookupLanguage) _reportFamiliarLanguage()
   await _loadSharedHintTranslations(_vocabularyLookupLanguage())
-  try { context.assertCurrent() } catch (_) { return }
+  context.assertCurrent()
+  if (window._appSettings.vocabularyLookupLanguage) _reportFamiliarLanguage()
   _renderVocabularyForHintLanguage()
 }
 
@@ -3753,7 +3864,7 @@ function _getVocabularyHintIndex(matcher = _getVocabularyMatcher(), lookup = _vo
   let cached = _vocabularyHintIndexes.get(lookup)
   if (cached?.matcher !== matcher || cached.catalog !== _vocabularyCatalog || cached.translations !== translations) {
     cached = { matcher, catalog: _vocabularyCatalog, translations,
-      index: createVocabularyHintIndex(matcher.rows, target, _vocabularyCatalog, lookup, translations) }
+      index: createVocabularyHintIndex(matcher.rows, target, vocabularyCatalogForLanguage(lookup, _generatedVocabularyHints, vocabularyHintSeed, _vocabularyCatalogOther, _vocabularyCatalogSelf), lookup, translations) }
     _vocabularyHintIndexes.set(lookup, cached)
   }
   return cached.index
@@ -3780,7 +3891,8 @@ async function _editVocabularyMatch(match) {
   context.assertCurrent()
   const language = getLangFromUrl().code
   if (!ownLines(_ownVocabulary(), match.category).includes(match.line)) return
-  const catalogBaseline = _vocabularyCatalogSelf
+  const storageBaseline = _vocabularyStorageReaders.get('self')?.snapshot()
+  const catalogBaseline = storageBaseline?.legacyRaw ? parseVocabularyCatalog(storageBaseline.legacyRaw) : _vocabularyCatalogSelf
   const matcher = _getVocabularyMatcher()
   const row = matcher.rows.find(item => item.category === match.category && item.line === match.line)
   if (!row) return
@@ -3788,12 +3900,13 @@ async function _editVocabularyMatch(match) {
   const group = index.groupFor(row.index)
   const english = lookup === 'en'
   const cues = vocabularyLineParts(row.line).hints
-  const hints = english ? cues : index.hintsFor(row.line, row.index)
+  const needsReview = !!group?.reviewRequired && !group.reviewedHints?.includes(lookup)
+  const hints = english ? cues : needsReview && group.hintOverrides?.[lookup] ? group.hintOverrides[lookup] : index.hintsFor(row.line, row.index)
   const translations = _sharedHintTranslations.get(lookup)
   const sharedHints = english ? [] : [...new Map(cues.map(cue => [normalizeHint(cue, 'en'), cue])).values()]
     .map(cue => ({ cue, hints: sharedVocabularyHints(_vocabularyCatalog, lookup, translations, cue) }))
   openVocabularyEditor({
-    row, language, lookup, hints, sharedHints, hasOverride: !!group?.hintOverrides?.[lookup],
+    row, language, lookup, hints, sharedHints, needsReview: !english && needsReview, hasOverride: !!group?.hintOverrides?.[lookup],
     languageName: _vocabularyLanguageName,
     async save(nextHints, sharedChanges) {
       context.assertCurrent()
@@ -3805,53 +3918,51 @@ async function _editVocabularyMatch(match) {
       const line = english ? replaceEnglishVocabularyHints(row.line, nextHints) : row.line
       if (english) {
         local[category] = [...lines]
-        local[category][at] = line
+        spliceVocabularyEntries(local, category, at, 1, [line])
       }
       const baseline = window._vocabularyBaselineText || ''
       const pending = _userData.getItem(PENDING_VOCAB_KEY)
-      let nextText, nextCatalog
-      const files = [{
-        path: _langRepoDir() + '/vocabulary.txt',
-        getContent(remote) {
-          context.assertCurrent()
-          assertVocabularyRow(remote, baseline, category, row.line)
-          if (!english) return null
-          nextText = vocabularyToText(mergeVocabulary(baseline, local, remote || ''))
-          return nextText
-        },
-      }]
       const patch = {}
       if (sharedChanges.length) {
         patch.sharedHints = { [lookup]: Object.fromEntries(sharedChanges.map(([cue, aliases]) => [normalizeHint(cue, 'en'), aliases])) }
       }
       if (english ? !!group : nextHints !== undefined) {
-        const id = group?.id || await vocabularyHintGroupId(language, row)
-        const current = group || { language, category, line, forms: [] }
-        const updated = reviseVocabularyGroup(current, row.line, { category, line })
+        const id = group?.id || row.entryId || await vocabularyHintGroupId(language, row)
+        const ownCatalog = _ownVocabularyCatalogForWrite()
+        const owned = ownCatalog.groups[id]
+        const current = (owned && !owned.storagePlaceholder ? owned : group || owned) || { language, category, line, forms: [], entryId: row.entryId }
+        const source = owned || ownCatalog.groups[row.entryId]
+        const updated = reviseVocabularyGroup({ ...current, entryId: row.entryId }, row.line, { category, line })
         if (!english) {
-          updated.hintOverrides = { ...current.hintOverrides }
+          if (source && source !== current) {
+            if (source.reviewRequired) updated.reviewRequired = true
+            else delete updated.reviewRequired
+            if (source.reviewedHints) updated.reviewedHints = [...source.reviewedHints]
+            else delete updated.reviewedHints
+          }
+          updated.hintOverrides = { ...owned?.hintOverrides }
           if (nextHints === null) delete updated.hintOverrides[lookup]
           else updated.hintOverrides[lookup] = nextHints
           if (!Object.keys(updated.hintOverrides).length) delete updated.hintOverrides
+          if (updated.reviewRequired) updated.reviewedHints = [...new Set([...(updated.reviewedHints || []), lookup])]
         }
         patch.groups = { [id]: updated }
+        const references = new Set([...(updated.meanings || []), ...updated.forms.flatMap(form => form.meanings)])
+        const missing = [...references].filter(meaning => !ownCatalog.meanings[meaning] && _vocabularyCatalog.meanings[meaning])
+        if (missing.length) patch.meanings = Object.fromEntries(missing.map(id => [id, _vocabularyCatalog.meanings[id]]))
       }
-      if (patch.groups || patch.sharedHints) {
-        files.push({
-          path: VOCABULARY_CATALOG_PATH,
-          getContent(remote) {
-            context.assertCurrent()
-            nextCatalog = changeVocabularyCatalog(remote, catalogBaseline, patch)
-            return JSON.stringify(nextCatalog, null, 2) + '\n'
-          },
-        })
-      }
+      const commit = vocabularyCommitFiles({
+        path: _langRepoDir() + '/vocabulary.txt', baselineText: baseline, local, language,
+        catalog: _ownVocabularyCatalogForWrite(), catalogBaseline, storageSnapshot: storageBaseline, patch,
+        assertCurrent: () => context.assertCurrent(),
+      })
       await _userData.flush()
       context.assertCurrent()
       const { owner, repo, branch } = _dsWriteTarget()
-      await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch, commitMessage: 'vocab: update ' + lookup + ' hints', files })
+      await window.GitHubUtils.commitMultipleFiles({ owner, repo, branch, commitMessage: 'vocab: update ' + lookup + ' hints', files: commit.files, prepareFiles: commit.prepareFiles })
+      const { text: nextText, catalog: nextCatalog, storage, storageWrites } = commit.result()
       context.assertCurrent()
-      if (english) {
+      {
         const concurrent = _userData.getItem(PENDING_VOCAB_KEY) !== pending
         const shown = concurrent ? vocabularyToText(mergeVocabulary(baseline, _ownVocabulary(), nextText)) : nextText
         _setVocabularyLayers(_dsMergeVocabularyLayers(shown, window._vocabularyOtherText))
@@ -3862,13 +3973,7 @@ async function _editVocabularyMatch(match) {
         context.assertCurrent()
         loadWholeVocabulary()
       }
-      if (nextCatalog) {
-        _vocabularyCatalogSelf = nextCatalog
-        try {
-          localStorage.setItem(_scopedKey('vocabulary-catalog:' + _dsSourceIdentity('self', 'shared')), JSON.stringify(nextCatalog))
-        } catch (_) { /* keep the in-memory revision */ }
-      }
-      _installVocabularyCatalog()
+      await _rememberVocabularyCatalog(nextCatalog, storage, storageWrites)
       if (_familiarSearchLanguage() && window._requestedSearchText) {
         doSearch(window._requestedSearchText).catch(error => console.warn('Could not refresh the search after saving hints:', error))
       }
@@ -3895,13 +4000,21 @@ async function fetchVocabulary() {
       })
       context.assertCurrent()
       const v = _dsVocabularyFromLayers(layers)
+      if (_dsHasSelf()) {
+        const own = await adoptVocabularyEntryIds(parseVocabularyFile(v.baselineText), getLangFromUrl().code)
+        context.assertCurrent()
+        v.baselineText = vocabularyToText(own)
+        Object.assign(v, _dsMergeVocabularyLayers(v.baselineText, v.otherText))
+      }
       _setVocabularyLayers(v)
       window._vocabularyBaselineText = v.baselineText
       res = null // already applied
     }
     if (typeof res === 'string' && res) {
       context.assertCurrent()
-      window.vocabulary = parseVocabularyFile(res)
+      window.vocabulary = await adoptVocabularyEntryIds(parseVocabularyFile(res), getLangFromUrl().code)
+      context.assertCurrent()
+      res = vocabularyToText(window.vocabulary)
       // Baseline of the file as it was when we loaded it. Used by
       // commitVocabularyToGithub for a 3-way merge against the live remote
       // so concurrent edits on GitHub aren't clobbered by our push.
@@ -8628,7 +8741,7 @@ function _getVocabularyMatcher() {
   const lang = getSelectedLang() === 'en' ? 'en' : getLangFromUrl().code
   // Include the full contents: edits often replace a line without changing
   // the number of categories/lines. The previous count-only caches missed it.
-  const signature = lang + ':' + JSON.stringify(window.vocabulary || {})
+  const signature = lang + ':' + vocabularyToText(window.vocabulary || {})
   if (!_vocabularyMatcherCache || _vocabularyMatcherCache.signature !== signature) {
     const expansions = getExpansionForWords()
     const matcher = createVocabularyMatcher(window.vocabulary, {

@@ -1,3 +1,4 @@
+import { copyVocabularyEntryIds, vocabularyEntryId, vocabularyEntries, setVocabularyEntryId } from './vocabulary-entries.js'
 import { LANGUAGE_KEY, languageKeyFromLocation, defaultDataRoot } from './language-config.js'
 // Where the language app reads from and writes to. Every raw URL and every
 // GitHub write target in language.js comes from here; nothing else names an
@@ -378,12 +379,20 @@ function addOtherVocabulary(vocab, otherText) {
   if (!otherText) return { vocab, readOnly, otherCategories }
   const other = parseVocabularyFile(otherText)
   const selfLines = new Set(Object.values(vocab).flat().filter(l => l && l.trim()))
+  const usedIds = new Set(vocabularyEntries(vocab).map(entry => entry.id).filter(Boolean))
   for (const cat of Object.keys(other)) {
     if (cat === '__empty__') continue
     const added = new Set()
     for (const line of other[cat]) {
       if (!line || !line.trim() || selfLines.has(line) || added.has(line)) continue
       if (!hasOwn(vocab, cat)) { vocab[cat] = []; otherCategories.add(cat) }
+      const id = vocabularyEntryId(other, cat, line)
+      // A fork can contain a different version of self's entry. Keep self's
+      // identity unique; the read-only version still gets ordinary cue hints.
+      if (id && !usedIds.has(id)) {
+        setVocabularyEntryId(vocab, cat, line, id)
+        usedIds.add(id)
+      }
       vocab[cat].push(line)
       added.add(line)
       readOnly.add(line)
@@ -413,7 +422,7 @@ export function withoutReadOnlyLines(vocab, readOnly, otherCategories) {
     if (cat === '__empty__' && !kept.some(l => l && l.trim())) continue
     out[cat] = kept
   }
-  return out
+  return copyVocabularyEntryIds(vocab, out)
 }
 
 // The vocabulary to show and edit, from readLayers('vocabulary.txt').
@@ -450,6 +459,7 @@ export function vocabularyFromLayers(layers) {
 export function pendingVocabCategories(vocab, names, readOnly, otherCategories) {
   const picked = Object.create(null)
   for (const cat of names || []) if (hasOwn(vocab || {}, cat) && Array.isArray(vocab[cat])) picked[cat] = vocab[cat]
+  copyVocabularyEntryIds(vocab, picked)
   return withoutReadOnlyLines(picked, readOnly, otherCategories)
 }
 
@@ -478,7 +488,7 @@ export function claimVocabularyLines(vocab, readOnly, otherCategories, lines) {
     if (kept.length === 0 && lines.length > 0 && otherCategories && otherCategories.has(cat)) continue
     out[cat] = kept
   }
-  return { vocab: out, readOnly: nextReadOnly }
+  return { vocab: copyVocabularyEntryIds(vocab, out), readOnly: nextReadOnly }
 }
 
 // recordings.json ({ collectionName: { items, ... } }): the name is the key;
