@@ -5,7 +5,7 @@ import { join, resolve, dirname, sep } from 'node:path'
 import { webcrypto } from 'node:crypto'
 import { parseVocabularyFile, vocabularyToText, mergeVocabulary } from '../../public/language/vocab-merge.js'
 import { adoptVocabularyEntryIds, vocabularyEntries } from '../../public/language/vocabulary-entries.js'
-import { parseVocabularyCatalog, mergeVocabularyCatalogs, synchronizeVocabularyGroups, createVocabularyHintIndex, parseVocabularyHintTranslations, vocabularyLineParts } from '../../public/language/vocabulary-hints.js'
+import { parseVocabularyCatalog, mergeVocabularyCatalogs, synchronizeVocabularyGroups, createVocabularyHintIndex, parseVocabularyHintTranslations, vocabularyLineParts, vocabularyCatalogForLanguage } from '../../public/language/vocabulary-hints.js'
 import { vocabularyHintSeed } from '../../public/language/vocabulary-hint-seed.js'
 import { packVocabularyCatalog, createVocabularyCatalogReader, VOCABULARY_STORAGE_INDEX } from '../../public/language/vocabulary-catalog-storage.js'
 
@@ -19,7 +19,8 @@ export async function auditVocabularyCatalog({ dataDir, lang = 'sv', outDir }) {
   const vocabulary = mergeVocabulary(vocabularyToText(previous), previous, raw)
   if (existsSync(join(shared, VOCABULARY_STORAGE_INDEX))) throw new Error('This source already uses split storage. This command stages the initial legacy migration only.')
   const canonical = parseVocabularyCatalog(read(join(shared, 'vocabulary-meanings.json')))
-  const source = mergeVocabularyCatalogs(parseVocabularyCatalog(read(join(dataDir, 'vocabulary-hints-hi.json'))), vocabularyHintSeed, canonical)
+  const hindi = parseVocabularyCatalog(read(join(dataDir, 'vocabulary-hints-hi.json')))
+  const source = mergeVocabularyCatalogs(hindi, vocabularyHintSeed, canonical)
   const updated = { ...canonical, ...source, groups: { ...source.groups, ...synchronizeVocabularyGroups(source, lang, previous, vocabulary) } }
   if (canonical.attribution) updated.attribution = canonical.attribution
   const packed = await packVocabularyCatalog(updated)
@@ -32,9 +33,9 @@ export async function auditVocabularyCatalog({ dataDir, lang = 'sv', outDir }) {
   await reader.initialize()
   for (const language of languages) {
     const translations = parseVocabularyHintTranslations(read(join(shared, 'vocabulary-hints', language + '.txt')) || '', language)
-    const before = createVocabularyHintIndex(rows, lang, source, language, translations)
+    const before = createVocabularyHintIndex(rows, lang, vocabularyCatalogForLanguage(language, hindi, vocabularyHintSeed, canonical), language, translations)
     await reader.loadLanguage(language)
-    const after = createVocabularyHintIndex(rows, lang, await reader.catalog(), language, translations)
+    const after = createVocabularyHintIndex(rows, lang, vocabularyCatalogForLanguage(language, vocabularyHintSeed, await reader.catalog()), language, translations)
     const changed = rows.filter(row => JSON.stringify(before.hintsFor(row.line, row.index)) !== JSON.stringify(after.hintsFor(row.line, row.index)))
     const aliases = new Set([
       ...[...translations.values()].flat(), ...Object.values(source.meanings).flatMap(meaning => meaning.hints[language] || []),
@@ -42,10 +43,10 @@ export async function auditVocabularyCatalog({ dataDir, lang = 'sv', outDir }) {
       ...Object.values(source.sharedHints?.[language] || {}).flat(),
       ...(language === 'en' ? rows.flatMap(row => vocabularyLineParts(row.line).hints) : []),
     ])
-    const searchSignature = index => JSON.stringify(index.map(hit => [hit.index, [...hit.forms].sort(), [...hit.meanings].sort(), hit.localizedHints]).sort(([a], [b]) => a - b))
+    const searchSignature = index => JSON.stringify(index.map(hit => [hit.index, [...hit.forms].sort(), [...hit.meanings].sort(), hit.localizedHints]))
     for (const alias of aliases) {
       aliasChecks++
-      if (searchSignature(before.search(alias)) !== searchSignature(after.search(alias))) searchDifferences.push({ language, alias })
+      if (searchSignature(before.search(alias)) !== searchSignature(after.search(alias))) searchDifferences.push({ language, alias, before: JSON.parse(searchSignature(before.search(alias))), after: JSON.parse(searchSignature(after.search(alias))) })
     }
     results[language] = changed.length
     differences.push(...changed.map(row => ({ language, line: row.line, before: before.hintsFor(row.line, row.index), after: after.hintsFor(row.line, row.index) })))

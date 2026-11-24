@@ -137,6 +137,16 @@ export function parseVocabularyCatalog(raw) {
 }
 
 export function mergeVocabularyCatalogs(...catalogs) {
+  const meanings = Object.create(null)
+  for (const catalog of catalogs) {
+    for (const [id, meaning] of Object.entries(catalog.meanings || {})) {
+      const previous = meanings[id]
+      meanings[id] = previous?.label === meaning.label ? { ...meaning,
+        hints: { ...previous.hints, ...meaning.hints },
+        ...((previous.examples || meaning.examples) ? { examples: { ...previous.examples, ...meaning.examples } } : {}),
+      } : meaning
+    }
+  }
   const sharedHints = Object.create(null)
   for (const catalog of catalogs) {
     for (const [language, entries] of Object.entries(catalog.sharedHints || {})) {
@@ -146,7 +156,7 @@ export function mergeVocabularyCatalogs(...catalogs) {
   }
   return {
     version: 1,
-    meanings: Object.assign(Object.create(null), ...catalogs.map(catalog => catalog.meanings)),
+    meanings,
     groups: Object.assign(Object.create(null), ...catalogs.map(catalog => catalog.groups)),
     sharedHints,
   }
@@ -249,7 +259,7 @@ export function vocabularyGroupLinks(rows, language, catalog) {
   }
   const signature = texts => JSON.stringify(texts.map(formKey).sort())
   const cues = texts => JSON.stringify(texts.map(h => normalizeHint(h, 'en')).sort())
-  return Object.entries(catalog.groups).filter(([, group]) => group.language === language).map(([id, group]) => {
+  return Object.entries(catalog.groups || {}).filter(([, group]) => group.language === language).map(([id, group]) => {
     if (group.deleted) return [id, group, undefined]
     // Once bound, never fall back to text: a deleted ID must not find a new row.
     let candidates = group.entryId ? byId.get(group.entryId) : exact.get(rowKey(group.category, group.line))
@@ -378,7 +388,7 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
       for (const meaning of form.meanings) put(byMeaning, meaning, { row: group.row, form: key })
     }
   }
-  for (const [id, meaning] of Object.entries(catalog.meanings)) {
+  for (const [id, meaning] of Object.entries(catalog.meanings || {})) {
     const links = byMeaning.get(id)
     if (!links) continue
     const aliases = meaning.hints[source] || []
@@ -451,3 +461,55 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
 }
 
 export function vocabularyFormKey(form) { return formKey(form) }
+
+// Source overlays are evaluated for the requested hint language. A compact
+// source-only placeholder must not mask a linked library's actual hint, and
+// an edit in one locale must not hide another locale's fallback translation.
+export function vocabularyCatalogForLanguage(language, ...catalogs) {
+  const result = mergeVocabularyCatalogs(...catalogs)
+  const groups = Object.create(null), meanings = Object.create(null)
+  const hasHint = group => Object.hasOwn(group.hintOverrides || {}, language)
+  for (const catalog of catalogs) {
+    const lowerMeanings = { ...meanings }
+    for (const [id, meaning] of Object.entries(catalog.meanings || {})) {
+      const previous = meanings[id]
+      meanings[id] = previous?.label === meaning.label ? { ...meaning,
+        hints: { ...previous.hints, ...meaning.hints },
+        ...((previous.examples || meaning.examples) ? { examples: { ...previous.examples, ...meaning.examples } } : {}),
+      } : meaning
+    }
+    const lowerByEntry = new Map()
+    for (const previous of Object.values(groups)) {
+      if (!previous.entryId || previous.deleted || !hasHint(previous)) continue
+      if (!lowerByEntry.has(previous.entryId)) lowerByEntry.set(previous.entryId, [])
+      lowerByEntry.get(previous.entryId).push(previous)
+    }
+    for (const [id, group] of Object.entries(catalog.groups || {})) {
+      const previous = groups[id]
+      if (previous && !previous.deleted && !group.deleted && group.storagePlaceholder && !previous.storagePlaceholder) continue
+      if (group.entryId && !group.deleted && !hasHint(group)) {
+        const references = [...(group.meanings || []), ...group.forms.flatMap(form => form.meanings)]
+        const labelsAgree = references.every(id => !catalog.meanings[id] || !lowerMeanings[id] || catalog.meanings[id].label === lowerMeanings[id].label)
+        const fallback = labelsAgree && (lowerByEntry.get(group.entryId) || []).find(previous =>
+          JSON.stringify(group.forms) === JSON.stringify(previous.forms) && JSON.stringify(group.meanings || []) === JSON.stringify(previous.meanings || []))
+        if (fallback) {
+          if (previous !== fallback) delete groups[id]
+          continue
+        }
+      }
+      groups[id] = group
+    }
+  }
+  const orderedMeanings = Object.values(meanings).some(meaning => meaning.storageOrder !== undefined)
+    ? Object.fromEntries(Object.entries(meanings).sort(([, a], [, b]) => (a.storageOrder ?? Infinity) - (b.storageOrder ?? Infinity))) : meanings
+  if (Object.values(groups).some(group => group.storageOrder !== undefined)) {
+    const entries = Object.entries(groups).map(([id, group], order) => {
+      let layer = 0
+      for (let i = 0; i < catalogs.length; i++) if (catalogs[i].groups[id] === group) layer = i
+      return { id, group, layer, order: group.storageOrder ?? order }
+    })
+    entries.sort((a, b) => Number(!!a.group.storagePlaceholder) - Number(!!b.group.storagePlaceholder) || a.layer - b.layer || a.order - b.order)
+    return { ...result, groups: Object.fromEntries(entries.map(({ id, group }) => [id, group])), meanings: orderedMeanings }
+  }
+  return { ...result, groups, meanings: orderedMeanings }
+}

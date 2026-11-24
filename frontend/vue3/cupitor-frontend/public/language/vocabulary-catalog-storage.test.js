@@ -2,7 +2,7 @@ import { TextEncoder } from 'util'
 import { webcrypto } from 'crypto'
 import { parseVocabularyFile, vocabularyToText } from './vocab-merge.js'
 import { createVocabularyMatcher } from './vocabulary-matcher.js'
-import { createVocabularyHintIndex, parseVocabularyCatalog, VOCABULARY_CATALOG_PATH } from './vocabulary-hints.js'
+import { createVocabularyHintIndex, parseVocabularyCatalog, mergeVocabularyCatalogs, VOCABULARY_CATALOG_PATH } from './vocabulary-hints.js'
 import { vocabularyCommitFiles } from './vocabulary-save.js'
 import { catalogJSON, packVocabularyCatalog, packVocabularyStream, readVocabularyStream,
   createVocabularyCatalogReader, VOCABULARY_STORAGE_INDEX, VOCABULARY_STORAGE_PATH, VOCABULARY_CHUNK_BYTES } from './vocabulary-catalog-storage.js'
@@ -216,4 +216,50 @@ test('meaning searches keep their original row order across chunk partitions', a
   const base = await fixture(data, 'hi', vocabulary)
   expect(lookup(base.catalog, 'hi', vocabulary).search('सत्य').map(hit => hit.line))
     .toEqual(lookup(data, 'hi', vocabulary).search('सत्य').map(hit => hit.line))
+})
+
+test('different meanings sharing an alias retain definition order after split storage and source overlays', async () => {
+  const { vocabularyCatalogForLanguage } = await import('./vocabulary-hints.js')
+  const second = '(wake early)|vakna tidigt|'
+  const vocabulary = parseVocabularyFile(vocabText + '\n' + second + '\t[entry:entry-two]')
+  const data = source()
+  data.meanings = { 'z-first': { label: 'First', hints: { hi: ['सत्य'] } }, 'a-last': { label: 'Last', hints: { hi: ['सत्य'] } } }
+  const common = { language: 'sv', category: 'Everyday Life', forms: [] }
+  data.groups = { earlier: { ...common, entryId: 'entry-one', line, meanings: ['a-last'] },
+    later: { ...common, entryId: 'entry-two', line: second, meanings: ['z-first'] } }
+  const base = await fixture(data, 'hi', vocabulary)
+  const overlaid = vocabularyCatalogForLanguage('hi', data, base.catalog)
+  expect(lookup(overlaid, 'hi', vocabulary).search('सत्य').map(hit => hit.line)).toEqual([second, line])
+})
+
+test('linked-library hints remain available per locale without masking owned overrides or bypassing review', async () => {
+  const { vocabularyCatalogForLanguage } = await import('./vocabulary-hints.js')
+  const linked = source(), owned = source()
+  owned.groups['entry-one'].hintOverrides = { hi: ['My Hindi'] }
+  const hi = vocabularyCatalogForLanguage('hi', linked, owned)
+  expect(lookup(hi, 'hi').hintsFor(line)).toEqual(['My Hindi'])
+  const th = vocabularyCatalogForLanguage('th', linked, owned)
+  expect(lookup(th, 'th').hintsFor(line)).toEqual(['ตื่นแต่เช้า'])
+  linked.groups['entry-one'].reviewRequired = true
+  expect(lookup(vocabularyCatalogForLanguage('th', linked, owned), 'th').hintsFor(line)).toEqual([])
+  const placeholder = { ...owned, groups: { 'entry-one': { ...owned.groups['entry-one'], storagePlaceholder: true, hintOverrides: undefined } } }
+  expect(lookup(vocabularyCatalogForLanguage('hi', source(), placeholder), 'hi').hintsFor(line)).toEqual(['जल्दी उठना'])
+})
+
+test('linked fallback matching uses entry identity across old group keys and respects differing meaning links', async () => {
+  const { vocabularyCatalogForLanguage } = await import('./vocabulary-hints.js')
+  const linked = source(), owned = source()
+  linked.groups = { 'old-library-key': linked.groups['entry-one'] }
+  owned.groups['entry-one'].hintOverrides = { hi: ['My Hindi'] }
+  expect(lookup(vocabularyCatalogForLanguage('th', linked, owned), 'th').hintsFor(line)).toEqual(['ตื่นแต่เช้า'])
+  owned.groups['entry-one'].meanings = ['truth']
+  expect(vocabularyCatalogForLanguage('th', linked, owned).groups['entry-one'].meanings).toEqual(['truth'])
+})
+
+test('updating one meaning translation keeps the other language fields', () => {
+  const base = source()
+  const update = { version: 1, groups: {}, meanings: { truth: { label: 'Truth', hints: { hi: ['Updated Hindi'] } } } }
+  const merged = mergeVocabularyCatalogs(base, update)
+  expect(merged.meanings.truth.hints.hi).toEqual(['Updated Hindi'])
+  expect(merged.meanings.truth.hints.th).toEqual(['ความจริง'])
 })

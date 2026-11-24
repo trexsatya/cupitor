@@ -159,9 +159,10 @@ export async function vocabularyCatalogRecords(catalog, { targets, hintLanguages
       if (includes(language)) put('hints/' + group.language + '/' + language, id, hints)
     }
   }
+  let nextMeaningOrder = Object.values(catalog.meanings).reduce((max, meaning) => Math.max(max, meaning.storageOrder ?? -1), -1) + 1
   for (const [id, meaning] of Object.entries(catalog.meanings)) {
-    const { hints, examples, ...metadata } = meaning
-    put('meaning-definitions', id, metadata)
+    const { hints, examples, storageOrder, ...metadata } = meaning
+    put('meaning-definitions', id, { value: metadata, order: storageOrder ?? nextMeaningOrder++ })
     for (const language of new Set([...Object.keys(meaning.hints), ...Object.keys(meaning.examples || {})])) {
       if (includes(language)) put('meaning-hints/' + language, id, {
         ...(Object.hasOwn(meaning.hints, language) ? { h: meaning.hints[language] } : {}),
@@ -211,7 +212,10 @@ export async function hydrateVocabularyCatalog(streams, target, vocabulary) {
       ...(value.h ? { storageHasOverrides: true, hintOverrides: {} } : {}), ...expandReview(value), ...(source.deleted ? { deleted: true } : {}),
       ...(changed.get(value.e) ? { reviewRequired: true, reviewedHints: [] } : {}) }
   }
-  for (const [id, value] of Object.entries(streams.get('meaning-definitions') || {})) result.meanings[id] = { ...value, hints: {} }
+  const meanings = Object.entries(streams.get('meaning-definitions') || {})
+    .map(([id, value], index) => ({ id, value: typeof value.label === 'string' ? value : value.value, order: typeof value.label === 'string' ? index : value.order }))
+    .sort((a, b) => a.order - b.order)
+  for (const { id, value, order } of meanings) result.meanings[id] = { ...value, hints: {}, storageOrder: order }
   for (const [name, records] of streams) {
     if (name.startsWith('hints/' + target + '/')) {
       const language = name.slice(('hints/' + target + '/').length)
