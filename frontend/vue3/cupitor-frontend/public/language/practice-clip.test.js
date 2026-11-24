@@ -1,5 +1,7 @@
 import {
   clipRange,
+  padPracticeClip,
+  practicePaddingSeconds,
   contiguousLineWindow,
   wordContextLineWindow,
   gapSecondsBefore,
@@ -178,5 +180,27 @@ describe("wordContextLineWindow", () => {
     ];
     expect(wordContextLineWindow(clips, 1, 0, 0, { word: "target", minWordsAround: 10 }))
       .toEqual({ from: 1, to: 1 });
+  });
+});
+
+describe("practice clip padding", () => {
+  test("accepts signed decimal settings and defaults invalid values to zero", () => {
+    expect(practicePaddingSeconds("-0.5")).toBe(-0.5);
+    expect(practicePaddingSeconds("0.5")).toBe(0.5);
+    expect(practicePaddingSeconds("Infinity")).toBe(0);
+  });
+
+  test("trims the start and end using negative padding", () => {
+    expect(padPracticeClip({ start: 10, stop: 14 }, { before: -0.5, after: -1 }))
+      .toEqual({ start: 10.5, stop: 13 });
+  });
+
+  test("keeps the original range when trimming would remove the entire clip", () => {
+    expect(padPracticeClip(captured, { before: -0.5, after: -0.5 })).toEqual(captured);
+  });
+
+  test("extends the clip with positive padding and clamps the start at zero", () => {
+    expect(padPracticeClip({ start: 1, stop: 4 }, { before: 2, after: 1 }))
+      .toEqual({ start: 0, stop: 5 });
   });
 });
