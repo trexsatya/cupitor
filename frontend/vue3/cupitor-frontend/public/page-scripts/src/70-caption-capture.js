@@ -40,7 +40,7 @@
     // Version tag: bump whenever the snippet changes in a way that requires
     // tearing down the previous install (new UI, new state shape, etc).
     // The previous install's tear-down hook clears its sidebar + intervals.
-    const CAPS_VERSION = 33;
+    const CAPS_VERSION = 34;
     const prev = window.__cupCapsInstalled;
     if (prev && typeof prev === 'object' && prev.version >= CAPS_VERSION) return;
     if (prev && typeof prev === 'object' && typeof prev.teardown === 'function') {
@@ -121,6 +121,12 @@
       onDownloadSubtitles: site.id === 'youtube' && window.YouTubeSubtitles &&
         typeof window.YouTubeSubtitles.postMessage === 'function'
         ? () => window.YouTubeSubtitles.postMessage(JSON.stringify({op: 'download'}))
+        : (!adaptedPlayer && /^https?:$/.test(location.protocol) &&
+            typeof window.MediaSubtitles?.postMessage === 'function'
+          ? () => requestPageSubtitles(window.MediaSubtitles, 'download')
+          : null),
+      onSaveSubtitles: typeof window.MediaSubtitles?.postMessage === 'function'
+        ? srt => window.MediaSubtitles.postMessage(JSON.stringify({op: 'save', srt}))
         : null,
       onClearCues: () => {
         const id = currentYouTubeId();
@@ -309,12 +315,15 @@
       try { sessionStorage.setItem(localCacheKey, JSON.stringify(tracks.slice(-5))); } catch (_) {}
     }
     function openLocalSubtitles() {
-      if (pendingLocal) return;
+      requestPageSubtitles(window.LocalSubtitles, 'open');
+    }
+    function requestPageSubtitles(channel, op) {
+      if (pendingLocal || (op === 'download' && !isWatchPage())) return;
       pendingLocal = {requestId: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2), mediaKey: pageKey()};
       ui.setImportBusy(true);
       try {
-        window.LocalSubtitles.postMessage(JSON.stringify({
-          op: 'open', requestId: pendingLocal.requestId, lang: ui.sourceLanguage,
+        channel.postMessage(JSON.stringify({
+          op, requestId: pendingLocal.requestId, lang: ui.sourceLanguage,
         }));
       } catch (_) { pendingLocal = null; ui.setImportBusy(false); }
     }
@@ -476,8 +485,12 @@
         return 'spotify:unlinked:' + location.pathname + ':' + spotifyItemVersion;
       }
       const key = location.origin + location.pathname;
-      if (!videoParams.length) return key;
       const q = new URLSearchParams(location.search);
+      if (!videoParams.length) {
+        if (site.id !== 'native' && site.id !== 'jwplayer') return key;
+        const query = q.toString();
+        return query ? key + '?' + query : key;
+      }
       return key + '?' + videoParams.map(n => n + '=' + (q.get(n) || '')).join('&');
     };
     let lastPageKey = pageKey();
