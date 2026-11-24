@@ -760,6 +760,7 @@ const _practiceSessionTimeout = createStudySessionTimeout(() => {
       _pracRec.token++
       _pracRec.watchPos = null
       _pracRec.loopSuspended = _pracRec.loop
+      _pracRec.loopGap = null
       _pracRecLoopClearAudio(_pracRec)
       _pracRec.audio?.pause()
       _pracRec.audio = null
@@ -2688,6 +2689,7 @@ window._appSettings = {
   practicePlaybackRate: 1,
   practiceClipPaddingBefore: 0,
   practiceClipPaddingAfter: 0,
+  practiceLoopSilenceSeconds: 0,
   practiceSpeedOptions: [1, 0.75, 0.5],
   // Seconds the recording-playback waits between items.
   recPlayGapSeconds: 30,
@@ -3115,6 +3117,7 @@ function loadAppSettings() {
   for (const field of ['practiceClipPaddingBefore', 'practiceClipPaddingAfter']) {
     $('#' + field).val(practicePaddingSeconds(window._appSettings[field]))
   }
+  $('#practiceLoopSilenceSeconds').val(_practiceLoopSilenceSeconds())
   $('#studySessionTimeoutMinutes').val(studyTimeoutMinutes(window._appSettings.studySessionTimeoutMinutes))
   $('#ttsReplacements').val((window._appSettings.ttsReplacements || []).map(r => `${r.from}=${r.to}`).join('\n'))
   $('#ttsNewlinePauseMs').val(window._appSettings.ttsNewlinePauseMs ?? 700)
@@ -4571,6 +4574,12 @@ $('document').ready(e => {
     const seconds = practicePaddingSeconds(this.value)
     this.value = seconds
     window._appSettings[this.id] = seconds
+    saveAppSettings()
+  })
+  $('#practiceLoopSilenceSeconds').on('change', function () {
+    const seconds = _practiceLoopSilenceSeconds(this.value)
+    this.value = seconds
+    window._appSettings.practiceLoopSilenceSeconds = seconds
     saveAppSettings()
   })
   $('#playbackSpeed').on('change', function () {
@@ -23469,6 +23478,7 @@ function minimizePracticeMode() {
     }
     // A minimized view must not keep looping or talking behind the main page.
     _pracRec.loop = false
+    _pracRec.loopGap = null
     _pracRecLoopClearAudio(_pracRec)
     if (_pracRec.loopTake) _deleteSpeakOverAudio(_pracRec.loopTake.url)
     _pracRec.loopTake = null
@@ -24079,7 +24089,7 @@ function _pracRecBegin(it) {
     timer: null,
     audio: null,
     loop: false, loopSuspended: false, loopTake: null, loopAudio: null, loopToken: 0,
-    loopPlayed: false, loopSeeking: false, loopSeekTimer: null,
+    loopPlayed: false, loopSeeking: false, loopSeekTimer: null, loopGap: null,
   }
   // Armed for the whole card, not just after a recording.
   _pracRecWatch()
@@ -24453,6 +24463,10 @@ async function _pracRecStop() {
 // latest scratch recording is audible over the source on subsequent loops.
 // Nothing is saved to the playlist until the user explicitly chooses the
 // normal Keep workflow.
+function _practiceLoopSilenceSeconds(value = window._appSettings.practiceLoopSilenceSeconds) {
+  return Math.min(600, practicePaddingSeconds(value))
+}
+
 function _pracRecLoopClearAudio(st) {
   st.loopToken = (st.loopToken || 0) + 1
   if (st.loopAudio) {
@@ -24466,6 +24480,7 @@ function _pracRecLoopSeek(st, { preserveAudio = false, start = Number(st.clipSta
   if (!spotifyClips(st.item).length && isYoutubeAdPlaying()) { st.adWaiting = true; return }
   if (_practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes) === false) return
   st.loopSuspended = false
+  st.loopGap = null
   _pracRecTakeOverPlayhead()
   // A take can be longer than a single loop. Keep that recording audible
   // across source rewinds instead of cutting it short at the clip boundary.
@@ -24495,6 +24510,7 @@ function _pracRecLoopToggle() {
   if (!st || st.phase !== 'idle' || !_practiceSpeakOverShown()) return
   if (st.loop) {
     st.loop = false
+    st.loopGap = null
     _pracRecLoopClearAudio(st)
     if (st.loopSeekTimer) clearTimeout(st.loopSeekTimer)
     st.loopSeeking = false
@@ -24553,7 +24569,7 @@ async function _pracRecLoopStart() {
     st.phase = 'recording'
     // Opening the microphone can pause the media while the recorder takes
     // focus. Reassert loop playback after startup without rewinding the clip.
-    _pracRecPlayVideo()
+    if (!st.loopGap) _pracRecPlayVideo()
     _renderPracticeRecBar()
     return true
   } catch (error) {
@@ -24638,7 +24654,19 @@ function _pracRecWatch() {
     if (st.adWaiting) {
       st.adWaiting = false
       st.watchPos = null
-      if (st.loop && !st.loopSuspended) _pracRecLoopSeek(st)
+      if (st.loop && !st.loopSuspended && !st.loopGap) _pracRecLoopSeek(st)
+      return
+    }
+    if (st.loopGap) {
+      if (st.loopSuspended) return
+      if (st.loopGap.resumeAt == null) {
+        // Finish a take that outlasts the source before counting silence.
+        if (st.loopAudio && !st.loopAudio.paused && !st.loopAudio.ended) return
+        _pracRecLoopClearAudio(st)
+        st.loopGap.resumeAt = Date.now() + st.loopGap.ms
+      } else if (Date.now() >= st.loopGap.resumeAt) {
+        _pracRecLoopSeek(st)
+      }
       return
     }
     const ct = _pracRecNow()
@@ -24660,7 +24688,15 @@ function _pracRecWatch() {
         return
       }
       if (st.clipStop != null && ct >= st.clipStop - 0.07) {
-        _pracRecLoopSeek(st, { preserveAudio: true })
+        const ms = _practiceLoopSilenceSeconds() * 1000
+        if (ms > 0) {
+          const takePlaying = st.loopAudio && !st.loopAudio.paused && !st.loopAudio.ended
+          st.loopGap = { ms, resumeAt: takePlaying ? null : Date.now() + ms }
+          if (!takePlaying) _pracRecLoopClearAudio(st)
+          _pracRecPauseVideo()
+        } else {
+          _pracRecLoopSeek(st, { preserveAudio: true })
+        }
         return
       }
       const tk = st.loopTake
@@ -25302,7 +25338,7 @@ function _practiceSpotifyOptions(it) {
     isCurrent: () => window._practiceActive && window._practiceCards?.[window._practiceIdx] === it,
     isPaused: () => window._practiceMinimized || _practiceSessionTimeout.expired || (_pracRec?.key === _pracRecKey(it) &&
       (_pracRec.loop
-        ? _pracRec.loopSuspended
+        ? _pracRec.loopSuspended || !!_pracRec.loopGap
         : ['starting', 'recording', 'playback'].includes(_pracRec.phase)))
   }
 }
@@ -25311,7 +25347,7 @@ function _togglePracticePlayback() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
   if (_practiceSessionTimeout.ensure(window._appSettings.studySessionTimeoutMinutes) === false) return
-  if (_pracRec?.loopSuspended && _pracRec.loop) {
+  if (_pracRec?.loop && (_pracRec.loopSuspended || _pracRec.loopGap)) {
     _pracRecLoopSeek(_pracRec)
     return
   }
