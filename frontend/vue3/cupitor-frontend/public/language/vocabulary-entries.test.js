@@ -7,6 +7,8 @@ import { mergeVocabularyLayers, withoutReadOnlyLines, pendingVocabCategories, re
 import { createVocabularyMatcher } from './vocabulary-matcher.js'
 import { createVocabularyHintIndex, parseVocabularyCatalog, reviseVocabularyGroup, synchronizeVocabularyGroups } from './vocabulary-hints.js'
 import { vocabularyCommitFiles } from './vocabulary-save.js'
+import { VOCABULARY_CATALOG_PATH } from './vocabulary-hints.js'
+import { createVocabularyCatalogReader, VOCABULARY_STORAGE_PATH } from './vocabulary-catalog-storage.js'
 
 beforeAll(() => {
   global.TextEncoder = TextEncoder
@@ -21,6 +23,14 @@ const catalog = () => ({ version: 1, meanings: {}, groups: { 'hints-old': {
   hintOverrides: { hi: ['जल्दी उठना'], th: ['ตื่นแต่เช้า'] },
 } }, attribution: { source: 'Retain this metadata' } })
 const index = (vocab, data, language = 'hi') => createVocabularyHintIndex(createVocabularyMatcher(vocab).rows, 'sv', data, language)
+
+async function runCommit(commit, vocabulary, data, headSha = 'head') {
+  const files = new Map([['vocabulary.txt', vocabulary], [VOCABULARY_CATALOG_PATH, JSON.stringify(data)]])
+  const read = jest.fn(async path => files.get(path) ?? null)
+  const plan = await commit.prepareFiles({ headSha, read })
+  for (const file of plan) files.set(file.path, await file.getContent(files.get(file.path) ?? null))
+  return { ...commit.result(), files }
+}
 
 function migrate() {
   const previous = parseVocabularyFile(text())
@@ -159,27 +169,29 @@ test('legacy remote text can be adopted atomically with the existing curated pac
   spliceVocabularyEntries(local, 'Everyday Life', 0, 1, [changed])
   const data = catalog()
   const commit = vocabularyCommitFiles({ path: 'vocabulary.txt', baselineText: vocabularyToText(baseline), local, language: 'sv', catalog: data, catalogBaseline: data })
-  const nextText = await commit.files[0].getContent(raw)
-  const nextCatalog = JSON.parse(await commit.files[1].getContent(JSON.stringify(data)))
+  const { text: nextText, catalog: nextCatalog, files } = await runCommit(commit, raw, data)
   const id = vocabularyEntryId(baseline, 'Everyday Life', original)
   expect(vocabularyEntryId(parseVocabularyFile(nextText), 'Everyday Life', changed)).toBe(id)
   expect(nextCatalog.groups['hints-old'].entryId).toBe(id)
   expect(nextCatalog.groups['hints-old'].reviewRequired).toBe(true)
   expect(nextCatalog.attribution).toEqual(data.attribution)
+  expect(files.has(VOCABULARY_STORAGE_PATH)).toBe(true)
+  expect(files.get(VOCABULARY_CATALOG_PATH)).toBe(JSON.stringify(data))
 })
 
 test('transaction retries use fresh remote vocabulary and retain unrelated catalog edits', async () => {
   const { data } = migrate()
   const commit = vocabularyCommitFiles({ path: 'vocabulary.txt', baselineText: text(), local: parseVocabularyFile(text()), language: 'sv', catalog: data, catalogBaseline: data })
-  await commit.files[0].getContent(text())
-  await commit.files[1].getContent(JSON.stringify(data))
+  await runCommit(commit, text(), data, 'first')
   const remoteText = text(original, 'Moved')
   const remote = { ...data, sharedHints: { hi: { cat: ['बिल्ली'] } } }
-  await commit.files[0].getContent(remoteText)
-  await commit.files[1].getContent(JSON.stringify(remote))
-  expect(commit.result().catalog.sharedHints).toEqual(remote.sharedHints)
-  expect(commit.result().catalog.groups['hints-old'].category).toBe('Moved')
-  expect(commit.result().text).toContain('#Moved')
+  const result = await runCommit(commit, remoteText, remote, 'second')
+  const reader = createVocabularyCatalogReader({ read: async path => result.files.get('db/language/shared/' + path) ?? null,
+    target: 'sv', vocabulary: () => parseVocabularyFile(result.text) })
+  await reader.loadLanguage('hi')
+  expect((await reader.catalog()).sharedHints).toEqual(remote.sharedHints)
+  expect(result.catalog.groups['hints-old'].category).toBe('Moved')
+  expect(result.text).toContain('#Moved')
 })
 
 test('migration updates every legacy group on a row and refuses ambiguous matches', () => {
@@ -212,9 +224,7 @@ test('a catalog-only edit cannot bypass a concurrent vocabulary edit', async () 
   const { data } = migrate()
   const commit = vocabularyCommitFiles({ path: 'vocabulary.txt', baselineText: text(), local: parseVocabularyFile(text()), language: 'sv', catalog: data, catalogBaseline: data,
     patch: { groups: { 'hints-old': { ...data.groups['hints-old'], hintOverrides: { hi: ['Updated hint'] } } } } })
-  await commit.files[0].getContent(text(changed))
-  // An old editor's explicit patch must not overwrite the newer row snapshot.
-  await expect(commit.files[1].getContent(JSON.stringify(data))).rejects.toThrow(/vocabulary/)
+  await expect(runCommit(commit, text(changed), data)).rejects.toThrow(/vocabulary/)
 })
 
 test('first adoption preserves curated hints when the old seed has a spelling difference', () => {
@@ -235,22 +245,16 @@ test('shared-pack-only rows also get a stable snapshot for later translation rev
   expect(changed['entry-one'].reviewRequired).toBe(true)
 })
 
-test('catalog-first parallel reads share one plan and assign the same IDs on every retry', async () => {
+test('dynamic plans assign matching vocabulary and hint IDs on every retry', async () => {
   const { data } = migrate()
   const commit = vocabularyCommitFiles({ path: 'vocabulary.txt', baselineText: text(), local: parseVocabularyFile(text()), language: 'sv', catalog: data, catalogBaseline: data })
   for (const headSha of ['one', 'two']) {
     const remote = text(original, headSha) + '\n(new entry)|nytt ord|'
-    const read = jest.fn(async () => remote)
-    const snapshot = { headSha, read }
-    const [catalogText, vocabularyText] = await Promise.all([
-      commit.files[1].getContent(JSON.stringify(data), snapshot),
-      commit.files[0].getContent(remote, snapshot),
-    ])
-    const next = parseVocabularyFile(vocabularyText)
+    const result = await runCommit(commit, remote, data, headSha)
+    const next = parseVocabularyFile(result.text)
     const newId = vocabularyEntryId(next, headSha, '(new entry)|nytt ord|')
-    expect(JSON.parse(catalogText).groups[newId].entryId).toBe(newId)
-    expect(JSON.parse(catalogText).groups['hints-old'].category).toBe(headSha)
-    expect(read).toHaveBeenCalledTimes(1)
+    expect(result.catalog.groups[newId].entryId).toBe(newId)
+    expect(result.catalog.groups['hints-old'].category).toBe(headSha)
   }
 })
 
@@ -268,4 +272,13 @@ test('a line-only display cannot bypass review when identical text has multiple 
   const result = createVocabularyHintIndex(createVocabularyMatcher(vocab).rows, 'sv', data, 'hi', new Map([['wake early', ['Unreviewed shared hint']]]))
   expect(result.hintsFor(line)).toEqual([])
   expect(result.search('Approved translation')).toHaveLength(1)
+})
+
+test('first adoption retains identical legacy rows with their distinct identities', async () => {
+  const raw = '#Everyday Life\n' + original + '\n' + original
+  const baseline = await adoptVocabularyEntryIds(parseVocabularyFile(raw), 'sv')
+  const merged = mergeVocabulary(vocabularyToText(baseline), baseline, raw)
+  expect(merged['Everyday Life']).toEqual([original, original])
+  expect(vocabularyEntries(merged).filter(entry => entry.id).map(entry => entry.id)).toEqual(vocabularyEntries(baseline).filter(entry => entry.id).map(entry => entry.id))
+  expect(() => mergeVocabulary(vocabularyToText(baseline), baseline, '#Everyday Life\n' + original)).toThrow(/ambiguously/)
 })

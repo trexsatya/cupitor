@@ -96,13 +96,21 @@ export function mergeIdentifiedVocabulary(base, local, remote) {
   const oldByText = new Map()
   for (const entry of baseRows) {
     const key = rowKey(entry)
-    oldByText.set(key, oldByText.has(key) ? null : entry)
+    if (!oldByText.has(key)) oldByText.set(key, [])
+    oldByText.get(key).push(entry)
   }
   const index = vocab => {
     assertUniqueVocabularyEntryIds(vocab)
-    return new Map(vocabularyEntries(vocab).filter(e => e.category !== '__empty__').map(entry => {
-      const id = entry.id || oldByText.get(rowKey(entry))?.id
-      return [id || 'text:' + rowKey(entry), { ...entry, id }]
+    const rows = vocabularyEntries(vocab).filter(e => e.category !== '__empty__')
+    const counts = new Map()
+    for (const entry of rows) counts.set(rowKey(entry), (counts.get(rowKey(entry)) || 0) + 1)
+    return new Map(rows.map(entry => {
+      const previous = oldByText.get(rowKey(entry)) || []
+      if (!entry.id && previous.length > 1 && previous.some(row => row.id) && previous.length !== counts.get(rowKey(entry))) {
+        throw new Error('Duplicate legacy vocabulary rows changed ambiguously. Reload before saving.')
+      }
+      const id = entry.id || previous[entry.occurrence]?.id
+      return [id || 'text:' + JSON.stringify([entry.category, entry.line, entry.occurrence]), { ...entry, id }]
     }))
   }
   const b = index(base), l = index(local), r = index(remote)

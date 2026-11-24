@@ -26,6 +26,7 @@ async function serveFixtures(route) {
     return route.fulfill({ body: fs.readFileSync(file), contentType: types[path.extname(file)] || 'application/octet-stream' })
   }
   const file = decodeURIComponent(url.pathname)
+  if (file.endsWith('/vocabulary-catalog/index.json')) return route.fulfill({status:404, body:''})
   let body = '{}'
   let contentType = 'application/json'
   if (file.endsWith('/srts/index.json')) body = JSON.stringify(index)

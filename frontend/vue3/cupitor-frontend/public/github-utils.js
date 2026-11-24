@@ -323,9 +323,10 @@
    * @param {string} options.branch
    * @param {string} options.commitMessage
    * @param {Array<{path: string, getContent: (current: string|null, snapshot: {headSha: string, read: (path: string) => Promise<string|null>}) => Promise<string>|string}>} options.files
+   * @param {Function} [options.prepareFiles] Build a dynamic file plan from the pinned snapshot on every retry.
    * @param {number} [options.maxAttempts]
    */
-  async function commitMultipleFiles({ owner, repo, branch, commitMessage, files, maxAttempts = 5 }) {
+  async function commitMultipleFiles({ owner, repo, branch, commitMessage, files, prepareFiles, maxAttempts = 5 }) {
     if (!owner || !repo || !branch || !commitMessage || !Array.isArray(files) || !files.length) {
       throw new Error("commitMultipleFiles: missing required options");
     }
@@ -346,7 +347,11 @@
             .catch(e => { if (isNotFound(e)) return null; throw e; }));
           return reads.get(path);
         };
-        const prepared = subtitleAdapter ? await subtitleAdapter.prepare({ files, read }) : { files };
+        const plannedFiles = prepareFiles ? await prepareFiles({ headSha,
+          read: async path => (await read(path))?.content ?? null,
+        }) : files;
+        if (!Array.isArray(plannedFiles) || !plannedFiles.length) throw new Error('No files in the GitHub write plan.');
+        const prepared = subtitleAdapter ? await subtitleAdapter.prepare({ files: plannedFiles, read }) : { files: plannedFiles };
 
         // 2. For each file: read current content (in parallel batches),
         //    run the transform, then create a blob (also in parallel).

@@ -223,3 +223,21 @@ test('dependent transforms read the same pinned commit even when their reads fin
   expect(global.fetch.mock.calls.filter(([url]) => url.includes('/contents/a.txt'))).toHaveLength(1)
   expect(global.fetch.mock.calls.filter(([url]) => url.includes('/contents/')).every(([url]) => new URL(url).searchParams.get('ref') === 'H')).toBe(true)
 })
+
+test('dynamic vocabulary plans discover chunk writes from the pinned commit before transforms run', async () => {
+  const calls = fakeGitHub({
+    [`GET ${R}/git/ref/heads/gh-pages`]: reply(200, { object: { sha: 'H' } }),
+    [`GET ${R}/git/commits/H`]: reply(200, { tree: { sha: 'T' } }),
+    [`GET ${R}/contents/index.json`]: reply(200, { content: b64('index'), sha: 'I' }),
+  })
+  const prepareFiles = jest.fn(async snapshot => {
+    expect(snapshot.headSha).toBe('H')
+    expect(await snapshot.read('index.json')).toBe('index')
+    return [{ path: 'new-chunk.json', getContent: () => null }]
+  })
+  await window.GitHubUtils.commitMultipleFiles({ owner: 'o', repo: 'r', branch: 'gh-pages', commitMessage: 'vocab: split',
+    files: [{ path: 'placeholder', getContent: () => { throw new Error('unprepared') } }], prepareFiles, maxAttempts: 1 })
+  expect(prepareFiles).toHaveBeenCalledTimes(1)
+  expect(calls.some(call => call.includes('/contents/new-chunk.json'))).toBe(true)
+  expect(calls.some(call => call.includes('/contents/placeholder'))).toBe(false)
+})

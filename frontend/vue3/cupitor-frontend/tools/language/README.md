@@ -533,43 +533,65 @@ each key means).
   is left pending for the next run.
 - Tests: `npx jest "(public/language|tools/language)/.*\.test\.js$"`.
 
-## Vocabulary entry identity and translated hints
+## Vocabulary entry identity and split hint storage
 
-The app now saves an invisible identity marker with each row:
+The app saves an invisible identity marker with each row:
 
 ```text
 #Everyday Life
 (wake early)|uppe med tuppen|\t[entry:entry-0123456789abcdef]
 ```
 
-Here `\t` represents an actual tab. `parseVocabularyFile` removes the marker
-from display/search text and retains it as metadata; `vocabularyToText` restores
-it. CLI vocabulary readers use the same parser. Keep the marker when moving or
-correcting a row by hand. Omit it when adding a new entry; copying an existing
-marker to a second row is rejected.
+Here `\t` represents an actual tab. The shared vocabulary parser removes the
+marker from visible/searchable text; serialization restores it. Keep the marker
+when moving or correcting a row by hand. Omit it on a new row. Duplicate IDs
+are rejected. Pending edits retain identities and the original merge baseline.
 
-The first save in the updated app adopts legacy rows and binds existing catalog
-groups to `entryId`, without regenerating any translation. Existing group keys,
-meanings, language overrides and attribution remain. Shared-pack rows also get
-a catalog snapshot, so later edits can be checked. Migration happens in the same
-Git commit as the vocabulary save; there is no separate live data migration.
+On the first vocabulary or hint save, the app commits `vocabulary.txt` and a
+version 2 catalog in the same Git commit:
 
-Both the vocabulary dialog and hint editor save vocabulary and the shared
-catalog together. Every retry reads the same commit for both files. Unrelated
-remote changes are retained; competing edits to the same identified entry stop
-the save. Pending edits keep their identities and original baseline across a
-reload. An old text-only client cannot maintain this metadata; refresh clients
-before their next vocabulary edit after deploying this change.
+- `db/language/shared/vocabulary-catalog/index.json`: small index of stream roots.
+- `metadata/<study-language>/<hash>.json`: compact entry revisions, group/form
+  links, review flags and deletion tombstones. Bound rows do not duplicate
+  category names or vocabulary text; shared-only rows need no empty group object.
+- `hints/<study-language>/<hint-language>/<hash>.json`: entry-specific hints.
+- `meaning-definitions/<hash>.json`: shared meaning labels and metadata.
+- `meaning-hints/<hint-language>/<hash>.json`: meaning translations and examples.
+- `shared-hints/<hint-language>/<hash>.json`: edits to shared English cue hints.
 
-Moving categories, reordering forms and changing capitalization/spacing retain
-reviewed hints. Changing cues or forms retains the translations but marks them
-for review, since software cannot distinguish a spelling correction from a new
-meaning. Pending translations are hidden from display and native-language search
-until approved in **Edit vocabulary hints**. Approval applies only to the chosen
-hint language. It does not claim to retranslate the other packs automatically.
+All stream paths are under `vocabulary-catalog/`. Leaves and tree branch nodes
+are limited to 65,536 UTF-8 bytes. Immutable content hashes allow an older index
+to finish loading during an update. Unchanged chunks are reused; an ordinary
+hint edit rewrites only its chunk/tree path and the index. The dynamic write
+plan is rebuilt from the same pinned Git commit on every retry. Record-level
+checks retain independent edits and reject conflicting changes.
 
-Deletion retains a tombstone for the old identity. Adding identical text later
-creates a different identity, so the deleted entry's overrides cannot reattach.
-A one-to-many replacement also creates new identities; the app does not guess
-which new row should inherit a translation. Legacy entries that match multiple
-rows remain unbound rather than being attached to an arbitrary row.
+Startup loads metadata for the current study language, English fallback, and
+selected hint language. More hint languages load on demand. The in-memory hint
+working set is bounded to three languages including English. The optional,
+shared IndexedDB cache has a 32 MiB budget and does not enter user-data backups.
+Existing per-language `.txt` dictionaries remain separately loaded on demand.
+
+The old `vocabulary-meanings.json` and generated Hindi files are retained for
+history, not rewritten. Once the split index exists, updated clients use its
+chunks and skip those legacy catalogs. Refresh older clients before editing;
+legacy client writes to the old catalog are not imported after migration.
+
+Word/cue changes retain translations but withhold them until reviewed in
+**Edit vocabulary hints**. Approval is specific to the selected hint language.
+Category moves, formatting and form reordering keep their hints. Deleted entry
+IDs retain tombstones, so identical newly added text cannot inherit old edits.
+
+### Audit or stage migration without changing source data
+
+```bash
+node tools/language/vocabulary-catalog.js --dataDir /path/to/site/db/language/swedish --lang sv
+node tools/language/vocabulary-catalog.js --dataDir /path/to/site/db/language/swedish --lang sv --outDir /tmp/vocabulary-split-review
+```
+
+The audit verifies vocabulary row counts, every displayed hint and all known
+alias lookups, including matched forms and meanings. An optional staging
+folder receives the new `shared/vocabulary-catalog/` and `vocabulary/vocabulary.txt`;
+the source files are never overwritten. Publish the staged vocabulary and its
+index/chunks together in one data-repository commit, after deploying the updated
+reader. This command refuses sources that already have a split index.

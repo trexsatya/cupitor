@@ -228,12 +228,12 @@ export function reviseVocabularyGroup(group, previousLine, { category, line }) {
 
 // A text change cannot be classified reliably as a spelling correction or a
 // new meaning. Keep the translation, but require review before using it again.
+export function vocabularyContentSignature(line) {
+  const { hints, forms } = vocabularyLineParts(line)
+  return JSON.stringify([hints.map(h => normalizeHint(h, 'en')).sort(), forms.map(formKey).sort()])
+}
 export function vocabularyHintContentChanged(before, after) {
-  const signature = line => {
-    const { hints, forms } = vocabularyLineParts(line)
-    return JSON.stringify([hints.map(h => normalizeHint(h, 'en')).sort(), forms.map(formKey).sort()])
-  }
-  return signature(before) !== signature(after)
+  return vocabularyContentSignature(before) !== vocabularyContentSignature(after)
 }
 
 export function vocabularyGroupLinks(rows, language, catalog) {
@@ -329,7 +329,8 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
   for (const [id, group, row] of vocabularyGroupLinks(rows, target, catalog)) {
     const previous = row && byRow.get(row.index)
     const preferred = !previous || (!!group.entryId !== !!previous.entryId
-      ? !!group.entryId : group.hintOverrides || !previous.hintOverrides)
+      ? !!group.entryId : !!group.storagePlaceholder !== !!previous.storagePlaceholder
+        ? !group.storagePlaceholder : group.hintOverrides || !previous.hintOverrides)
     if (row && preferred) {
       const current = group.entryId ? reviseVocabularyGroup(group, group.line, row) : group
       byRow.set(row.index, { id, ...current, row })
