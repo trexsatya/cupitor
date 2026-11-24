@@ -398,6 +398,7 @@ export function createVocabularyHintIndex(rows, target, catalog, source, transla
   function hintsFor(line, index) {
     if (source === 'en') return []
     const groups = groupsByLine.get(line)
+    if (indexedRows.get(index) !== line && groups?.some(group => !usable(group))) return []
     const candidate = indexedRows.get(index) === line ? byRow.get(index) : groups?.length === 1 ? groups[0] : undefined
     if (candidate && !usable(candidate)) return []
     const group = candidate

@@ -3854,7 +3854,7 @@ async function _editVocabularyMatch(match) {
         patch.sharedHints = { [lookup]: Object.fromEntries(sharedChanges.map(([cue, aliases]) => [normalizeHint(cue, 'en'), aliases])) }
       }
       if (english ? !!group : nextHints !== undefined) {
-        const id = group?.id || await vocabularyHintGroupId(language, row)
+        const id = group?.id || row.entryId || await vocabularyHintGroupId(language, row)
         const current = group || { language, category, line, forms: [], entryId: row.entryId }
         const updated = reviseVocabularyGroup({ ...current, entryId: row.entryId }, row.line, { category, line })
         if (!english) {

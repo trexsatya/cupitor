@@ -259,3 +259,13 @@ test('a read-only fork with the same ID cannot make the own entry ambiguous', ()
   const layers = mergeVocabularyLayers(text(), text(changed, 'Other'))
   expect(index(layers.vocab, data).search('जल्दी उठना')).toHaveLength(1)
 })
+
+test('a line-only display cannot bypass review when identical text has multiple identities', () => {
+  const { data } = migrate()
+  const line = '(wake early)|vakna tidigt|'
+  data.groups.other = { ...data.groups['hints-old'], entryId: 'entry-two', category: 'Other', line, hintOverrides: { hi: ['Approved translation'] } }
+  const vocab = parseVocabularyFile(text(line) + '\n' + text(line, 'Other', 'entry-two'))
+  const result = createVocabularyHintIndex(createVocabularyMatcher(vocab).rows, 'sv', data, 'hi', new Map([['wake early', ['Unreviewed shared hint']]]))
+  expect(result.hintsFor(line)).toEqual([])
+  expect(result.search('Approved translation')).toHaveLength(1)
+})
