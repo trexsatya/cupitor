@@ -187,6 +187,9 @@ describe("practice clip padding", () => {
   test("accepts signed decimal settings and defaults invalid values to zero", () => {
     expect(practicePaddingSeconds("-0.5")).toBe(-0.5);
     expect(practicePaddingSeconds("0.5")).toBe(0.5);
+    expect(practicePaddingSeconds("-0,5")).toBe(-0.5);
+    expect(practicePaddingSeconds("-")).toBe(0);
+    expect(practicePaddingSeconds("0x10")).toBe(0);
     expect(practicePaddingSeconds("Infinity")).toBe(0);
   });
 

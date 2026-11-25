@@ -47,6 +47,11 @@ const startOf = (l) => timeOf(l && l.start && l.start.ordinal);
 const endOf = (l) => timeOf(l && l.end && l.end.ordinal);
 
 export function practicePaddingSeconds(value) {
+  if (typeof value === 'string') {
+    value = value.trim();
+    if (!/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:e[+-]?\d+)?$/i.test(value)) return 0;
+    value = value.replace(',', '.');
+  }
   const seconds = Number(value);
   return Number.isFinite(seconds) ? seconds : 0;
 }
