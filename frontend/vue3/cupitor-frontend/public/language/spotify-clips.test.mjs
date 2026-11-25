@@ -1,3 +1,4 @@
+import {practicePaddingSeconds} from './practice-clip.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createRequire} from 'node:module';
@@ -235,18 +236,19 @@ test('the Spotify SDK loader handles one request, a ready callback, and load err
 // Exercise the real playlist loop as well as the provider. The app's UI and
 // speech helpers are injected so this test needs no network or saved profile.
 function appPlaylist(f, events, overrides = {}) {
+  f.win._appSettings ??= {};
   const runtimeRequire = createRequire(require.resolve(process.env.CUPITOR_JSDOM || 'jsdom'));
   const {parse} = runtimeRequire('@babel/parser');
   const $ = runtimeRequire('jquery')(f.win);
   const source = fs.readFileSync(new URL('./language.js', import.meta.url), 'utf8');
   const ast = parse(source, {sourceType: 'module'});
-  const code = ['_cardHasPlayableMedia', '_setSessionItemGap', 'playRecording'].map(name => {
+  const code = ['_practicePadding', '_cardHasPlayableMedia', '_setSessionItemGap', 'playRecording'].map(name => {
     const node = ast.program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === name);
     assert.ok(node, 'the real playlist handler must be present');
     return source.slice(node.start, node.end);
   }).join('\n');
   const noop = () => {};
-  const scope = {window: f.win, document: f.win.document, $: $, spotifyPlayer: f.player,
+  const scope = {practicePaddingSeconds, window: f.win, document: f.win.document, $: $, spotifyPlayer: f.player,
     spotifyClips: spotifyClipSegments, _isManualItem: item => !!item?.manual, _parseMediaUrl: parseMediaUrl,
     _playlistPlaybackPlan: item => manualPlaybackPlan(item, f.win._appSettings?.recManualPlaybackMode),
     _cardHasAudio: () => false, _isAudioMediaUrl: () => false, _cardHasVideoLink: () => false, _cardClipsInOrder: () => [], _recPlayReversed: () => false,
@@ -281,6 +283,23 @@ test('the actual Play All loop waits for each Spotify clip end before advancing'
     await done;
     assert.equal(f.win._playingRecording, false);
     assert.equal(events.some(event => event[0] === 'skip'), false);
+  } finally {f.close();}
+});
+
+test('Play All applies after-padding before advancing to the next Spotify item', async () => {
+  const f = fixture(), events = [];
+  try {
+    f.win._appSettings = {practiceClipPaddingAfter: 10};
+    const play = appPlaylist(f, events);
+    const done = play({queue: [card(), card([30], [32])], shuffle: false, loop: 'off'});
+    await f.flush(); f.emit('ready'); f.state(12.52); f.state(12.6, false);
+    f.state(14.16, false); await f.flush();
+    assert.deepEqual(events.filter(event => event[0] === 'item').map(event => event[1]), [0]);
+    f.state(24.15, false); assert.equal(f.player.media.ended, false);
+    f.state(24.16, false); await f.flush();
+    assert.deepEqual(events.filter(event => event[0] === 'item').map(event => event[1]), [0, 1]);
+    f.state(30); f.state(32, false); assert.equal(f.player.media.ended, false);
+    f.state(42, false); await done;
   } finally {f.close();}
 });
 
