@@ -209,6 +209,7 @@ export async function adoptLogin(me, { gh = defaultGh(), storage } = {}) {
   const cur = loadAccount(storage)
   const other = !cur.legacy && sameLogin(cur.login, login) ? cur.other : defaultOther(login)
   const next = { login, repo, branch, other }
+  if (!cur.legacy && sameLogin(cur.login, login) && cur.otherData) next.otherData = cur.otherData
   if (missingRepo) next.missingRepo = missingRepo
   const saved = saveAccount(next, storage) ? loadAccount(storage) : null
   if (!saved || saved.legacy) return { ...next, other: other ? normalizeUser(other) : null }
@@ -598,6 +599,7 @@ export async function runSetup({
   const cur = loadAccount(storage)
   const same = !cur.legacy && sameLogin(cur.login, login)
   const state = { login, repo: r.repo, branch: r.branch, other: same ? cur.other : defaultOther(login) }
+  if (same && cur.otherData) state.otherData = cur.otherData
   const kept = saveAccount(state, storage) ? loadAccount(storage) : null
   if (!kept || kept.legacy || kept.login !== login || kept.repo !== r.repo || kept.branch !== r.branch) {
     throw new SetupError('repo', 'not_saved',

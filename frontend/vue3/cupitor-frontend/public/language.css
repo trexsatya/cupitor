@@ -6054,6 +6054,9 @@ body.study-split-active.study-media-combined.practice-mode #practiceMode .practi
 #accountDialog .acct-remember { display: block; margin: 4px 0; font-weight: normal; }
 #accountDialog .acct-setup, #accountDialog .acct-token, #accountDialog .acct-other { border-top: 1px solid #eee; padding-top: 6px; margin-top: 6px; }
 #accountDialog .acct-other select { max-width: 100%; margin-left: 4px; }
+#accountDialog .acct-other-data { margin-top: 8px; }
+#accountDialog .acct-other-data legend { font-size: inherit; margin-bottom: 4px; }
+#accountDialog .acct-other-data label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 
 #keyboardShortcutsDialog, #keyboardShortcutsDialog table { color: #24292f; background: #fff; }
 .keyboard-shortcuts-table { width: 100%; border-collapse: collapse; }

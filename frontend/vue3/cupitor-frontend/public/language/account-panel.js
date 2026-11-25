@@ -11,7 +11,7 @@
 // loads.
 
 import {
-  OWNER, loadAccount, saveAccount, sameLogin, isOwnerLogin,
+  OWNER, OTHER_DATA_KEYS, loadAccount, saveAccount, sameLogin, isOwnerLogin, normalizeOtherData,
 } from './account-state.js'
 import { layerStats } from './data-source.js'
 import {
@@ -30,6 +30,8 @@ export const NO_TOKEN_MSG = 'Paste your GitHub token to save.'
 export const VISITOR_MSG = 'Sign in to save changes.'
 export const UNCHECKED_MSG = "Couldn't check your sign-in with GitHub. Saving may fail until it can be checked."
 export const SIGNED_OUT_MSG = 'You were signed out because GitHub no longer accepts your sign-in. Your unsaved edits stay on this device.'
+
+const OTHER_DATA_LABELS = { vocabulary: 'Vocabulary and hints', subtitles: 'Subtitle examples', playlists: 'Playlists and cards' }
 
 const STEP_LABELS = { repo: 'Create your data repo', listing: 'Ask to be listed' }
 const STEP_TEXT = {
@@ -215,6 +217,7 @@ export function accountPanelVM({
     message: message || null,
     notices: otherNoticesOf(state, null, notices),
     otherOptions,
+    otherData: normalizeOtherData(state.otherData),
     // A visitor already reads the owner's library and cannot add another.
     showOtherPicker: !visitor,
     setupSteps,
@@ -251,7 +254,7 @@ let ui = freshUi()
 function freshUi() {
   return {
     users: null, listing: null, setup: null, reconcile: null, message: null, busy: false, repoName: null, bootState: null, open: false,
-    hiddenBanners: [],
+    hiddenBanners: [], otherDraft: null,
   }
 }
 
@@ -415,9 +418,26 @@ export function renderAccountPanel() {
     $root.append($s)
   }
   if (vm.showOtherPicker) {
+    const savedLogin = vm.otherOptions.find(option => option.selected)?.value || ''
+    const draft = ui.otherDraft || { login: savedLogin, data: vm.otherData }
     const $sel = $('<select id="acctOther"></select>').prop('disabled', vm.busy)
-    vm.otherOptions.forEach(o => $sel.append($('<option></option>').val(o.value).text(o.label).prop('selected', o.selected)))
-    $root.append($('<div class="acct-other"></div>').append($('<label></label>').append('Also load data from ', $sel)))
+    vm.otherOptions.forEach(o => $sel.append($('<option></option>').val(o.value).text(o.label)))
+    $sel.val(vm.otherOptions.find(option => sameLogin(option.value, draft.login))?.value || '')
+    const $other = $('<div class="acct-other"></div>')
+      .append($('<label></label>').append('Also load data from ', $sel))
+    if (draft.login) {
+      const $choices = $('<fieldset class="acct-other-data"></fieldset>')
+        .append($('<legend></legend>').text('Show alongside your data'))
+      for (const key of OTHER_DATA_KEYS) {
+        const $check = $('<input type="checkbox">').val(key)
+          .prop({ checked: draft.data[key] !== false, disabled: vm.busy })
+        $choices.append($('<label></label>').append($check, OTHER_DATA_LABELS[key]))
+      }
+      $other.append($choices)
+    }
+    const changed = otherSelectionChanged(draft, savedLogin, vm.otherData)
+    $other.append($('<p></p>').append(btn('acctApplyOther', 'Apply library selection', vm.busy || !changed)))
+    $root.append($other)
   }
   if (vm.showSignOut) $root.append($('<p></p>').append(btn('acctSignOut', 'Sign out', vm.busy)))
   $d.empty().append($root)
@@ -541,14 +561,44 @@ async function doSignOut() {
   D.reload()
 }
 
-function onOtherChange() {
-  if (ui.busy || typeof $ !== 'function') return
-  const login = String($('#acctOther').val() || '')
+function otherSelectionChanged(draft, savedLogin, savedData) {
+  return !sameLogin(draft.login, savedLogin) || OTHER_DATA_KEYS.some(key => draft.data[key] !== savedData[key])
+}
+
+function onOtherChange(event) {
+  if (ui.busy) return
+  const state = D.loadAccount()
+  const draft = ui.otherDraft || { login: state.other?.login || '', data: normalizeOtherData(state.otherData) }
+  if (event.target.id === 'acctOther') {
+    draft.login = event.target.value
+  } else {
+    const key = event.target.value
+    if (!OTHER_DATA_KEYS.includes(key)) return
+    if (event.target.checked) delete draft.data[key]
+    else draft.data[key] = false
+  }
+  ui.otherDraft = draft
+  if (event.target.id === 'acctOther') {
+    renderAccountPanel()
+    $('#acctOther').trigger('focus')
+  } else {
+    const saved = normalizeOtherData(state.otherData)
+    const changed = otherSelectionChanged(draft, state.other?.login || '', saved)
+    $('#acctApplyOther').prop('disabled', !changed)
+  }
+}
+
+function applyOtherSelection() {
+  if (ui.busy || !ui.otherDraft) return
+  const { login, data } = ui.otherDraft
   const state = D.loadAccount()
   const pick = pickOther(currentUsers(), state, login)
-  if (pick === undefined) { renderAccountPanel(); return }
-  const { legacy, ...rest } = state // eslint-disable-line no-unused-vars
-  if (!D.saveAccount({ ...rest, other: pick })) {
+  if (pick === undefined) { ui.otherDraft = null; renderAccountPanel(); return }
+  const { legacy, otherData, ...rest } = state // eslint-disable-line no-unused-vars
+  const next = { ...rest, other: pick }
+  const selection = normalizeOtherData(data)
+  if (Object.keys(selection).length) next.otherData = selection
+  if (!D.saveAccount(next)) {
     setBusy(false, "Couldn't save your choice on this device. Allow site data for this page and try again.")
     return
   }
@@ -585,6 +635,7 @@ export function openAccountDialog(message = null) {
     },
     close: () => {
       ui.open = false
+      ui.otherDraft = null
       if (!ui.busy) ui.message = null
       // The account changed while the panel was open (e.g. setup recorded
       // the repo and then failed at the listing step): boot again.
@@ -627,7 +678,8 @@ export function initAccountPanel() {
     .on('click.acctPanel', '#acctTokenSignIn', doTokenSignIn)
     .on('keydown.acctPanel', '#acctToken', e => { if (e.key === 'Enter') doTokenSignIn() })
     .on('click.acctPanel', '#acctSignOut', doSignOut)
-    .on('change.acctPanel', '#acctOther', onOtherChange)
+    .on('change.acctPanel', '#acctOther, .acct-other-data input', onOtherChange)
+    .on('click.acctPanel', '#acctApplyOther', applyOtherSelection)
   renderAccountPanel()
   // The other-layer notices are known once the subtitles have loaded.
   const ready = window._subtitlesReadyPromise

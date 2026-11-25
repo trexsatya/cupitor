@@ -186,6 +186,21 @@ describe('readLayers', () => {
     expect(calls).toHaveLength(2) // a missing file costs one request, no retries
     expect(layerStats().other).toEqual({ hits: 0, misses: 1, errors: 0 })
   })
+  test('selectively skips other requests and keeps every own request', async () => {
+    configure({ ...alice, otherData: { playlists: false, subtitles: false } })
+    const fetchFn = jest.fn(async url => res(200, url))
+    const read = async path => (await readLayers(path, { lang: 'swedish', fetchFn })).map(layer => layer.src)
+    expect(await read('vocabulary.txt')).toEqual(['self', 'other'])
+    expect(await read('vocabulary-hints/hi.txt')).toEqual(['self', 'other'])
+    expect(await read('srts/index.json')).toEqual(['self'])
+    expect(await read('srts/categorisation.txt')).toEqual(['self'])
+    expect(await read('recordings.json')).toEqual(['self'])
+    expect(fetchFn).toHaveBeenCalledTimes(7)
+    configure({ ...alice, otherData: { vocabulary: false } })
+    expect(await read('vocabulary-meanings.json')).toEqual(['self'])
+    expect(await read('vocabulary-hints-hi.json')).toEqual(['self'])
+    expect(await read('srts/index.json')).toEqual(['self', 'other'])
+  })
   test('an other-layer failure is skipped with a notice; a self failure throws', async () => {
     configure(alice)
     const notices = []

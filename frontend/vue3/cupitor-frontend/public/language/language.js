@@ -190,7 +190,7 @@ import {
   captureSourceContext as _dsCaptureSourceContext,
   writeTarget as _dsWriteTarget,
   hasSelf as _dsHasSelf,
-  hasOther as _dsHasOther,
+  hasOtherData as _dsHasOtherData,
   langFromLocation as _dsLangFromLocation,
   readLayers as _dsReadLayers,
   mergeIndexLayers as _dsMergeIndexLayers,
@@ -3830,7 +3830,7 @@ async function _loadVocabularyCatalog() {
     context.assertCurrent()
     return layers.flatMap(layer => parseVocabularyHintLanguages(layer.text || ''))
   }).catch(error => { console.warn('Shared vocabulary languages unavailable:', error); return [] })
-  await Promise.all(['self', 'other'].filter(which => which === 'self' ? _dsHasSelf() : _dsHasOther()).map(async which => {
+  await Promise.all(['self', 'other'].filter(which => which === 'self' ? _dsHasSelf() : _dsHasOtherData('vocabulary')).map(async which => {
     try {
       const read = _vocabularyStorageRead(which, context)
       const reader = createVocabularyCatalogReader({ read, target: getLangFromUrl().code, vocabulary: () => _vocabularySourceRows(which) })
@@ -4243,7 +4243,7 @@ window.marginEndSubtitle = 1
 window.starredLines = []
 window.allSubtitles = {}
 const _subtitleSearchContext = _dsCaptureSourceContext()
-const _subtitleSearchScope = JSON.stringify([_userData.scope, _dsHasOther() ? _dsSourceIdentity('other') : null])
+const _subtitleSearchScope = JSON.stringify([_userData.scope, _dsHasOtherData('subtitles') ? _dsSourceIdentity('other') : null])
 const _subtitleSearch = createSubtitleSearchClient({
   scope: _subtitleSearchScope,
   storage: new URLSearchParams(window.location.search).get('subtitleSearch') === 'indexeddb' ? 'indexeddb' : 'memory',
@@ -13744,7 +13744,7 @@ function _adoptRecordings(persistable) {
 // shapes their entries so a malformed file cannot break the dialog, and
 // drops their device-only keys (notification list, app playlist id).
 async function _loadOtherRecordings() {
-  if (!_dsHasOther()) return
+  if (!_dsHasOtherData('playlists')) return
   let coll = null
   try {
     coll = await _readRecordingsCollection('other')

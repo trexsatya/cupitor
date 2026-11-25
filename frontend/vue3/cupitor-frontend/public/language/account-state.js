@@ -4,11 +4,12 @@
 // Pure: storage is injected (defaults to localStorage) so jest can drive it.
 //
 // Record shape in localStorage `cupitor:account`:
-//   { login, repo, branch, other }
+//   { login, repo, branch, other, otherData }
 //   login  — GitHub login, null for a guest
 //   repo / branch — the user's data repo; both null until setup created it
 //   other  — a users.json entry { login, name, repo, branch } to layer on
 //            read-only, or null for none. Absent → the default for the login.
+//   otherData — optional false flags for hidden categories of that library.
 //   missingRepo — optional { repo, branch }: the user's recorded data repo
 //            that had no cupitor.json at the last sign-in (deleted, renamed
 //            or made private). Only while repo is null; the user has no
@@ -17,6 +18,13 @@
 // explicit record with a null login, written by saveGuest.
 
 export const ACCOUNT_KEY = 'cupitor:account'
+export const OTHER_DATA_KEYS = Object.freeze(['vocabulary', 'subtitles', 'playlists'])
+
+// Store only explicit exclusions so existing accounts keep all shared data.
+export function normalizeOtherData(value) {
+  return Object.fromEntries(OTHER_DATA_KEYS.filter(key => value?.[key] === false).map(key => [key, false]))
+}
+
 export const USERS_CACHE_KEY = 'cupitor:users'
 
 export const OWNER = Object.freeze({ login: 'trexsatya', name: 'Satya', repo: 'trexsatya.github.io', branch: 'gh-pages' })
@@ -152,6 +160,8 @@ export function loadAccount(storage) {
   else other = normalizeUser(v.other) || defaultOther(login)
   if (other && sameLogin(other.login, login)) other = null
   const state = { login, repo, branch, other }
+  const otherData = normalizeOtherData(v.otherData)
+  if (Object.keys(otherData).length) state.otherData = otherData
   const missing = missingRepoOf(state, v.missingRepo)
   if (missing) state.missingRepo = missing
   return state
@@ -173,6 +183,8 @@ export function saveAccount(state, storage) {
   if (!s || !state) return false
   const { login, repo, branch, other } = state
   const rec = { login, repo, branch, other: other ? normalizeUser(other) : null }
+  const otherData = normalizeOtherData(state.otherData)
+  if (Object.keys(otherData).length) rec.otherData = otherData
   const missing = missingRepoOf(rec, state.missingRepo)
   if (missing) rec.missingRepo = missing
   try {
