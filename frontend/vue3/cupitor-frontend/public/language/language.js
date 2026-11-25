@@ -22123,6 +22123,7 @@ async function playRecording(opts) {
         _setRecPlayPhase('clip')
         try {
           await spotifyPlayer.playCard(it, {
+            padding: _practicePadding(),
             isCurrent: () => sessionPlaying() && window._recPlayItemToken === itemToken &&
               !window._practiceActive && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex),
             isPaused: () => !!window._recPlayPaused,
