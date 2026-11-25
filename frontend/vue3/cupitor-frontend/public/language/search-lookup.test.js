@@ -86,6 +86,7 @@ describe('native filterData handoff', () => {
     const calls = []
     const $ = name => {
       if (!fields[name]) fields[name] = {
+        hasClass() { return false },
         value: null, val(v) { if (!arguments.length) return this.value; this.value = v; return this },
         trigger(event) { calls.push([name, event]); return this },
         show() { return this }
@@ -119,6 +120,22 @@ describe('native filterData handoff', () => {
     expect(ui.win.unprocessedSearchText).toBeNull()
     expect(ui.calls).toContainEqual(['#searchedWords', 'change.select2'])
     expect(ui.calls).toContainEqual(['#searchText', 'change'])
+  })
+
+  test('native lookup closes Playlists before minimizing study views', () => {
+    const ui = mockUi()
+    ui.win.__cupitorSearchReady = true
+    ui.win._practiceActive = true
+    const playlists = ui.$('#recordingReviewDialog')
+    playlists.hasClass = name => name === 'ui-dialog-content'
+    let open = true
+    playlists.dialog = jest.fn(action => { if (action === 'close') open = false })
+    ui.win.minimizePracticeMode = jest.fn(() => { expect(open).toBe(false) })
+    attachRealHandler(ui)
+    ui.win.dispatch('filterData', { text: 'gäll' })
+    expect(playlists.dialog).toHaveBeenCalledWith('close')
+    expect(ui.win.minimizePracticeMode).toHaveBeenCalledTimes(1)
+    expect(ui.fields['#searchText'].value).toBe('gäll')
   })
 
   test('a native lookup minimizes each open study view before showing search, retaining parked sessions', () => {

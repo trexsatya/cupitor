@@ -572,6 +572,10 @@ function _applyIncomingLookup(rawText) {
   const term = String(rawText == null ? '' : rawText).trim()
   if (!term) return
   window.__cupitorLookupWantsSearch = true
+  // Playlists may still be open behind a study view or after filing a capture.
+  // Close it before minimizing study so it cannot reappear over the lookup.
+  const $playlists = $('#recordingReviewDialog')
+  if ($playlists.hasClass('ui-dialog-content')) $playlists.dialog('close')
   // A native word lookup hands the foreground to Search, retaining the study
   // sessions and their positions behind their restore pills.
   if (window._playingRecording && !window._recPlayMinimized) window.minimizePlayingRecording()

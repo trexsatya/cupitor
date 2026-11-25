@@ -148,8 +148,15 @@ async function check(browser, mobile) {
     assert.equal(await page.locator('#settingsPanel').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true)
     await close('settingsPanel')
     await page.setViewportSize({ width: mobile ? 390 : 1280, height: 900 })
+    // Native word lookups foreground Search even when Playlists was left open.
+    await page.evaluate(() => window.openRecordingReviewDialog())
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('filterData', { detail: { text: 'hagla' } })))
+    assert.equal(await page.evaluate(() => $('#recordingReviewDialog').dialog('isOpen')), false,
+      'a native lookup closes Playlists so it cannot cover Search')
+    assert.equal(await page.locator('#recordingReviewDialog').isVisible(), false)
     // Space must never start a hidden previous recording on a silent card.
     await page.evaluate(wav => {
+      window.openRecordingReviewDialog()
       window.AudioBridge = { postMessage(raw) {
         const r = JSON.parse(raw)
         queueMicrotask(() => window.__cupAudio({ rid: r.rid, result: r.op === 'load' ? wav : null }))
@@ -178,8 +185,12 @@ async function check(browser, mobile) {
     assert.equal(await page.locator('#searchText').inputValue(), 'hagla')
     assert.equal(await page.locator('#searchText').isVisible(), true)
     assert.equal(await page.evaluate(() => window._practiceActive && window._practiceIdx === 1), true)
+    assert.equal(await page.evaluate(() => $('#recordingReviewDialog').dialog('isOpen')), false,
+      'minimizing Practice for a lookup cannot uncover Playlists')
+    assert.equal(await page.locator('#recordingReviewDialog').isVisible(), false)
     await page.evaluate(() => window.closePracticeMode())
     await page.evaluate(() => {
+      window.openRecordingReviewDialog()
       window.__playerTask = window.playRecording({ queue: [
         { manual: true, id: 'voice-deck', source: 'Player card', sourceAudioUrl: 'file:///voice.wav' }
       ], temporary: true, shuffle: false })
@@ -190,6 +201,13 @@ async function check(browser, mobile) {
     assert.equal(await page.evaluate(() => window._playingRecording && window._recPlayPaused && window._recPlayIndex === 0), true)
     assert.equal(await page.locator('#searchText').inputValue(), 'sova')
     assert.equal(await page.locator('#searchText').isVisible(), true)
+    assert.equal(await page.evaluate(() => $('#recordingReviewDialog').dialog('isOpen')), false,
+      'minimizing Player for a lookup cannot uncover Playlists')
+    assert.equal(await page.locator('#recordingReviewDialog').isVisible(), false)
+    // The user can still open Playlists explicitly after a lookup.
+    await page.evaluate(() => window.openRecordingReviewDialog())
+    assert.equal(await page.locator('#recordingReviewDialog').isVisible(), true)
+    await close('recordingReviewDialog')
     await page.evaluate(() => { window.stopPlayingRecording(); return window.__playerTask })
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'}: insertion, destination memory, settings, silent-card Space and native lookup passed`)
