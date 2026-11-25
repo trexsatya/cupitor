@@ -234,6 +234,10 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
       if (!state.isPaused) pauseController();
       paint(session); return;
     }
+    // Pause can report the previous clip position synchronously. For adjacent
+    // clips that position can be inside the next seek's acceptance window.
+    if (session.pendingSeek && !session.initializing && !session.seekAttempts) return;
+
     const wasPaused = session.paused, wasBuffering = session.buffering;
     const reportedPaused = !!state.isPaused;
     session.duration = Number(state.duration) / 1000;

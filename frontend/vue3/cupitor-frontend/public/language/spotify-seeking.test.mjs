@@ -50,8 +50,8 @@ function fixture() {
     now: () => clock, isForeground: () => foreground});
   const options = {isPaused: () => ownerPaused, onExternalPause: value => {ownerPaused = value;}};
   const emit = (name, data = {}) => listeners.get(name)?.({data});
-  const state = (position, isPaused = true, isBuffering = false) => emit('playback_update', {
-    playingURI: uri, position: position * 1000, duration: 2642000, isPaused, isBuffering});
+  const state = (position, isPaused = true, isBuffering = false, playingURI = uri) => emit('playback_update', {
+    playingURI, position: position * 1000, duration: 2642000, isPaused, isBuffering});
   const flush = async () => {for (let i = 0; i < 10; i++) await Promise.resolve();};
   const advance = ms => {
     const end = clock + ms;
@@ -297,6 +297,31 @@ test('fractional passages and the next card advance using whole-second seeks wit
     assert.ok(f.count('resume') > resumes);
     f.state(148.2, false); f.state(155.42, false);
     assert.equal(await next, true);
+  } finally {f.close();}
+});
+
+test('the coffee playlist boundary cannot acknowledge the next card before Seek', async () => {
+  const f = fixture();
+  const coffeeUrl = 'https://open.spotify.com/episode/6yW3SE0eYE6IEGc5AWTAVC';
+  const coffee = (starts, ends) => ({
+    manual: true, mediaUrl: coffeeUrl, captionUrl: coffeeUrl,
+    captionStarts: starts, captionEnds: ends,
+  });
+  const firstCard = coffee([29.32, 35.84], [35.68, 39.16]);
+  const secondCard = coffee([39.32, 45.72], [45.56, 53.16]);
+  const state = (position, paused = true) => f.state(position, paused, false, coffeeUrl);
+  try {
+    const first = f.player.playCard(firstCard, f.options); await f.flush(); f.ready();
+    state(29.32, false); state(39.16, false);
+    assert.equal(await first, true);
+
+    const second = f.player.playCard(secondCard, f.options);
+    f.onPause(() => state(39.16));
+    await f.flush();
+    assert.deepEqual(f.calls.slice(-3), [['pause'], ['seek', 39], ['resume']]);
+    state(39); state(39.32, false);
+    state(53.15, false); assert.equal(f.player.media.ended, false);
+    state(53.16, false); assert.equal(await second, true);
   } finally {f.close();}
 });
 
