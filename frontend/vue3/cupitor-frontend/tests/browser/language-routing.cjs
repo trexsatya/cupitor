@@ -49,12 +49,19 @@ async function checkMultilingualVocabulary(browser, mobile) {
   const viewport = mobile ? {width:390,height:844} : {width:1280,height:900}
   const page = await browser.newPage({viewport, isMobile:mobile, hasTouch:mobile})
   const errors = []
+  const published = new Map(), catalogRequests = []
+  let offlineCatalog = false
+  await page.exposeFunction('__publishHintWrites', writes => { for (const [path, text] of writes) published.set('/' + path, text) })
   const swedishVocabulary = '#Shapes, arrangements and conditions\n(opening, gap)|öppning|slits|hål|glugg|gluggar|springa|springor|\n' +
     '#Food, Drink, kitchen, Eating\n(drink)|dricka|dricker|drack|druckit|\n(sip)|smutta|smuttar|\n' +
     '#Objects\n(chair)|stol|stolar|\n#Phrases\n(greeting)|ha en bra dag|\n#Other verbs\n(sip)|sippa|\n'
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/*', route => {
     const pathname = new URL(route.request().url()).pathname
+    if (pathname.includes('/vocabulary-catalog/') || pathname.endsWith('/vocabulary-meanings.json') || pathname.endsWith('/vocabulary-hints-hi.json')) catalogRequests.push(pathname)
+    if (offlineCatalog && pathname.includes('/vocabulary-catalog/')) return route.abort('failed')
+    const savedFile = [...published].find(([path]) => pathname.endsWith(path))
+    if (savedFile) return route.fulfill({contentType: pathname.endsWith('.json') ? 'application/json' : 'text/plain', body: savedFile[1]})
     if (pathname.endsWith('/vocabulary-hints/hi.txt')) return route.fulfill({
       contentType:'text/plain', body:'drink = पीना | peena\nsip = घूँट लेना'
     })
@@ -243,10 +250,17 @@ async function checkMultilingualVocabulary(browser, mobile) {
       const original = window.GitHubUtils.commitMultipleFiles
       window.GitHubUtils.commitMultipleFiles = async options => {
         if (!options.commitMessage.startsWith('vocab:')) return original(options)
-        for (const file of options.files) {
-          const next = await file.getContent(file.path.endsWith('/vocabulary.txt') ? vocabulary : null)
-          if (next != null) window.__hintWrites.push([file.path, JSON.parse(next)])
+        const snapshot = {
+          headSha: 'hint-save-snapshot',
+          read: async path => path.endsWith('/vocabulary.txt') ? vocabulary : null,
         }
+        const files = options.prepareFiles ? await options.prepareFiles(snapshot) : options.files
+        // The write plan is fixed before parallel transforms run.
+        await Promise.all([...files].reverse().map(async file => {
+          const next = await file.getContent(await snapshot.read(file.path), snapshot)
+          if (next != null) window.__hintWrites.push([file.path, next])
+        }))
+        await window.__publishHintWrites(window.__hintWrites)
         return {committed:true}
       }
     }, swedishVocabulary)
@@ -255,12 +269,19 @@ async function checkMultilingualVocabulary(browser, mobile) {
     await editor.getByRole('button', {name:'Save changes'}).click()
     await editor.waitFor({state:'detached'})
     const writes = await page.evaluate(() => window.__hintWrites)
-    assert.equal(writes.length, 1)
-    assert.match(writes[0][0], /vocabulary-meanings\.json$/)
-    const [updated] = Object.values(writes[0][1].groups)
-    assert.equal(updated.line, '(sip)|smutta|smuttar|')
-    assert.deepEqual(updated.hintOverrides, {hi:['घूँट भरना', 'ghoont bharna']})
-    assert.deepEqual(writes[0][1].sharedHints, {hi:{sip:['चुस्की लेना', 'chuski lena']}})
+    assert(writes.length > 2, 'vocabulary, hint chunks and their index are saved together')
+    const vocabularyWrite = writes.find(([path]) => path.endsWith('/vocabulary.txt'))
+    const indexWrite = writes.find(([path]) => path.endsWith('/vocabulary-catalog/index.json'))
+    assert(vocabularyWrite && indexWrite)
+    assert(!writes.some(([path]) => path.endsWith('/vocabulary-meanings.json')), 'the monolithic catalog is not rewritten')
+    assert.match(vocabularyWrite[1], /\t\[entry:[a-z0-9-]+\]/)
+    const hintRecords = Object.assign({}, ...writes.filter(([path]) => path.includes('/hints/sv/hi/')).map(([, text]) => JSON.parse(text).records || {}))
+    const [id, hints] = Object.entries(hintRecords).find(([, aliases]) => aliases.includes('ghoont bharna'))
+    assert(vocabularyWrite[1].includes('(sip)|smutta|smuttar|\t[entry:' + id + ']'))
+    assert.deepEqual(hints, ['घूँट भरना', 'ghoont bharna'])
+    const sharedRecords = Object.assign({}, ...writes.filter(([path]) => path.includes('/shared-hints/hi/')).map(([, text]) => JSON.parse(text).records || {}))
+    assert.deepEqual(sharedRecords.sip, ['चुस्की लेना', 'chuski lena'])
+    assert(writes.filter(([path]) => path.includes('/vocabulary-catalog/') && !path.endsWith('/index.json')).every(([, text]) => Buffer.byteLength(text) <= 65536))
     await language.selectOption({label:'Hindi'})
     await search('ghoont bharna')
     await sip.waitFor()
@@ -268,6 +289,17 @@ async function checkMultilingualVocabulary(browser, mobile) {
     await search('chuski lena')
     await results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'sippa'}).waitFor()
     await sip.waitFor({state:'detached'})
+    await search('peena')
+    await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
+    catalogRequests.length = 0
+    await page.evaluate(async () => { await window.cupitorUserData.flush() })
+    offlineCatalog = true
+    await page.reload({waitUntil:'networkidle'})
+    await language.selectOption({label:'Hindi'})
+    await search('ghoont bharna')
+    await results.locator('[data-vocab-match-kind="hint"]').filter({hasText:'smuttar'}).waitFor()
+    assert(!catalogRequests.some(path => /vocabulary-meanings\.json|vocabulary-hints-hi\.json/.test(path)), 'split storage reloads from its cache without legacy catalogs')
+    offlineCatalog = false
     await search('peena')
     await results.locator('mark').filter({hasText:'dricka'}).first().waitFor()
     await openSearchOptions()

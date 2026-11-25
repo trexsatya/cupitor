@@ -75,7 +75,7 @@ describe('commitMultipleFiles', () => {
     })
     const getContent = jest.fn(() => null)   // skip the write; only the read matters here
     await run(getContent).catch(() => {})
-    expect(getContent).toHaveBeenCalledWith(big)
+    expect(getContent).toHaveBeenCalledWith(big, expect.objectContaining({ headSha: 'H', read: expect.any(Function) }))
   })
 })
 
@@ -203,4 +203,41 @@ describe('request', () => {
       window.removeEventListener('cupitorGithubUnauthorized', seen)
     })
   })
+})
+
+test('dependent transforms read the same pinned commit even when their reads finish first', async () => {
+  const reads = []
+  fakeGitHub({
+    [`GET ${R}/git/ref/heads/gh-pages`]: reply(200, { object: { sha: 'H' } }),
+    [`GET ${R}/git/commits/H`]: reply(200, { tree: { sha: 'T' } }),
+    [`GET ${R}/contents/a.txt`]: () => new Promise(resolve => setTimeout(() => resolve(reply(200, { content: b64('A'), sha: 'A' })), 5)),
+    [`GET ${R}/contents/b.txt`]: reply(200, { content: b64('B'), sha: 'B' }),
+  })
+  const transform = async (current, snapshot) => {
+    reads.push([current, snapshot.headSha, await snapshot.read('a.txt')])
+    return null
+  }
+  await window.GitHubUtils.commitMultipleFiles({ owner: 'o', repo: 'r', branch: 'gh-pages', commitMessage: 'm',
+    files: [{ path: 'a.txt', getContent: transform }, { path: 'b.txt', getContent: transform }], maxAttempts: 1 })
+  expect(reads.sort()).toEqual([['A', 'H', 'A'], ['B', 'H', 'A']])
+  expect(global.fetch.mock.calls.filter(([url]) => url.includes('/contents/a.txt'))).toHaveLength(1)
+  expect(global.fetch.mock.calls.filter(([url]) => url.includes('/contents/')).every(([url]) => new URL(url).searchParams.get('ref') === 'H')).toBe(true)
+})
+
+test('dynamic vocabulary plans discover chunk writes from the pinned commit before transforms run', async () => {
+  const calls = fakeGitHub({
+    [`GET ${R}/git/ref/heads/gh-pages`]: reply(200, { object: { sha: 'H' } }),
+    [`GET ${R}/git/commits/H`]: reply(200, { tree: { sha: 'T' } }),
+    [`GET ${R}/contents/index.json`]: reply(200, { content: b64('index'), sha: 'I' }),
+  })
+  const prepareFiles = jest.fn(async snapshot => {
+    expect(snapshot.headSha).toBe('H')
+    expect(await snapshot.read('index.json')).toBe('index')
+    return [{ path: 'new-chunk.json', getContent: () => null }]
+  })
+  await window.GitHubUtils.commitMultipleFiles({ owner: 'o', repo: 'r', branch: 'gh-pages', commitMessage: 'vocab: split',
+    files: [{ path: 'placeholder', getContent: () => { throw new Error('unprepared') } }], prepareFiles, maxAttempts: 1 })
+  expect(prepareFiles).toHaveBeenCalledTimes(1)
+  expect(calls.some(call => call.includes('/contents/new-chunk.json'))).toBe(true)
+  expect(calls.some(call => call.includes('/contents/placeholder'))).toBe(false)
 })

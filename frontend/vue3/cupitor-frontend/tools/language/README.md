@@ -532,3 +532,66 @@ each key means).
   (`filmotDelayMs` / `translateDelayMs`) and retry with backoff; on failure a unit
   is left pending for the next run.
 - Tests: `npx jest "(public/language|tools/language)/.*\.test\.js$"`.
+
+## Vocabulary entry identity and split hint storage
+
+The app saves an invisible identity marker with each row:
+
+```text
+#Everyday Life
+(wake early)|uppe med tuppen|\t[entry:entry-0123456789abcdef]
+```
+
+Here `\t` represents an actual tab. The shared vocabulary parser removes the
+marker from visible/searchable text; serialization restores it. Keep the marker
+when moving or correcting a row by hand. Omit it on a new row. Duplicate IDs
+are rejected. Pending edits retain identities and the original merge baseline.
+
+On the first vocabulary or hint save, the app commits `vocabulary.txt` and a
+version 2 catalog in the same Git commit:
+
+- `db/language/shared/vocabulary-catalog/index.json`: small index of stream roots.
+- `metadata/<study-language>/<hash>.json`: compact entry revisions, group/form
+  links, review flags and deletion tombstones. Bound rows do not duplicate
+  category names or vocabulary text; shared-only rows need no empty group object.
+- `hints/<study-language>/<hint-language>/<hash>.json`: entry-specific hints.
+- `meaning-definitions/<hash>.json`: shared meaning labels and metadata.
+- `meaning-hints/<hint-language>/<hash>.json`: meaning translations and examples.
+- `shared-hints/<hint-language>/<hash>.json`: edits to shared English cue hints.
+
+All stream paths are under `vocabulary-catalog/`. Leaves and tree branch nodes
+are limited to 65,536 UTF-8 bytes. Immutable content hashes allow an older index
+to finish loading during an update. Unchanged chunks are reused; an ordinary
+hint edit rewrites only its chunk/tree path and the index. The dynamic write
+plan is rebuilt from the same pinned Git commit on every retry. Record-level
+checks retain independent edits and reject conflicting changes.
+
+Startup loads metadata for the current study language, English fallback, and
+selected hint language. More hint languages load on demand. The in-memory hint
+working set is bounded to three languages including English. The optional,
+shared IndexedDB cache has a 32 MiB budget and does not enter user-data backups.
+Existing per-language `.txt` dictionaries remain separately loaded on demand.
+
+The old `vocabulary-meanings.json` and generated Hindi files are retained for
+history, not rewritten. Once the split index exists, updated clients use its
+chunks and skip those legacy catalogs. Refresh older clients before editing;
+legacy client writes to the old catalog are not imported after migration.
+
+Word/cue changes retain translations but withhold them until reviewed in
+**Edit vocabulary hints**. Approval is specific to the selected hint language.
+Category moves, formatting and form reordering keep their hints. Deleted entry
+IDs retain tombstones, so identical newly added text cannot inherit old edits.
+
+### Audit or stage migration without changing source data
+
+```bash
+node tools/language/vocabulary-catalog.js --dataDir /path/to/site/db/language/swedish --lang sv
+node tools/language/vocabulary-catalog.js --dataDir /path/to/site/db/language/swedish --lang sv --outDir /tmp/vocabulary-split-review
+```
+
+The audit verifies vocabulary row counts, every displayed hint and all known
+alias lookups, including matched forms and meanings. An optional staging
+folder receives the new `shared/vocabulary-catalog/` and `vocabulary/vocabulary.txt`;
+the source files are never overwritten. Publish the staged vocabulary and its
+index/chunks together in one data-repository commit, after deploying the updated
+reader. This command refuses sources that already have a split index.

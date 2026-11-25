@@ -48,11 +48,15 @@ const endOf = (l) => timeOf(l && l.end && l.end.ordinal);
 
 export function practicePaddingSeconds(value) {
   const seconds = Number(value);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  return Number.isFinite(seconds) ? seconds : 0;
 }
 
 export function padPracticeClip({ start, stop }, { before, after }) {
-  return { start: Math.max(0, start - before), stop: stop + after };
+  const paddedStart = Math.max(0, start - before);
+  const paddedStop = stop + after;
+  // Keep the clip playable if trimming would remove it entirely.
+  if ((before < 0 || after < 0) && paddedStop <= paddedStart) return { start, stop };
+  return { start: paddedStart, stop: paddedStop };
 }
 
 export function clipRange(lines, pos, before, after, fallback, opts = {}) {

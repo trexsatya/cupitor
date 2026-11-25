@@ -1,3 +1,5 @@
+import { splitVocabularyEntry, setVocabularyEntryId, vocabularyEntryId, vocabularyEntries, copyVocabularyEntryIds, assertUniqueVocabularyEntryIds, mergeIdentifiedVocabulary } from './vocabulary-entries.js'
+
 // Pure vocabulary parse/serialize/merge helpers. The vocabulary file is
 // a category-bucketed text file:
 //
@@ -29,9 +31,13 @@ export function parseVocabularyFile(text) {
       currentCategory = line.replace('#', '').trim()
       out[currentCategory] = []
     } else {
-      out[currentCategory].push(line)
+      const entry = splitVocabularyEntry(line)
+      const occurrence = out[currentCategory].filter(previous => previous === entry.line).length
+      out[currentCategory].push(entry.line)
+      if (entry.id) setVocabularyEntryId(out, currentCategory, entry.line, entry.id, occurrence)
     }
   }
+  assertUniqueVocabularyEntryIds(out)
   return out
 }
 
@@ -46,8 +52,17 @@ export function ownLines(vocab, cat) {
 // insertion order for string keys). Each category's lines are joined
 // with newlines and prefixed with the `#header` line.
 export function vocabularyToText(vocab) {
-  return Object.keys(vocab)
-    .map(k => `#${k}\n${vocab[k].join('\n')}`).join('\n')
+  assertUniqueVocabularyEntryIds(vocab)
+  return Object.keys(vocab).map(category => {
+    const counts = new Map()
+    const lines = vocab[category].map(line => {
+      const occurrence = counts.get(line) || 0
+      counts.set(line, occurrence + 1)
+      const id = vocabularyEntryId(vocab, category, line, occurrence)
+      return line + (id ? '\t[entry:' + id + ']' : '')
+    })
+    return `#${category}\n${lines.join('\n')}`
+  }).join('\n')
 }
 
 // Bracket-balance check across the line, validated per `|`-segment so a
@@ -88,6 +103,9 @@ export function mergeVocabulary(baseText, localVocab, remoteText) {
   const base = parseVocabularyFile(baseText || '#__empty__\n')
   const remote = parseVocabularyFile(remoteText || '#__empty__\n')
   const local = localVocab || {}
+  if ([base, local, remote].some(vocab => vocabularyEntries(vocab).some(entry => entry.id))) {
+    return mergeIdentifiedVocabulary(base, local, remote)
+  }
   const merged = Object.create(null)
   const allCats = new Set([
     ...Object.keys(base),
@@ -149,6 +167,12 @@ export function removeVocabularyLine(vocab, readOnly, category, line, occurrence
   for (const cat of Object.keys(vocab)) {
     out[cat] = cat === category ? lines.filter((_, i) => i !== at) : vocab[cat]
   }
+  copyVocabularyEntryIds(vocab, out)
+  // Removing an identical earlier copy shifts the later copies' identities.
+  const previous = vocabularyEntries(vocab).filter(entry => entry.category === category && entry.line === line)
+  previous.filter(entry => entry.occurrence !== occurrence).forEach((entry, index) => {
+    if (entry.id) setVocabularyEntryId(out, category, line, entry.id, index)
+  })
   return { vocab: out }
 }
 

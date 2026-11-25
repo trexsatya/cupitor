@@ -323,7 +323,8 @@
       sb.className = 'cup-sub-sidebar';
       const buttons = [
         ['split', '⇋', 'Toggle split view'], ['scroll', '⇩', 'Auto-scroll'],
-        ['translate', '🌐', 'Toggle translation'], ['download', '⤓CC', 'Download YouTube subtitles'],
+        ['translate', '🌐', 'Toggle translation'], ['download', '⤓CC', 'Download subtitles'],
+        ['save-srt', 'Save SRT', 'Save subtitles as an SRT file'],
         ['open-srt', 'Open SRT', 'Open a local SRT subtitle file'], ['settings', '⚙', 'Strategy & settings'],
         ['prev', '⟨', 'Previous cue'], ['next', '⟩', 'Next cue'], ['copy', '⧉', 'Copy transcript'],
         ['clear', '🗑', 'Clear transcript'], ['pick', '☑', 'Select lines'],
@@ -331,7 +332,7 @@
       ].map(([act, label, title]) => node('button', {
         'data-act': act, title, type: 'button',
         class: ['split', 'scroll'].includes(act) ? 'cup-on' : null,
-        style: ['download', 'open-srt', 'all', 'send'].includes(act) ? 'display:none' : null,
+        style: ['download', 'save-srt', 'open-srt', 'all', 'send'].includes(act) ? 'display:none' : null,
       }, [label]));
       sb.append(
         node('div', {class: 'cup-sub-drag', title: 'Drag to resize'}),
@@ -370,7 +371,14 @@
       const download = sb.querySelector('[data-act="download"]');
       if (typeof opts.onDownloadSubtitles === 'function') {
         download.style.display = '';
+        download.disabled = state.importBusy;
         download.onclick = () => opts.onDownloadSubtitles();
+      }
+      const saveSrt = sb.querySelector('[data-act="save-srt"]');
+      if (typeof opts.onSaveSubtitles === 'function') {
+        saveSrt.style.display = '';
+        saveSrt.disabled = !state.cues.length;
+        saveSrt.onclick = () => opts.onSaveSubtitles(subtitlesAsSrt());
       }
       const openSrt = sb.querySelector('[data-act="open-srt"]');
       if (typeof opts.onOpenSubtitles === 'function') {
@@ -518,6 +526,26 @@
       return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
     }
 
+    function updateSaveSrt() {
+      const button = state.sidebar?.querySelector('[data-act="save-srt"]');
+      if (button) button.disabled = !state.cues.length;
+    }
+
+    function subtitlesAsSrt() {
+      const format = ms => {
+        const parts = [Math.floor(ms / 3600000), Math.floor(ms / 60000) % 60, Math.floor(ms / 1000) % 60];
+        return parts.map(value => String(value).padStart(2, '0')).join(':')
+          + ',' + String(ms % 1000).padStart(3, '0');
+      };
+      return state.cues.map((cue, index) => {
+        const start = Math.max(0, Math.round(cue.start * 1000));
+        const end = Number.isFinite(cue.end) && cue.end > cue.start ? cue.end : cue.start + 3;
+        const stop = Math.max(start + 1, Math.round(end * 1000));
+        const text = cue.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n');
+        return (index + 1) + '\n' + format(start) + ' --> ' + format(stop) + '\n' + text + '\n';
+      }).join('\n');
+    }
+
     function tokenize(text) {
       const fragment = document.createDocumentFragment();
       for (const tok of text.split(/(\s+)/)) {
@@ -640,6 +668,7 @@
       // so it keeps pointing at the same cue.
       if (state.chunkStartIdx != null && i <= state.chunkStartIdx) state.chunkStartIdx++;
       if (state.listEl) renderCue(cue, i);
+      updateSaveSrt();
       if (state.translationEnabled) requestTranslation(i);
       // NOTE: chunk progression is intentionally NOT driven from here — see
       // onPlayheadCue(). Harvested cues stream ahead of the playhead; counting
@@ -653,6 +682,7 @@
       buildSidebar();
       if (language) state.translationSource = language;
       state.cues = cues.map(cue => ({ ...cue, id: state.nextCueId++ }));
+      updateSaveSrt();
       if (state.listEl) {
         for (let i = 0; i < state.cues.length; i++) renderCue(state.cues[i], i);
       }
@@ -976,7 +1006,8 @@
     // Used by the clear button, and when the page moves on to another video,
     // whose timeline starts over.
     function clearCues({resume = true} = {}) {
-      state.cues = []; state.activeIdx = -1;
+      state.cues = [];
+      updateSaveSrt(); state.activeIdx = -1;
       state.selected = new Set();
       state.pendingTr = Object.create(null);
       // A replay in progress may have slowed the video down, or paused it to
@@ -1383,8 +1414,8 @@
       addCue, clearCues, replaceCues, buildSidebar, setSplit, setVideoElement,
       setImportBusy(busy) {
         state.importBusy = !!busy;
-        const button = state.sidebar && state.sidebar.querySelector('[data-act="open-srt"]');
-        if (button) button.disabled = state.importBusy;
+        state.sidebar?.querySelectorAll('[data-act="open-srt"], [data-act="download"]')
+          .forEach(button => { button.disabled = state.importBusy; });
       },
       showNotice(message) {
         buildSidebar();
