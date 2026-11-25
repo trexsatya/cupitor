@@ -455,7 +455,7 @@ mark.cup-page-find-current {
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0; border-bottom: 1px solid #edf0f4; }
 .settings-row > label { margin: 0; min-width: 0; flex: 1; font-size: 13px; color: #26374c; }
 .settings-row small { display: block; font-weight: 400; color: #667588; font-size: 12px; margin-top: 4px; line-height: 1.4; }
-#settingsPanel .settings-row input[type="number"] { width: 76px !important; margin: 0 !important; padding: 7px; box-sizing: border-box; }
+#settingsPanel .settings-row input:is([type="number"], .settings-signed-number) { width: 76px !important; margin: 0 !important; padding: 7px; box-sizing: border-box; }
 .settings-row > select { max-width: 170px; min-width: 0; padding: 6px; font-size: 12px; }
 .settings-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
 .settings-actions .manage-item { width: auto; border: 1px solid #ccd5e0; border-radius: 5px; background: #fff; color: #31465f; padding: 8px 10px; }
