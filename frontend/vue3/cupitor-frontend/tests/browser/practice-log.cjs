@@ -147,6 +147,133 @@ async function check(browser, mobile) {
   }
 }
 
+async function checkIsolation(browser, mobile) {
+  const owner = { login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null }
+  const shared = { login: owner.login, repo: owner.repo, branch: owner.branch }
+  const alice = { login: 'alice', repo: 'cupitor-data', branch: 'main', other: shared }
+  const bob = { ...alice, login: 'bob' }
+  const payload = (goal, updatedAt = 10) => ({ weeks: { '2026-W46': { Reading: { goal, updatedAt } } } })
+  for (const account of [null, { login: null, other: shared }, { ...alice, repo: null, branch: null }, alice, owner]) {
+    const page = await browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 850 }, isMobile: mobile, hasTouch: mobile })
+    const calls = [], errors = []
+    page.on('pageerror', error => errors.push(error.message))
+    try {
+      await page.clock.setFixedTime(new Date('2026-11-15T12:00:00Z'))
+      await page.addInitScript(({ account, original }) => {
+        window.dontConfirmOnRefresh = true
+        if (!sessionStorage.getItem('isolation-seeded')) {
+          if (account) localStorage.setItem('cupitor:account', JSON.stringify(account))
+          localStorage.setItem('cupitor:practiceLog:swedish', JSON.stringify(original))
+          sessionStorage.setItem('isolation-seeded', '1')
+        }
+      }, { account, original: payload('Owner local goal', 1) })
+      let started, release
+      const fetching = new Promise(resolve => { started = resolve })
+      const response = new Promise(resolve => { release = resolve })
+      let delay = false
+      await page.route('**/*', async route => {
+        const url = new URL(route.request().url())
+        if (url.pathname.endsWith('/practice-log.json')) {
+          calls.push(url.pathname)
+          const login = url.pathname.split('/')[1]
+          if (delay) { started(); await response }
+          return route.fulfill({ json: payload(`${login} remote goal`) })
+        }
+        return serveFixtures(route)
+      })
+      await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'domcontentloaded' })
+      await page.waitForFunction(() => window.__cupitorSearchReady && !!window.cupitorUserData)
+      await page.evaluate(() => window.openPracticeLogDialog())
+      const canReadOwn = !!account?.login && !!account.repo
+      assert.equal(calls.length, canReadOwn ? 1 : 0, 'unidentified visitors and users without a repo make no personal-log request')
+      if (canReadOwn) {
+        assert.match(calls[0], new RegExp(`^/${account.login}/`))
+        assert.ok(await page.locator('#practiceLogItems').getByText(`${account.login} remote goal`, { exact: true }).isVisible())
+      } else {
+        assert.equal(await page.locator('#practiceLogItems').innerText().then(text => /Owner local goal|remote goal/.test(text)), false)
+        assert.equal(await page.evaluate(() => window.cupitorUserData.getItem('cupitor:practiceLog:swedish')), null)
+        await page.locator('#practiceLogSaveBtn').click()
+        assert.equal(calls.length, 0, 'anonymous sync must not even read the owner file')
+      }
+      assert.match(await page.evaluate(() => localStorage.getItem('cupitor:practiceLog:swedish')), /Owner local goal/)
+
+      if (account === alice) {
+        // A late response from Alice must not enter Bob's memory, display or store.
+        await page.evaluate(() => window.openPracticeLogDialog()) // close
+        delay = true
+        await page.evaluate(() => { window.openingOldLog = window.openPracticeLogDialog() })
+        await fetching
+        await page.evaluate(async bob => {
+          const { saveAccount } = await import('/language/account-state.js')
+          saveAccount(bob)
+        }, bob)
+        assert.equal(await page.locator('#practiceLogDialog').isVisible(), false)
+        assert.equal(await page.evaluate(() => window._practiceLog), null)
+        assert.equal(await page.locator('#practiceLogItems').innerText(), '')
+        release()
+        await page.evaluate(() => window.openingOldLog)
+        assert.equal(await page.evaluate(() => window._practiceLog), null)
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        await page.waitForFunction(() => window.__cupitorSearchReady && !!window.cupitorUserData)
+        delay = false
+        await page.evaluate(() => window.openPracticeLogDialog())
+        assert.ok(await page.locator('#practiceLogItems').getByText('bob remote goal', { exact: true }).isVisible())
+        assert.equal(await page.locator('#practiceLogItems').innerText().then(text => /alice remote goal|Owner local goal/.test(text)), false)
+        assert.ok(calls.at(-1).startsWith('/bob/'))
+      }
+      assert.deepEqual(errors, [])
+    } finally { await page.close() }
+  }
+  console.log(`${mobile ? 'Mobile' : 'Desktop'}: anonymous/guest/new-account isolation, owner preservation and delayed account-switch responses passed`)
+}
+
+async function checkStartupIdentity(browser, mobile) {
+  const page = await browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 850 }, isMobile: mobile, hasTouch: mobile })
+  const personalCalls = [], errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  try {
+    await page.addInitScript(() => {
+      window.dontConfirmOnRefresh = true
+      if (!sessionStorage.getItem('startup-seeded')) {
+        localStorage.setItem('cupitor:account', JSON.stringify({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null }))
+        localStorage.setItem('cupitor:practiceLog:swedish@alice', JSON.stringify({ weeks: {
+          '2026-W46': { Reading: { goal: 'Alice local secret' } },
+        } }))
+        localStorage.setItem('cupitor:ghToken', 'test-token-for-bob')
+        sessionStorage.setItem('startup-seeded', '1')
+      }
+    })
+    let started, release
+    const checking = new Promise(resolve => { started = resolve })
+    const identity = new Promise(resolve => { release = resolve })
+    await page.route('**/*', async route => {
+      const url = new URL(route.request().url())
+      if (url.hostname === 'api.github.com' && url.pathname === '/user') {
+        started(); await identity
+        return route.fulfill({ json: { login: 'bob', name: 'Bob' } })
+      }
+      if (url.pathname.endsWith('/practice-log.json')) personalCalls.push(url.pathname)
+      return serveFixtures(route)
+    })
+    await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'domcontentloaded' })
+    await checking
+    await page.waitForFunction(() => window.__cupitorSearchReady && !!window.cupitorUserData)
+    await page.evaluate(() => { window.openingBeforeIdentity = window.openPracticeLogDialog() })
+    assert.equal(await page.locator('#practiceLogDialog').isVisible(), false, 'the previous account log stays hidden while identity is being reconciled')
+    assert.equal(await page.evaluate(() => window._practiceLog), null)
+    assert.deepEqual(personalCalls, [])
+    const reloaded = page.waitForEvent('domcontentloaded')
+    release(); await reloaded
+    await page.waitForFunction(() => window.__cupitorSearchReady && !!window.cupitorUserData)
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('cupitor:account')).login), 'bob')
+    await page.evaluate(() => window.openPracticeLogDialog())
+    assert.equal(await page.locator('#practiceLogItems').innerText().then(text => text.includes('Alice local secret')), false)
+    assert.deepEqual(personalCalls, [])
+    assert.deepEqual(errors, [])
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: startup identity reconciliation blocks the previous account log`)
+  } finally { await page.close() }
+}
+
 ;(async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined, headless: true,
@@ -155,6 +282,10 @@ async function check(browser, mobile) {
   try {
     await check(browser, false)
     await check(browser, true)
+    await checkIsolation(browser, false)
+    await checkIsolation(browser, true)
+    await checkStartupIdentity(browser, false)
+    await checkStartupIdentity(browser, true)
   } finally {
     await browser.close()
   }

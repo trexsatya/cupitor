@@ -7,8 +7,8 @@ import { LANGUAGE_KEY, languageKeyFromLocation, defaultDataRoot } from './langua
 //   self    — the signed-in user's own repo (editable). Absent for a guest
 //             and for a signed-in user whose repo is not set up yet.
 //   other   — one other listed user's repo, read-only. Absent when "none".
-//   primary — self when present, else other. What the single-source code
-//             paths (practice log, resource base URL) use.
+//   primary — self when present, else other. Used for shared resource URLs;
+//             personal files such as practice logs require explicit self.
 //
 // The account state is read from localStorage once, on first use, and then
 // kept. Nothing here notices a later sign-in, sign-out or repo setup: after
@@ -171,25 +171,36 @@ export function writeTarget() {
 }
 
 // The parsed JSON of one of the user's own files (practice log, starred
-// lines): never the other user's. `fallback` when there is no self (no
-// request is made), the file is missing, the request fails or the text is
-// not JSON; never throws. Failures other than a 404 go to `log`. `query` is
+// lines): never the other user's. `fallback` without an explicit self identity
+// (no request is made), for a missing file, a failed request, invalid JSON or
+// a stale account/source context. Never throws. Failures other than a 404 go
+// to `log`. `query` is
 // appended to the URL as given; `init` is passed to fetch.
 export async function fetchSelfJson(path, {
   lang = langFromLocation(), query = '', init, fallback = null, fetchFn,
   log = (m, e) => { try { console.warn(m, e) } catch (_) {} },
 } = {}) {
-  let url
+  let url, context, account
   try {
-    if (!hasSelf()) return fallback
+    if (state().legacy || !hasSelf()) return fallback
+    context = captureSourceContext(lang)
+    account = configuredIdentity(loadAccount())
     url = readUrl('self', path, lang) + query
   } catch (e) { log(`fetchSelfJson: no URL for ${path}`, e); return fallback }
   try {
     const f = fetchFn || fetch
     const res = init === undefined ? await f(url) : await f(url, init)
+    const assertCurrent = () => {
+      context.assertCurrent()
+      if (configuredIdentity(loadAccount()) !== account)
+        throw Object.assign(new Error('The account changed while loading personal data.'), { code: 'stale-data-source' })
+    }
+    assertCurrent()
     if (res.status === 404) return fallback
     if (!res.ok) { log(`fetchSelfJson: ${path} answered ${res.status}`); return fallback }
-    return await res.json()
+    const value = await res.json()
+    assertCurrent()
+    return value
   } catch (e) {
     log(`fetchSelfJson: could not read ${path}`, e)
     return fallback

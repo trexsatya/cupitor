@@ -817,6 +817,41 @@ describe('fetchSelfJson (own files only)', () => {
     expect(calls[0]).toContain('/alice/cupitor-data/main/')
   })
 
+  test('a missing, invalid or unreadable account cannot fetch the legacy owner\'s personal files', async () => {
+    const { loadAccount } = require('./account-state.js')
+    for (const raw of [null, '{broken', '[]']) {
+      configure(loadAccount({ getItem: () => raw }))
+      const fetchFn = jest.fn()
+      expect(await fetchSelfJson('practice-log.json', { fetchFn })).toBeNull()
+      expect(fetchFn).not.toHaveBeenCalled()
+    }
+  })
+
+  test('a response from a previous account, repository or language is discarded, including during JSON decoding', async () => {
+    for (const duringJson of [false, true]) {
+      for (const change of [() => configure(owner), () => configure({ ...alice, repo: 'different' }),
+        () => saveGuest(), () => window.history.replaceState({}, '', '?lang=spanish')]) {
+        localStorage.clear()
+        window.history.replaceState({}, '', '/')
+        configure(alice)
+        let release
+        const wait = new Promise(resolve => { release = resolve })
+        const pending = fetchSelfJson('practice-log.json', { log: () => {}, fetchFn: async () => {
+          if (!duringJson) await wait
+          return { ok: true, status: 200, json: async () => {
+            if (duringJson) await wait
+            return { weeks: { '2026-W48': { Reading: { goal: 'Alice only' } } } }
+          } }
+        } })
+        await Promise.resolve()
+        change(); release()
+        expect(await pending).toBeNull()
+      }
+    }
+    localStorage.clear()
+    window.history.replaceState({}, '', '/')
+  })
+
   test('no self (guest, or a user without a repo): fallback and no request', async () => {
     for (const st of [guest, aliceNoRepo]) {
       configure(st)

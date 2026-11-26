@@ -145,8 +145,8 @@ describe('sources', () => {
 })
 
 describe('scopedKey', () => {
-  test('the owner (with or without a record) keeps the plain key; other logins get a suffix', () => {
-    expect(scopedKey('cupitor:recordings', loadAccount(memStorage()))).toBe('cupitor:recordings')
+  test('only an explicit owner keeps the plain key; an unidentified visitor uses guest storage', () => {
+    expect(scopedKey('cupitor:recordings', loadAccount(memStorage()))).toBe('cupitor:recordings@~guest')
     expect(scopedKey('cupitor:recordings', { login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null })).toBe('cupitor:recordings')
     expect(scopedKey('cupitor:recordings', loadAccount(memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages' }) })))).toBe('cupitor:recordings')
     expect(scopedKey('cupitor:recordings', { login: 'alice', repo: null, branch: null, other: null })).toBe('cupitor:recordings@alice')
@@ -158,9 +158,9 @@ describe('scopedKey', () => {
     expect(scopedKey('k', loadAccount(memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'not valid!' }) })))).toBe('k@~guest')
     // A GitHub user literally called "guest" is not the guest.
     expect(scopedKey('k', { login: 'guest', repo: null, branch: null, other: null })).toBe('k@guest')
-    // The legacy owner (no record) is not a guest.
+    // The legacy library default does not establish the visitor's identity.
     expect(loadAccount(memStorage()).legacy).toBe(true)
-    expect(storageOwner(loadAccount(memStorage()))).toBe('trexsatya')
+    expect(storageOwner(loadAccount(memStorage()))).toBe(GUEST_STORAGE_OWNER)
   })
   test('the owner in any case keeps the plain key; other logins are lowercased in the suffix', () => {
     expect(scopedKey('k', { login: 'TrexSatya', repo: null, branch: null, other: null })).toBe('k')
@@ -236,7 +236,7 @@ describe('storage robustness', () => {
       expect(saveGuest()).toBe(false)
       expect(saveAccount({ login: 'alice', repo: null, branch: null, other: null })).toBe(false)
       expect(clearAccount()).toBe(false)
-      expect(scopedKey('k')).toBe('k')
+      expect(scopedKey('k')).toBe('k@~guest')
     } finally {
       Object.defineProperty(window, 'localStorage', desc)
     }

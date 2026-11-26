@@ -1399,11 +1399,11 @@ describe('reconcileLogin (boot)', () => {
     expect(loadAccount(storage).login).toBe('alice'); expect(storedToken(tab1)).toBe('ghp_alice')
   })
 
-  test('the legacy owner with a token in use is recorded as the owner without a reload', async () => {
+  test('confirming the legacy owner reloads from guest storage into the owner scope', async () => {
     const gh = fakeGh({ 'GET /user': { login: 'trexsatya' } })
     for (const opts of [{ bridgeAvailable: true, ghUtils: fakeGhUtils() }, { bridgeAvailable: false, ghUtils: fakeGhUtils('ghp_prompted') }]) {
       const storage = memStorage()
-      expect(await reconcileLogin({ gh, storages: storages(), storage, ...opts })).toBe('ok')
+      expect(await reconcileLogin({ gh, storages: storages(), storage, ...opts })).toBe('reload')
       expect(loadAccount(storage)).toEqual({ login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null })
     }
   })
