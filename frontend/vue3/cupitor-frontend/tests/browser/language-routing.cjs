@@ -363,7 +363,8 @@ async function checkMultilingualVocabulary(browser, mobile) {
       assert.equal(await page.locator('meta[name="cupitor-study-supported"]').getAttribute('content'), String(supported))
       if (supported) {
         assert(dataRequests.some(url => url.includes('/db/language/' + name.toLowerCase() + '/srts/index.json')))
-        assert(dataRequests.every(url => !url.includes('/db/language/' + name + '/')))
+        assert(dataRequests.filter(url => /\/(?:srts\/index.json|vocabulary.txt)$/.test(url))
+          .every(url => url.includes('/db/language/' + name.toLowerCase() + '/')))
         assert.equal(await page.locator('#searchText').isEnabled(), true)
         await page.locator('#searchText').fill(term)
         await page.locator('#searchText').press('Tab')
