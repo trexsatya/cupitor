@@ -8,6 +8,7 @@ import { wireMobileSearch } from './mobile-search.js'
 import { attributeSubtitleMatches } from './subtitle-search-engine.js';
 import { createSubtitleSearchClient, observeSubtitleCorpus } from './subtitle-search-client.js';
 import { userDataReady } from './user-data.js';
+import { capturePracticeLogSession } from './practice-log-session.js';
 const _userData = await userDataReady();
 import { LANGUAGES, languageFromLocation, requireStudyLanguage, speechLocale, unsupportedStudyLanguageMessage } from './language-config.js';
 import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
@@ -3312,10 +3313,11 @@ window.openSubtitleCacheDialog = openSubtitleCacheDialog
 // Per-language weekly goals. Records keep the goal, measurement and status
 // together so a device never merges a count into the wrong unit.
 const PRACTICE_LOG_OPENED_KEY = 'cupitor:practiceLog:openedOnce'
+const _practiceLogSession = capturePracticeLogSession()
 
 function _practiceLogLocalKey() {
-  const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || 'default'
-  return _scopedKey(`cupitor:practiceLog:${lang}`)
+  _practiceLogSession.assertCurrent()
+  return _practiceLogSession.key
 }
 
 function _practiceLogGithubPath() {
@@ -3346,10 +3348,11 @@ function _savePracticeLogLocal(data) {
 // a data repo, so the dialog stays local-only.
 async function _fetchPracticeLogRemote() {
   try {
+    if (!_practiceLogSession.remote || !_practiceLogIsCurrent()) return null
     const v = await _dsFetchSelfJson('practice-log.json', {
       lang: _dsLangFromLocation(), query: `?_=${Date.now()}`, init: { cache: 'no-cache' }, fallback: null,
     })
-    return v == null ? null : normalizePracticeLog(v)
+    return !_practiceLogIsCurrent() || v == null ? null : normalizePracticeLog(v)
   } catch (_) { return null }
 }
 
@@ -3359,6 +3362,26 @@ window._practiceLog = null
 window._practiceLogPending = false
 window._practiceLogActiveTab = 'current'
 let _practiceReminders
+
+function _practiceLogIsCurrent() {
+  try { _practiceLogSession.assertCurrent(); return true }
+  catch (_) {
+    window._practiceLog = null
+    window._practiceLogPending = false
+    _practiceReminders?.dispose()
+    const editor = $('#practiceLogEditor')[0]
+    if (editor?.open) editor.close()
+    const $dialog = $('#practiceLogDialog')
+    if ($dialog.hasClass('ui-dialog-content')) $dialog.dialog('close')
+    $('#practiceLogItems, #practiceLogWeekLabel, #practiceLogHistoryList, #practiceLogEditor, #practiceReminderSettings').empty()
+    $('#practiceLogStatus').text('The account changed. Reload to open your practice log.')
+    return false
+  }
+}
+window.addEventListener('cupitor:account-changed', _practiceLogIsCurrent)
+window.addEventListener('storage', event => {
+  if (event.key === 'cupitor:account' || event.key == null) _practiceLogIsCurrent()
+})
 
 function _practiceLogActiveWeekLabel() {
   if (window._practiceLogActiveTab === 'next') return _nextWeekLabel()
@@ -3371,6 +3394,7 @@ function _refreshPracticeLogPendingHint() {
 }
 
 function _refreshPracticeLogBtnHighlight() {
+  if (!_practiceLogIsCurrent()) return
   const data = window._practiceLog || _loadPracticeLogLocal()
   const current = Object.values(data.weeks[_currentWeekLabel()] || {}).filter(hasPracticeLogEntry)
   const next = Object.values(data.weeks[_nextWeekLabel()] || {}).some(hasPracticeLogEntry)
@@ -3379,6 +3403,7 @@ function _refreshPracticeLogBtnHighlight() {
 }
 
 function _markPracticeLogEdited(data, weekLabel) {
+  if (!_practiceLogIsCurrent()) return
   if (weekLabel === _currentWeekLabel()) {
     data.lastWeeklyUpdate = practiceDate()
     if (data.reminders?.enabled && window.CallBridge) {
@@ -3392,6 +3417,7 @@ function _markPracticeLogEdited(data, weekLabel) {
 }
 
 function _renderPracticeLogPlan() {
+  if (!_practiceLogIsCurrent()) return
   const data = window._practiceLog
   if (!data) return
   const weekLabel = _practiceLogActiveWeekLabel()
@@ -3410,7 +3436,7 @@ function _renderPracticeLogPlan() {
     }, { once: true })
   }
   function saveRecord(name, update, selector) {
-    if (window._practiceLog !== data) return false
+    if (!_practiceLogIsCurrent() || window._practiceLog !== data) return false
     const currentWeek = data.weeks[weekLabel] || {}
     const existing = Object.hasOwn(currentWeek, name) ? currentWeek[name] : {}
     const record = update(existing)
@@ -3428,7 +3454,7 @@ function _renderPracticeLogPlan() {
       }
       return updatePracticeGoal(current, goal)
     }, '.practice-log-item-goal'), name => {
-    if (window._practiceLog !== data || !confirm(`Remove "${name}" from available activities? Its saved goals and history will be kept.`)) return false
+    if (!_practiceLogIsCurrent() || window._practiceLog !== data || !confirm(`Remove "${name}" from available activities? Its saved goals and history will be kept.`)) return false
     data.customItems = data.customItems.filter(item => item !== name)
     data.activityEdits = { ...data.activityEdits, [name]: { available: false, updatedAt: Date.now() } }
     _markPracticeLogEdited(data)
@@ -3446,7 +3472,7 @@ function _renderPracticeLogPlan() {
   renderPracticeLogPlan(vm, mount, {
     editGoal,
     editWeekNote: () => openPracticeLogWeekNoteEditor(editor, weekLabel, vm.note, text => {
-      if (window._practiceLog !== data) return false
+      if (!_practiceLogIsCurrent() || window._practiceLog !== data) return false
       if (text === vm.note) return true
       data.weekNotes[weekLabel] = { text, updatedAt: Date.now() }
       _markPracticeLogEdited(data)
@@ -3467,6 +3493,7 @@ function _renderPracticeLogPlan() {
 }
 
 function _renderPracticeLogHistory() {
+  if (!_practiceLogIsCurrent()) return
   const data = window._practiceLog
   if (!data) return
   const $ret = $('#practiceLogHistoryWeeks')
@@ -3494,6 +3521,7 @@ function _setPracticeLogTab(tab) {
 }
 
 async function openPracticeLogDialog(forceCurrent = false) {
+  if (!_practiceLogIsCurrent()) return
   // Mark first-open before any await — if the network fetch fails the user
   // still gets the front-page banner removed because they made the choice to
   // open it. Same flag is checked at boot in _initPracticeLogFrontBanner.
@@ -3548,6 +3576,7 @@ async function openPracticeLogDialog(forceCurrent = false) {
         language: getLangFromUrl().fullName,
         close: () => _setPracticeLogTab(window._practiceLogActiveTab),
         save() {
+          if (!_practiceLogIsCurrent()) return
           window._practiceLogPending = true
           _savePracticeLogLocal(window._practiceLog)
           _refreshPracticeLogPendingHint()
@@ -3578,7 +3607,7 @@ async function openPracticeLogDialog(forceCurrent = false) {
   // Background-fetch latest remote and merge in. Skips silently if offline.
   const $status = $('#practiceLogStatus').text('fetching remote…')
   const remote = await _fetchPracticeLogRemote()
-  if (window._practiceLog !== local) return
+  if (!_practiceLogIsCurrent() || window._practiceLog !== local) return
   if (remote) {
     const merged = _mergePracticeLog(remote, local)
     Object.assign(local, merged)
@@ -3587,7 +3616,7 @@ async function openPracticeLogDialog(forceCurrent = false) {
     else _renderPracticeLogPlan()
     $status.empty()
   } else {
-    $status.text(_dsHasSelf() ? 'Offline' : '')
+    $status.text(_practiceLogSession.remote ? 'Offline' : '')
   }
 }
 window.openPracticeLogDialog = openPracticeLogDialog
@@ -3600,6 +3629,11 @@ window.addEventListener('cupitorPracticeReminderOpened', event => _openPracticeR
 $(function () { _openPracticeReminder(window.__cupitorPracticeReminderOpened) })
 
 async function _commitPracticeLogToGithub() {
+  if (!_practiceLogIsCurrent()) return
+  if (!_practiceLogSession.remote) {
+    $('#practiceLogStatus').text('Sign in and set up your repo to sync your practice log.')
+    return
+  }
   const $button = $('#practiceLogSaveBtn')
   const data = window._practiceLog
   if (!data || $button.prop('disabled') || !_requireSelf()) return
@@ -3609,10 +3643,12 @@ async function _commitPracticeLogToGithub() {
   $button.prop('disabled', true)
   try {
     await _userData.flush()
+    _practiceLogSession.assertCurrent()
     const syncedText = await commitWithMerge({
       filePath,
       commitMessage: 'practice-log: update weekly practice log',
       merge: remoteText => {
+        _practiceLogSession.assertCurrent()
         // Invalid remote data must not be overwritten.
         const remote = remoteText?.trim() ? normalizePracticeLog(JSON.parse(remoteText)) : null
         if (remoteText?.trim() && !remote) throw new Error('Practice Log on GitHub is invalid.')
@@ -3620,7 +3656,7 @@ async function _commitPracticeLogToGithub() {
         return JSON.stringify(merged, null, 2) + '\n'
       }
     })
-    if (window._practiceLog !== data) return
+    if (!_practiceLogIsCurrent() || window._practiceLog !== data) return
     const changed = JSON.stringify(data) !== baseline
     const synced = JSON.parse(syncedText)
     const merged = changed ? _prunePracticeLogWeeks(_mergePracticeLog(synced, data)) : synced

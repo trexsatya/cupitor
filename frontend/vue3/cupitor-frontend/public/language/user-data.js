@@ -4,6 +4,7 @@ import { sourceDescriptor, hasSelf, hasOther, captureSourceContext, langFromLoca
 import { parseWordMaps } from './word-maps-sync.js'
 import { openUserDataStore } from './user-data-store.js'
 import { withWordMapRecords, MAP_RECORDS_FORMAT } from './word-map-library.js'
+import { practiceLogLocalKey } from './practice-log-session.js'
 
 const object = raw => {
   const value = JSON.parse(raw)
@@ -39,7 +40,7 @@ export function legacyUserDataKeys(account, language, storage) {
         return selected.length ? JSON.stringify(selected) : null
       } },
     { key: key(`cupitor:wordMaps:${language}`), validate: parseWordMaps },
-    { key: key(`cupitor:practiceLog:${language}`), validate: object },
+    { key: practiceLogLocalKey(language, account), validate: object },
     { key: key(`cupitor:playlistFolders:${language}`), validate: object },
     { key: key(`cupitor:playlistFolders:${language}:base`), validate: object },
     { key: key(`cupitor:recordings:base:db/language/${language}/recordings.json`), validate: object },

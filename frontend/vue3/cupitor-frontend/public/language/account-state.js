@@ -189,6 +189,7 @@ export function saveAccount(state, storage) {
   if (missing) rec.missingRepo = missing
   try {
     s.setItem(ACCOUNT_KEY, JSON.stringify(rec))
+    notifyAccountChanged(storage)
     return true
   } catch (_) {
     return false
@@ -203,6 +204,7 @@ export function saveGuest(storage) {
   if (!s) return false
   try {
     s.setItem(ACCOUNT_KEY, JSON.stringify({ login: null, repo: null, branch: null }))
+    notifyAccountChanged(storage)
     return true
   } catch (_) {
     return false
@@ -217,10 +219,18 @@ export function clearAccount(storage) {
   if (!s) return false
   try {
     s.removeItem(ACCOUNT_KEY)
+    notifyAccountChanged(storage)
     return true
   } catch (_) {
     return false
   }
+}
+
+// Storage events reach other tabs only. Notify open personal views in this
+// page too; injected stores used by pure callers do not represent its account.
+function notifyAccountChanged(storage) {
+  if (storage || typeof window === 'undefined') return
+  try { window.dispatchEvent(new CustomEvent('cupitor:account-changed')) } catch (_) {}
 }
 
 // { self, other } as { owner, repo, branch } or null. The owner without a
@@ -239,14 +249,16 @@ export function sources(state) {
 }
 
 // Whose local data a storage key belongs to, lowercased so a login's case
-// never splits its data. The owner, with or without a record (legacy), keeps
-// the plain keys (where the pre-account data lives); any other login gets
-// its own suffix, and a guest (a record with no valid login) gets
+// never splits its data. An explicit owner record keeps the plain keys
+// (where the pre-account data lives); any other login gets its own suffix.
+// An absent account record selects the legacy public library but cannot
+// identify its visitor. It uses guest storage until sign-in confirms the
+// owner, leaving the old owner data intact. Guests also get
 // GUEST_STORAGE_OWNER, which no GitHub login can equal ('~' is never in
 // one), so a guest's data never mixes with the owner's or a user's.
 export const GUEST_STORAGE_OWNER = '~guest'
 export function storageOwner(state) {
-  return state.login ? state.login.toLowerCase() : GUEST_STORAGE_OWNER
+  return !state.legacy && state.login ? state.login.toLowerCase() : GUEST_STORAGE_OWNER
 }
 
 export function scopedKey(base, state = loadAccount()) {
