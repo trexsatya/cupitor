@@ -227,6 +227,53 @@ async function checkIsolation(browser, mobile) {
   console.log(`${mobile ? 'Mobile' : 'Desktop'}: anonymous/guest/new-account isolation, owner preservation and delayed account-switch responses passed`)
 }
 
+async function checkStartupIdentity(browser, mobile) {
+  const page = await browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 850 }, isMobile: mobile, hasTouch: mobile })
+  const personalCalls = [], errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  try {
+    await page.addInitScript(() => {
+      window.dontConfirmOnRefresh = true
+      if (!sessionStorage.getItem('startup-seeded')) {
+        localStorage.setItem('cupitor:account', JSON.stringify({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null }))
+        localStorage.setItem('cupitor:practiceLog:swedish@alice', JSON.stringify({ weeks: {
+          '2026-W46': { Reading: { goal: 'Alice local secret' } },
+        } }))
+        localStorage.setItem('cupitor:ghToken', 'test-token-for-bob')
+        sessionStorage.setItem('startup-seeded', '1')
+      }
+    })
+    let started, release
+    const checking = new Promise(resolve => { started = resolve })
+    const identity = new Promise(resolve => { release = resolve })
+    await page.route('**/*', async route => {
+      const url = new URL(route.request().url())
+      if (url.hostname === 'api.github.com' && url.pathname === '/user') {
+        started(); await identity
+        return route.fulfill({ json: { login: 'bob', name: 'Bob' } })
+      }
+      if (url.pathname.endsWith('/practice-log.json')) personalCalls.push(url.pathname)
+      return serveFixtures(route)
+    })
+    await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'domcontentloaded' })
+    await checking
+    await page.waitForFunction(() => window.__cupitorSearchReady && !!window.cupitorUserData)
+    await page.evaluate(() => { window.openingBeforeIdentity = window.openPracticeLogDialog() })
+    assert.equal(await page.locator('#practiceLogDialog').isVisible(), false, 'the previous account log stays hidden while identity is being reconciled')
+    assert.equal(await page.evaluate(() => window._practiceLog), null)
+    assert.deepEqual(personalCalls, [])
+    const reloaded = page.waitForEvent('domcontentloaded')
+    release(); await reloaded
+    await page.waitForFunction(() => window.__cupitorSearchReady && !!window.cupitorUserData)
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('cupitor:account')).login), 'bob')
+    await page.evaluate(() => window.openPracticeLogDialog())
+    assert.equal(await page.locator('#practiceLogItems').innerText().then(text => text.includes('Alice local secret')), false)
+    assert.deepEqual(personalCalls, [])
+    assert.deepEqual(errors, [])
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: startup identity reconciliation blocks the previous account log`)
+  } finally { await page.close() }
+}
+
 ;(async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined, headless: true,
@@ -237,6 +284,8 @@ async function checkIsolation(browser, mobile) {
     await check(browser, true)
     await checkIsolation(browser, false)
     await checkIsolation(browser, true)
+    await checkStartupIdentity(browser, false)
+    await checkStartupIdentity(browser, true)
   } finally {
     await browser.close()
   }

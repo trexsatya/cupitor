@@ -34,6 +34,8 @@ test('result markup highlights safely, shows map identity and retains folded sta
 test('storage reads are scoped to account and language and never overwrite corrupt data', () => {
   const data = new Map()
   globalThis.localStorage = { getItem: key => data.get(key) ?? null }
+  assert.equal(wordMapStorageKey('?lang=swedish'), 'cupitor:wordMaps:swedish@~guest')
+  data.set('cupitor:account', JSON.stringify({ login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages' }))
   assert.equal(wordMapStorageKey('?lang=swedish'), 'cupitor:wordMaps:swedish')
   data.set('cupitor:account', JSON.stringify({ login: 'alice', repo: 'cupitor-data', branch: 'main' }))
   assert.equal(wordMapStorageKey('?lang=spanish'), 'cupitor:wordMaps:spanish@alice')

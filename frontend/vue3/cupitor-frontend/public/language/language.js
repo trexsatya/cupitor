@@ -3314,6 +3314,8 @@ window.openSubtitleCacheDialog = openSubtitleCacheDialog
 // together so a device never merges a count into the wrong unit.
 const PRACTICE_LOG_OPENED_KEY = 'cupitor:practiceLog:openedOnce'
 const _practiceLogSession = capturePracticeLogSession()
+let _practiceLogAccountChecked
+const _practiceLogAccountReady = new Promise(resolve => { _practiceLogAccountChecked = resolve })
 
 function _practiceLogLocalKey() {
   _practiceLogSession.assertCurrent()
@@ -3521,6 +3523,7 @@ function _setPracticeLogTab(tab) {
 }
 
 async function openPracticeLogDialog(forceCurrent = false) {
+  await _practiceLogAccountReady
   if (!_practiceLogIsCurrent()) return
   // Mark first-open before any await — if the network fetch fails the user
   // still gets the front-page banner removed because they made the choice to
@@ -25885,8 +25888,8 @@ $(function () {
   // calls from here on carry it. A failure here must not stop the page.
   try { _initAccountPanel() } catch (e) { console.warn('[account] panel init failed', e) }
   try {
-    _bootAccount().catch(e => console.warn('[account] boot check failed', e))
-  } catch (e) { console.warn('[account] boot check failed', e) }
+    _bootAccount().catch(e => console.warn('[account] boot check failed', e)).finally(_practiceLogAccountChecked)
+  } catch (e) { console.warn('[account] boot check failed', e); _practiceLogAccountChecked() }
   _loadRecording()
   // Must follow _loadRecording — a capture that arrived before this page
   // finished loading needs the real playlist collection to choose from.
