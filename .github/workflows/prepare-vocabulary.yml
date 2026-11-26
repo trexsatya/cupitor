@@ -1,0 +1,23 @@
+name: Prepare vocabulary translations
+on:
+  pull_request:
+    paths:
+      - tools/vocabulary-draft/**
+      - .github/workflows/prepare-vocabulary.yml
+permissions:
+  contents: read
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Draft missing native equivalents for review
+        run: python3 tools/vocabulary-draft/translate.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vocabulary-translation-draft
+          path: tools/vocabulary-draft/output.json
