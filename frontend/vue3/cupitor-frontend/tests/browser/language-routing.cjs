@@ -322,7 +322,15 @@ async function checkMultilingualVocabulary(browser, mobile) {
       assert.deepEqual(await learning.locator('option').allTextContents(), ['Swedish', 'Spanish', 'French', 'German'])
       await learning.selectOption(name)
       await page.waitForURL(new RegExp('lang=' + name))
-      await results.locator('mark').filter({hasText:word}).first().waitFor()
+      // Shared-cue translations match the whole row. Only the older seeded
+      // form-specific meanings highlight individual native forms.
+      const translatedRow = results.locator('[data-vocab-match-kind="hint"]').filter({hasText:word}).first()
+      try { await translatedRow.waitFor() }
+      catch (error) {
+        console.error({name, mobile, query:await query.inputValue(), results:await results.innerText()})
+        throw error
+      }
+      assert.match(await translatedRow.innerText(), /पीना/)
       assert.equal(await query.inputValue(), 'peena')
       assert.equal(await page.locator('#vocabularyLookupLanguage').inputValue(), 'hi')
       assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), [label, 'English', 'Hindi'])
