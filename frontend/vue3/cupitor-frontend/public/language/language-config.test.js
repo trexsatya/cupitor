@@ -15,7 +15,7 @@ test('data keys retain directory names while definitions accept codes and locale
   expect(() => defaultDataRoot('../swedish')).toThrow(/Invalid/)
 })
 test('unknown and unimplemented study languages have an explicit unsupported state', () => {
-  for (const key of ['unknown', 'french', 'hindi']) {
+  for (const key of ['unknown', 'english', 'hindi', 'greek']) {
     const language = languageFromLocation(at('?lang=' + key))
     expect(language.fullName).toBe(key)
     expect(language.supported).toBe(false)
@@ -24,6 +24,16 @@ test('unknown and unimplemented study languages have an explicit unsupported sta
   expect(languageFromLocation(at('?lang=unknown')).code).toBeNull()
   expect(languageKeyFromLocation(at('?lang=../escape'))).toBe('swedish')
   expect(languageKeyFromLocation(null)).toBe('swedish')
+})
+test.each([
+  ['spanish', 'es', 'es-ES'], ['french', 'fr', 'fr-FR'], ['german', 'de', 'de-DE'],
+])('%s vocabulary uses its own data, subtitle suffix and speech locale', (name, code, locale) => {
+  const language = requireStudyLanguage(at('?lang=' + name))
+  expect(language.code).toBe(code)
+  expect(language.definition.subtitleSuffix).toBe('.' + code + '.srt')
+  expect(defaultDataRoot(language.fullName)).toBe('db/language/' + name)
+  expect(speechLocale(name)).toBe(locale)
+  expect(() => requireStudyLanguage(at('?lang=unknown'))).toThrow('Swedish, Spanish, French or German')
 })
 test('study calls retain named-language and explicit locale support independently of study capabilities', () => {
   expect(speechLocale('hindi')).toBe('hi-IN')

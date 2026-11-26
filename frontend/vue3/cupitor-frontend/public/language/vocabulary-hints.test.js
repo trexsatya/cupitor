@@ -211,7 +211,12 @@ test('shared catalog edits apply across learning languages, with line overrides 
   expect(shared.hintsFor(other)).toEqual(['पेय लेना', 'घूँट लेना'])
   expect(shared.search('पेय लेना').map(hit => hit.line)).toEqual([group.line, other])
   expect(shared.search('peena')).toEqual([])
-  expect(indexFor({ Drinks: ['(drink)|beber|'] }, 'es', 'hi', catalog, translations).search('पेय लेना')).toHaveLength(1)
+  for (const [target, form] of [['es', 'beber'], ['fr', 'boire'], ['de', 'trinken']]) {
+    const result = indexFor({ Drinks: [`(drink)|${form}|`] }, target, 'hi', catalog, translations).search('पेय लेना')
+    expect(result).toHaveLength(1)
+    expect(result[0].line).toBe(`(drink)|${form}|`)
+    expect([...result[0].forms]).toEqual([])
+  }
 
   const local = mergeVocabularyCatalogs(catalog, { meanings: {}, groups: {
     'swedish-drink': { ...group, hintOverrides: { hi: ['पानी पीना'] } },
