@@ -41,7 +41,14 @@ async function check(browser, mobile) {
     if (file.endsWith('.en.srt')) return route.fulfill({ body: english, contentType: 'text/plain' })
     return serveFixtures(route)
   })
-  await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
+  await page.addInitScript(() => {
+    window.dontConfirmOnRefresh = true
+    // This migration fixture exercises the owner's legacy cache and writes.
+    // An unidentified visitor must use the separate guest cache instead.
+    localStorage.setItem('cupitor:account', JSON.stringify({
+      login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null,
+    }))
+  })
   const waitReady = () => page.evaluate(async () => { await window._subtitlesReadyPromise })
   const read = () => page.evaluate(id => {
     const s = window.allSubtitles[id]
