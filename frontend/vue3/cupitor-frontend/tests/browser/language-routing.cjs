@@ -87,6 +87,14 @@ async function checkMultilingualVocabulary(browser, mobile) {
     if (pathname.endsWith('/french/vocabulary.txt')) {
       return route.fulfill({contentType:'text/plain', body:'#Food, Drink, kitchen, Eating\n(drink)|boire|je bois|bu|\n'})
     }
+    const addedVocabulary = {
+      portuguese:'#Everyday\n(drink)|beber|\n(sound)|som|\n(air)|ar|\n',
+      chinese:'#Everyday\n(drink)|喝|喝水|\n(water)|水|\n',
+      thai:'#Everyday\n(drink)|ดื่ม|\n(snake)|งู|\n',
+    }
+    for (const [name, body] of Object.entries(addedVocabulary)) {
+      if (pathname.endsWith('/' + name + '/vocabulary.txt')) return route.fulfill({contentType:'text/plain', body})
+    }
     if (pathname.endsWith('/german/vocabulary.txt')) {
       return route.fulfill({contentType:'text/plain', body:'#Food, Drink, kitchen, Eating\n(drink)|trinken|trinkt|trank|getrunken|\n'})
     }
@@ -316,10 +324,11 @@ async function checkMultilingualVocabulary(browser, mobile) {
     assert.equal(await page.locator('#vocabularyLookupLanguage').inputValue(), 'hi')
     assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), ['Spanish', 'English', 'Hindi'])
     assert.equal(await language.locator('option:checked').textContent(), 'Hindi')
-    for (const [name, label, word] of [['french', 'French', 'boire'], ['german', 'German', 'trinken']]) {
+    for (const [name, label, word] of [['french', 'French', 'boire'], ['german', 'German', 'trinken'],
+      ['portuguese', 'Portuguese', 'beber'], ['chinese', 'Chinese', '喝'], ['thai', 'Thai', 'ดื่ม']]) {
       await openSearchOptions()
       const learning = page.locator('#vocabularyLearningLanguage')
-      assert.deepEqual(await learning.locator('option').allTextContents(), ['Swedish', 'Spanish', 'French', 'German'])
+      assert.deepEqual(await learning.locator('option').allTextContents(), ['Swedish', 'Spanish', 'French', 'German', 'Portuguese', 'Chinese', 'Thai'])
       await learning.selectOption(name)
       await page.waitForURL(new RegExp('lang=' + name))
       // Shared-cue translations match the whole row. Only the older seeded
@@ -343,7 +352,8 @@ async function checkMultilingualVocabulary(browser, mobile) {
   const browser = await chromium.launch({headless:true, executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, args:['--no-sandbox']})
   try {
     for (const [name, code, supported, term] of [['Swedish','sv',true,'gräl'], ['SPANISH','es',true,'luz'],
-      ['french','fr',true,'maisons'], ['german','de',true,'Häuser'], ['hindi','hi',false], ['unknown','',false]]) {
+      ['french','fr',true,'maisons'], ['german','de',true,'Häuser'],
+      ['portuguese','pt',true,'som'], ['chinese','zh',true,'房子'], ['thai','th',true,'งู'], ['hindi','hi',false], ['unknown','',false]]) {
       const page = await browser.newPage({viewport:{width:390,height:844}, isMobile:true, hasTouch:true})
       const errors = [], dataRequests = []
       page.on('pageerror', error => errors.push(error.message))
@@ -352,10 +362,12 @@ async function checkMultilingualVocabulary(browser, mobile) {
         if (url.includes('/db/language/')) dataRequests.push(new URL(url).pathname)
         if (name.toLowerCase() === 'spanish' && new URL(url).pathname.endsWith('/vocabulary.txt'))
           return route.fulfill({contentType:'text/plain', body:'#Spanish\n(light)|luz|\n(speak)|hablar|\n'})
-        if (['fr', 'de'].includes(code)) {
+        if (['fr', 'de', 'pt', 'zh', 'th'].includes(code)) {
           if (new URL(url).pathname.endsWith('/srts/index.json')) return route.fulfill({json:[]})
           if (new URL(url).pathname.endsWith('/vocabulary.txt')) return route.fulfill({contentType:'text/plain',
-            body:code === 'fr' ? '#Home\n(house)|maison|la maison|maisons|\n' : '#Home\n(house)|Haus|das Haus|Häuser|\n'})
+            body:{fr:'#Home\n(house)|maison|la maison|maisons|\n', de:'#Home\n(house)|Haus|das Haus|Häuser|\n',
+              pt:'#Home\n(house)|casa|\n(sound)|som|\n(air)|ar|\n',
+              zh:'#Home\n(house)|房子|\n(water)|水|\n', th:'#Home\n(house)|บ้าน|\n(snake)|งู|\n'}[code]})
         }
         return serveFixtures(route)
       })
@@ -378,12 +390,19 @@ async function checkMultilingualVocabulary(browser, mobile) {
         await page.locator('#searchText').press('Tab')
         try { await page.waitForFunction(() => !document.querySelector('#result').textContent.includes('Loading…')) }
         catch(error) {console.error({language:name,errors}, await page.evaluate(() => ({search:window.searchText,result:document.querySelector('#result').textContent.slice(0,800)}))); throw error}
-        if (['fr', 'de'].includes(code)) {
+        if (['fr', 'de', 'pt', 'zh', 'th'].includes(code)) {
           const results = page.locator('#vocabularyResult')
+          for (const shortWord of {pt:['som','ar'],zh:['水','房子'],th:['งู'],fr:[],de:[]}[code]) {
+            await page.locator('#searchText').fill(shortWord)
+            await page.locator('#searchText').press('Tab')
+            await results.locator('[data-vocab-match-kind="exact"]').filter({hasText:shortWord}).first().waitFor()
+          }
+          await page.locator('#searchText').fill(term)
+          await page.locator('#searchText').press('Tab')
           await results.getByText(new RegExp(term)).first().waitFor()
           await page.locator('#searchText').fill('house')
           await page.locator('#searchText').press('Tab')
-          await results.locator('[data-vocab-match-kind="hint"]').filter({hasText:code === 'fr' ? 'maison' : 'Haus'}).waitFor()
+          await results.locator('[data-vocab-match-kind="hint"]').filter({hasText:{fr:'maison',de:'Haus',pt:'casa',zh:'房子',th:'บ้าน'}[code]}).waitFor()
         }
       } else {
         assert.match(await page.locator('#unsupportedStudyLanguage').innerText(), /does not support/)

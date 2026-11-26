@@ -21,6 +21,7 @@ export function createVocabularyMatcher(vocabulary, {
   lang = 'sv', expandLine = line => line, expansions = {},
   hiddenCategories = new Set(['expansions', 'Expansions', '_expansions'])
 } = {}) {
+  const stopWords = lang === 'sv' ? VOCAB_OVERLAP_STOP_WORDS : new Set()
   const forms = createWordFormMatcher(lang, expansions)
   const prepared = new Map()
   const prepare = raw => {
@@ -42,7 +43,7 @@ export function createVocabularyMatcher(vocabulary, {
       rows.push({ line, category, index: rows.length, ...prepare(line), ...(entryId ? { entryId } : {}) })
     }
   }
-  const known = new Set(rows.flatMap(row => row.words).filter(w => w.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(w)))
+  const known = new Set(rows.flatMap(row => row.words).filter(w => w.length >= 3 && !stopWords.has(w)))
   const knownByForm = new Map()
   for (const word of known) {
     for (const form of forms.forms(word)) {
@@ -52,7 +53,7 @@ export function createVocabularyMatcher(vocabulary, {
     }
   }
   const derivationalPrefixes = new Set(COMMON_PREFIXES.sv)
-  const recognized = word => !isVocabularyStopWord(word) && [...forms.forms(word)].some(form => knownByForm.has(form))
+  const recognized = word => !isVocabularyStopWord(word, lang) && [...forms.forms(word)].some(form => knownByForm.has(form))
   const compoundCache = new Map()
   const coverageCache = new Map()
   const supportedCoverage = parts => parts.reduce((n, part) => {
@@ -114,7 +115,7 @@ export function createVocabularyMatcher(vocabulary, {
       if (recognized(head)) {
         const left = word.slice(0, i)
         const modifier = left.endsWith('s') ? left.slice(0, -1) : left
-        if (modifier.length >= 3 && !derivationalPrefixes.has(modifier) && !isVocabularyStopWord(modifier)) {
+        if (modifier.length >= 3 && !derivationalPrefixes.has(modifier) && !isVocabularyStopWord(modifier, lang)) {
           modifiers.add(modifier)
         }
         return [head]
@@ -142,21 +143,21 @@ export function createVocabularyMatcher(vocabulary, {
         }
       }
     }
-    const singles = queryTerms.filter(t => t.length >= 3 && !/\s/.test(t) && !VOCAB_OVERLAP_STOP_WORDS.has(t))
+    const singles = queryTerms.filter(t => t.length >= 3 && !/\s/.test(t) && !stopWords.has(t))
     for (const term of singles) if (row.words.includes(term)) return { kind: 'token', matched: term }
     for (const term of singles) {
-      const word = row.words.find(w => !VOCAB_OVERLAP_STOP_WORDS.has(w) && forms.related(w, term))
+      const word = row.words.find(w => !stopWords.has(w) && forms.related(w, term))
       if (word) return { kind: 'family', matched: word }
     }
     for (const term of compounds) {
-      const word = row.words.find(w => !VOCAB_OVERLAP_STOP_WORDS.has(w) && forms.related(w, term))
+      const word = row.words.find(w => !stopWords.has(w) && forms.related(w, term))
       if (word) return { kind: 'compound', matched: word, constituent: term }
     }
     return null
   }
   // Filter alternatives before the exact branch too. A useful alternative
   // does not give a common-word-only alternative permission to match.
-  const queryTerms = query => termsOf(query).filter(term => !isVocabularyStopWord(term))
+  const queryTerms = query => termsOf(query).filter(term => !isVocabularyStopWord(term, lang))
   const matchLine = (line, query) => matchPrepared(prepare(line), queryTerms(query), [])
   const search = (query, { includePrefix = false } = {}) => {
     const terms = queryTerms(query)

@@ -9428,7 +9428,8 @@ function _renderVocabularySearch(search, includePrefix) {
   window._prefixOverflow = null
   if (!query) return
   const matcher = _getVocabularyMatcher()
-  const ordinary = commonWordsToIgnore.includes(query) ? [] : matcher.search(query, { includePrefix })
+  const ordinary = getLangFromUrl().code === 'sv' && commonWordsToIgnore.includes(query)
+    ? [] : matcher.search(query, { includePrefix })
   const lookup = getSelectedLang() === 'en' ? 'en' : _vocabularyLookupLanguage()
   const hints = _searchVocabularyHints(window._vocabularyHintQuery || query, matcher, lookup)
   const hintsByRow = new Map(hints.map(hit => [hit.index, hit]))

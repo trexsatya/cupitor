@@ -37,7 +37,8 @@ export const VOCAB_OVERLAP_STOP_WORDS = new Set([
 
 // Ignore a common word even with punctuation or decomposed diacritics.
 // Keep complete expressions ("se till", "till och från") intact.
-export function isVocabularyStopWord(text) {
+export function isVocabularyStopWord(text, language = 'sv') {
+  if (language !== 'sv') return false
   const words = String(text || '').normalize('NFC').toLowerCase().match(/[\p{L}\p{M}]+/gu) || []
   return words.length === 1 && VOCAB_OVERLAP_STOP_WORDS.has(words[0])
 }

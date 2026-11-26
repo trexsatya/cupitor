@@ -5,6 +5,15 @@ function matcher(vocab, lang = 'sv') {
   const expansions = buildExpansionMap(vocab)
   return createVocabularyMatcher(vocab, { lang, expansions, expandLine: line => expandWords(line, lang, expansions) })
 }
+test.each([
+  ['pt', '(sound)|som|', 'som'], ['pt', '(air)|ar|', 'ar'],
+  ['zh', '(water)|水|', '水'], ['zh', '(house)|房子|', '房子'],
+  ['th', '(snake)|งู|', 'งู'], ['th', '(drink)|ดื่ม|', 'ดื่ม'],
+])('%s matches the complete native form %s without Swedish stop-word filtering', (lang, line, query) => {
+  expect(matcher({Words:[line]}, lang).search(query)).toEqual([
+    expect.objectContaining({line, kind:'exact'}),
+  ])
+})
 const vocab = {
   Exact: ['(bully)|översittare|', '(hail)|hagla|', '(colorful)|färgsprakande|'],
   Families: ['(bullying)|översitteri|', '(hail)|hagel(sl-pl)|hagelskur|hagelskurar|hagelkorn(sl-pl)',
