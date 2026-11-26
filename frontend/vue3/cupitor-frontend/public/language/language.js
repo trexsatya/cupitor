@@ -19445,7 +19445,7 @@ function _speakWord(text) {
 
 function _ttsLangCode() {
   const code = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv'
-  return code === 'sv' ? 'sv' : code === 'es' ? 'es' : 'en'
+  return code
 }
 
 function _speakWordGoogle(text) {
