@@ -9,7 +9,7 @@ import { attributeSubtitleMatches } from './subtitle-search-engine.js';
 import { createSubtitleSearchClient, observeSubtitleCorpus } from './subtitle-search-client.js';
 import { userDataReady } from './user-data.js';
 const _userData = await userDataReady();
-import { LANGUAGES, languageFromLocation, requireStudyLanguage, speechLocale } from './language-config.js';
+import { LANGUAGES, languageFromLocation, requireStudyLanguage, speechLocale, unsupportedStudyLanguageMessage } from './language-config.js';
 import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
 import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js';
 import { retainCaptionEnds } from './caption-capture.js';
@@ -6874,7 +6874,7 @@ $(function () {
   const notice = document.createElement('p')
   notice.id = 'unsupportedStudyLanguage'
   notice.setAttribute('role', 'alert')
-  notice.textContent = `The study app does not support “${language.fullName}” yet. Choose Swedish or Spanish.`
+  notice.textContent = unsupportedStudyLanguageMessage(language.fullName)
   document.getElementById('mainControlInputs')?.prepend(notice)
   $('#searchText').prop('disabled', true).attr('title', notice.textContent)
 })

@@ -7,8 +7,8 @@ const definitions = [
   ['swedish', 'sv', 'sv-SE', true, 'swedish'],
   ['spanish', 'es', 'es-ES', true, 'spanish'],
   ['english', 'en', 'en-US', false, null],
-  ['french', 'fr', 'fr-FR', false, null],
-  ['german', 'de', 'de-DE', false, null],
+  ['french', 'fr', 'fr-FR', true, null],
+  ['german', 'de', 'de-DE', true, null],
   ['hindi', 'hi', 'hi-IN', false, null],
   ['greek', 'el', 'el-GR', false, null],
 ]
@@ -37,8 +37,14 @@ export function languageFromLocation(loc = typeof window === 'undefined' ? null 
 }
 export function requireStudyLanguage(loc) {
   const language = languageFromLocation(loc)
-  if (!language.supported) throw new Error(`The study app does not support “${language.fullName}” yet. Choose Swedish or Spanish.`)
+  if (!language.supported) throw new Error(unsupportedStudyLanguageMessage(language.fullName))
   return language
+}
+export function unsupportedStudyLanguageMessage(name) {
+  const choices = Object.values(LANGUAGES).filter(language => language.capabilities.study)
+    .map(language => language.name[0].toUpperCase() + language.name.slice(1))
+  const last = choices.pop()
+  return `The study app does not support “${name}” yet. Choose ${choices.join(', ')} or ${last}.`
 }
 export function defaultDataRoot(language) {
   if (typeof language !== 'string' || !LANGUAGE_KEY.test(language)) throw new Error(`Invalid language data key: ${language}`)

@@ -84,6 +84,12 @@ async function checkMultilingualVocabulary(browser, mobile) {
     if (pathname.endsWith('/spanish/vocabulary.txt')) {
       return route.fulfill({contentType:'text/plain', body:'#Food, Drink, kitchen, Eating\n(drink)|beber|tomar|\n'})
     }
+    if (pathname.endsWith('/french/vocabulary.txt')) {
+      return route.fulfill({contentType:'text/plain', body:'#Food, Drink, kitchen, Eating\n(drink)|boire|je bois|bu|\n'})
+    }
+    if (pathname.endsWith('/german/vocabulary.txt')) {
+      return route.fulfill({contentType:'text/plain', body:'#Food, Drink, kitchen, Eating\n(drink)|trinken|trinkt|trank|getrunken|\n'})
+    }
     return serveFixtures(route)
   })
   await page.addInitScript(() => {
@@ -310,6 +316,17 @@ async function checkMultilingualVocabulary(browser, mobile) {
     assert.equal(await page.locator('#vocabularyLookupLanguage').inputValue(), 'hi')
     assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), ['Spanish', 'English', 'Hindi'])
     assert.equal(await language.locator('option:checked').textContent(), 'Hindi')
+    for (const [name, label, word] of [['french', 'French', 'boire'], ['german', 'German', 'trinken']]) {
+      await openSearchOptions()
+      const learning = page.locator('#vocabularyLearningLanguage')
+      assert.deepEqual(await learning.locator('option').allTextContents(), ['Swedish', 'Spanish', 'French', 'German'])
+      await learning.selectOption(name)
+      await page.waitForURL(new RegExp('lang=' + name))
+      await results.locator('mark').filter({hasText:word}).first().waitFor()
+      assert.equal(await query.inputValue(), 'peena')
+      assert.equal(await page.locator('#vocabularyLookupLanguage').inputValue(), 'hi')
+      assert.deepEqual(await language.locator('option:not([hidden])').allTextContents(), [label, 'English', 'Hindi'])
+    }
     assert.deepEqual(errors, [])
     console.log((mobile ? 'Mobile' : 'Desktop') + ': optional vocabulary controls and cross-language lookup passed')
   } finally { await page.close() }
@@ -317,7 +334,8 @@ async function checkMultilingualVocabulary(browser, mobile) {
 ;(async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, args:['--no-sandbox']})
   try {
-    for (const [name, code, supported] of [['Swedish','sv',true], ['SPANISH','es',true], ['hindi','hi',false], ['unknown','',false]]) {
+    for (const [name, code, supported, term] of [['Swedish','sv',true,'gräl'], ['SPANISH','es',true,'luz'],
+      ['french','fr',true,'maisons'], ['german','de',true,'Häuser'], ['hindi','hi',false], ['unknown','',false]]) {
       const page = await browser.newPage({viewport:{width:390,height:844}, isMobile:true, hasTouch:true})
       const errors = [], dataRequests = []
       page.on('pageerror', error => errors.push(error.message))
@@ -326,6 +344,11 @@ async function checkMultilingualVocabulary(browser, mobile) {
         if (url.includes('/db/language/')) dataRequests.push(new URL(url).pathname)
         if (name.toLowerCase() === 'spanish' && new URL(url).pathname.endsWith('/vocabulary.txt'))
           return route.fulfill({contentType:'text/plain', body:'#Spanish\n(light)|luz|\n(speak)|hablar|\n'})
+        if (['fr', 'de'].includes(code)) {
+          if (new URL(url).pathname.endsWith('/srts/index.json')) return route.fulfill({json:[]})
+          if (new URL(url).pathname.endsWith('/vocabulary.txt')) return route.fulfill({contentType:'text/plain',
+            body:code === 'fr' ? '#Home\n(house)|maison|la maison|maisons|\n' : '#Home\n(house)|Haus|das Haus|Häuser|\n'})
+        }
         return serveFixtures(route)
       })
       await page.addInitScript(() => {
@@ -342,10 +365,17 @@ async function checkMultilingualVocabulary(browser, mobile) {
         assert(dataRequests.some(url => url.includes('/db/language/' + name.toLowerCase() + '/srts/index.json')))
         assert(dataRequests.every(url => !url.includes('/db/language/' + name + '/')))
         assert.equal(await page.locator('#searchText').isEnabled(), true)
-        await page.locator('#searchText').fill(code === 'es' ? 'luz' : 'gräl')
+        await page.locator('#searchText').fill(term)
         await page.locator('#searchText').press('Tab')
         try { await page.waitForFunction(() => !document.querySelector('#result').textContent.includes('Loading…')) }
         catch(error) {console.error({language:name,errors}, await page.evaluate(() => ({search:window.searchText,result:document.querySelector('#result').textContent.slice(0,800)}))); throw error}
+        if (['fr', 'de'].includes(code)) {
+          const results = page.locator('#vocabularyResult')
+          await results.getByText(new RegExp(term)).first().waitFor()
+          await page.locator('#searchText').fill('house')
+          await page.locator('#searchText').press('Tab')
+          await results.locator('[data-vocab-match-kind="hint"]').filter({hasText:code === 'fr' ? 'maison' : 'Haus'}).waitFor()
+        }
       } else {
         assert.match(await page.locator('#unsupportedStudyLanguage').innerText(), /does not support/)
         assert.equal(await page.locator('#searchText').isDisabled(), true)
