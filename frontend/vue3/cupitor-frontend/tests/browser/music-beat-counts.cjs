@@ -116,6 +116,11 @@ async function verifyGuitar(browser, mobile) {
       assert(Number.isFinite(p.tabBottom), `TAB staff found for ${p.key}`);
       assert(p.top > p.tabBottom + 3, `${p.key} clears the bottom of the tablature (${p.top} > ${p.tabBottom})`);
     });
+    const clearance = await page.evaluate(() => {
+      const bottom = Math.max(...[...document.querySelectorAll('#osmdPreview [data-counter-key]')].map(n => n.getBoundingClientRect().bottom));
+      return document.getElementById('variationsSection').getBoundingClientRect().top - bottom;
+    });
+    assert(clearance >= 6, 'the counter row stays clear of controls following the score');
   };
   try {
     await page.goto('http://127.0.0.1:3000/music.html?piece=guitar-tab-study');
