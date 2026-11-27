@@ -24884,9 +24884,10 @@ function _pracRecWatch() {
     // last take when one was spoken after them.
     if (st.clipStop != null && prev < ct) {
       const end = _pracRecClipEnd(st.clipStop)
-      // Half a poll early on average rather than half a poll late, so the
-      // pause lands at the end instead of in the next line's speech.
-      if (prev < end && ct + (ct - prev) / 2 >= end) { _pracRecPauseVideo(); return }
+      // Use the observed media time. Extrapolating from the previous sample
+      // mistakes seeks or delayed polls for playback speed and cuts off the
+      // clip (including configured padding or a saved take) before its end.
+      if (ct >= end) { _pracRecPauseVideo(); return }
     }
     // The mark this pass was aimed at is behind the playhead without having
     // been crossed — the rewind landed past it, which it can when two takes
