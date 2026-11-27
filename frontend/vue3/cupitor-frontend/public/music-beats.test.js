@@ -1,4 +1,4 @@
-import { measureBeatCounters, beatX, beatCounterLayout, copyBeatCounterEdits } from './music-beats.js';
+import { measureBeatCounters, beatStrength, beatX, beatCounterLayout, copyBeatCounterEdits } from './music-beats.js';
 import { createMusicRenderer } from './music-render.js';
 import { createMusicStore } from './music-local-store.js';
 import { indexedDB } from 'fake-indexeddb';
@@ -14,6 +14,21 @@ test('pickup, off-beat pickup and short final bar have distinct counting', () =>
   expect(measureBeatCounters({ measure: 1, duration: 1, pickup: true }).map(r => [r.label, r.beat])).toEqual([['4', 0]]);
   expect(measureBeatCounters({ measure: 1, duration: 1.5, pickup: true }).map(r => [r.label, r.beat])).toEqual([['3.5', 0], ['4', .5]]);
   expect(measureBeatCounters({ measure: 8, duration: 2 }).map(r => r.label)).toEqual(['1', '2']);
+});
+
+test.each([
+  [4, 4, ['downbeat', 'weak', 'strong', 'weak']],
+  [3, 4, ['downbeat', 'weak', 'weak']],
+  [6, 8, ['downbeat', 'weak', 'weak', 'strong', 'weak', 'weak']],
+  [9, 8, ['downbeat', 'weak', 'weak', 'strong', 'weak', 'weak', 'strong', 'weak', 'weak']],
+  [5, 8, ['downbeat', 'weak', 'weak', 'weak', 'weak']],
+])('accent hierarchy in %i/%i', (numerator, denominator, strengths) => {
+  expect(measureBeatCounters({ measure: 1, numerator, denominator, duration: numerator * 4 / denominator }).map(r => r.strength)).toEqual(strengths);
+});
+
+test('pickup is accented by its metric position, not by being first on the page', () => {
+  expect(measureBeatCounters({ measure: 1, duration: 1, pickup: true })[0].strength).toBe('weak');
+  expect(beatStrength(3.5, 4, 4)).toBe('weak');
 });
 
 test('beat positions follow uneven engraved anchors and interpolate sustained notes', () => {
@@ -105,6 +120,9 @@ test('manual edits survive redraw and reload, can be hidden, and reset to automa
   await renderer.loadDetail(detail);
   const label = () => host.querySelector('[data-counter-key="2:2"]');
   expect(label().textContent).toBe('two');
+  expect(label().getAttribute('data-beat-strength')).toBe('weak');
+  expect(host.querySelector('[data-counter-key="2:1"] .downbeat')).not.toBeNull();
+  expect(host.querySelector('[data-counter-key="2:3"] .strong')).not.toBeNull();
   expect(label().querySelector('[role=button]')).toBeNull();
   renderer.setBeatCounterEditing(true);
   label().firstChild.click();

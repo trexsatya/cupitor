@@ -817,6 +817,11 @@
     <input type="checkbox" id="chordWindowChk" hidden>
     <input type="checkbox" id="globalMatchChk" hidden>
   </div>
+  <div id="beatCountLegend" class="beat-count-legend" aria-label="Beat count styles">
+    <span><b class="beat-counter downbeat" aria-hidden="true">1</b> Downbeat</span>
+    <span><b class="beat-counter strong" aria-hidden="true">3</b> Strong beat</span>
+    <span><b class="beat-counter weak" aria-hidden="true">2</b> Other beats</span>
+  </div>
   <div id="beatCountEditor" class="beat-count-editor" hidden>
     <span>Click a count to edit it, or drag it into place. Counts follow the time-signature unit (6/8: 1–6).</span>
     <span id="beatCountSelection" role="status">Select a count on the score.</span>
@@ -2980,13 +2985,14 @@ Can you hear it?       &gt; ask()"></textarea>
   };
   document.getElementById('noteNameChk').onchange = (e) => { if (renderer) renderer.setNoteNames(e.target.checked); };
   document.getElementById('beatCountChk').onchange = e => {
+    document.getElementById('beatCountLegend').hidden = !e.target.checked;
     if (renderer) renderer.setBeatCounters(e.target.checked);
     if (!e.target.checked) setBeatCounterEditing(false);
   };
   function setBeatCounterEditing(on) {
     document.getElementById('beatCountEditBtn').setAttribute('aria-pressed', String(on));
     document.getElementById('beatCountEditor').hidden = !on;
-    if (on) { document.getElementById('beatCountChk').checked = true; syncToggles(); }
+    if (on) { document.getElementById('beatCountChk').checked = true; document.getElementById('beatCountLegend').hidden = false; syncToggles(); }
     if (renderer) { if (on) renderer.setBeatCounters(true); renderer.setBeatCounterEditing(on); }
   }
   document.getElementById('beatCountEditBtn').onclick = () => {
