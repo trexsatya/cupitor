@@ -26,6 +26,11 @@ const source = `<?xml version="1.0"?><score-partwise version="3.1">
   <measure number="6">${['G', 'F', 'E', 'D', 'C', 'D'].map(s => note(s, 2, 'eighth')).join('')}</measure>
   </part></score-partwise>`;
 const detail = { format: 'musicxml', source, voices: [], meta: { id: 'meter-study', title: 'Beat counts · meter study', tempo: 90 } };
+// Two bars from the published guitar score that exposed the misplaced row:
+// trexsatya.github.io/db/music/western/details/samba-do-aviao-antonio-carlos-jobim-samba-do-aviao-by-antonio-carlos-jobim.mxl.json
+const guitarDetail = { format: 'musicxml', voices: [],
+  source: fs.readFileSync(path.join(__dirname, 'fixtures/guitar-notation-tab.musicxml'), 'utf8'),
+  meta: { id: 'guitar-tab-study', title: 'Samba do Avião · notation and tablature', instrument: 'Guitar', tempo: 100 } };
 
 async function serve(route) {
   const url = new URL(route.request().url());
@@ -38,8 +43,9 @@ async function serve(route) {
   if (url.hostname === 'code.jquery.com') return route.fulfill({
     body: fs.readFileSync(require.resolve('jquery/dist/jquery.min.js')), contentType: 'application/javascript',
   });
-  if (url.pathname.endsWith('/western/index.json')) return route.fulfill({ json: [{ id: 'meter-study', title: detail.meta.title, tags: [] }] });
+  if (url.pathname.endsWith('/western/index.json')) return route.fulfill({ json: [detail, guitarDetail].map(d => ({ id: d.meta.id, title: d.meta.title, tags: [] })) });
   if (url.pathname.endsWith('/details/meter-study.json')) return route.fulfill({ json: detail });
+  if (url.pathname.endsWith('/details/guitar-tab-study.json')) return route.fulfill({ json: guitarDetail });
   if (route.request().resourceType() === 'script') return route.fulfill({ body: '', contentType: 'application/javascript' });
   return route.fulfill({ json: [] });
 }
@@ -93,10 +99,47 @@ async function verify(browser, mobile) {
   } finally { await page.close(); }
 }
 
+async function verifyGuitar(browser, mobile) {
+  const page = await browser.newPage({ viewport: mobile ? { width: 430, height: 1100 } : { width: 1600, height: 1100 },
+    isMobile: mobile, hasTouch: mobile });
+  page.setDefaultTimeout(20000);
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.route('**/*', serve);
+  const checkPlacement = async () => {
+    const positions = await page.locator('#osmdPreview [data-counter-key]').evaluateAll(nodes => nodes.map(n => {
+      const measure = n.dataset.counterKey.split(':')[0];
+      const tab = [...n.ownerSVGElement.querySelectorAll('.vf-measure')].find(g => g.id === measure && g.querySelector('.vf-tabnote'));
+      return { key: n.dataset.counterKey, top: n.getBoundingClientRect().top, tabBottom: tab?.getBoundingClientRect().bottom };
+    }));
+    assert(positions.length > 0);
+    positions.forEach(p => {
+      assert(Number.isFinite(p.tabBottom), `TAB staff found for ${p.key}`);
+      assert(p.top > p.tabBottom + 3, `${p.key} clears the bottom of the tablature (${p.top} > ${p.tabBottom})`);
+    });
+  };
+  try {
+    await page.goto('http://127.0.0.1:3000/music.html?piece=guitar-tab-study');
+    await page.locator('[data-counter-key="2:2"] .beat-counter').waitFor();
+    await page.evaluate(() => document.fonts.ready);
+    assert.equal(await page.locator('#osmdPreview .beat-counter').count(), 4, 'one count row per 2/2 bar');
+    await checkPlacement();
+    await fs.promises.mkdir(screenshots, { recursive: true });
+    await page.locator('#musicPreview').screenshot({ path: path.join(screenshots, mobile ? 'guitar-beat-counts-mobile.png' : 'guitar-beat-counts-desktop.png') });
+    await page.locator('#segFrom').fill('2');
+    await page.locator('#segTo').fill('2');
+    await page.locator('#previewSegBtn').click();
+    await page.waitForFunction(() => document.querySelectorAll('#osmdPreview .beat-counter').length === 2);
+    assert.equal(await page.locator('[data-counter-key="1:1"]').count(), 0, 'no counters for the undrawn bar');
+    await checkPlacement();
+    assert.deepEqual(errors, []);
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: guitar beat counts clear notation and TAB, including segment view`);
+  } finally { await page.close(); }
+}
+
 if (require.main === module) (async () => {
   const browser = await chromium.launch({ headless: true,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ['--no-sandbox', '--disable-dev-shm-usage'] });
-  try { await verify(browser, false); await verify(browser, true); }
+  try { await verify(browser, false); await verify(browser, true); await verifyGuitar(browser, false); await verifyGuitar(browser, true); }
   finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
