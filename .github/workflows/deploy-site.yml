@@ -127,6 +127,18 @@ jobs:
             echo "CUPITOR_CHROME_PATH=$chrome_path"
           } >> "$GITHUB_ENV"
 
+      - name: Verify beat count styling on desktop and mobile
+        run: node tests/browser/music-beat-counts.cjs
+
+      - name: Save beat count screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: music-beat-count-screenshots
+          path: source/frontend/vue3/cupitor-frontend/test-results/music-beat-counts/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Build production site
         run: npm run build
         env:

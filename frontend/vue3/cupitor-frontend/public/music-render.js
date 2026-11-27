@@ -1124,19 +1124,23 @@ export function createMusicRenderer(container, opts = {}) {
           const label = svgHtmlLabel(document, {
             x: row.x + (edit.dx || 0), y: row.y + (edit.dy || 0), fontSize: 11,
             anchor: 'middle', vAlign: 'middle', text: text || (editBeatCounters ? '·' : ''),
-            css: 'font-family:system-ui,sans-serif;font-weight:600;color:#374151;'
-              + 'text-shadow:0 0 3px #fff,0 0 3px #fff;',
+            css: 'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;',
           });
           label.setAttribute('x', row.x + (edit.dx || 0) - width / 2);
           label.setAttribute('width', width);
+          label.setAttribute('y', row.y + (edit.dy || 0) - 12);
+          label.setAttribute('height', 24);
           label.setAttribute('data-counter-key', row.key);
+          label.setAttribute('data-beat-strength', row.strength);
           const div = label.firstChild;
-          div.className = 'beat-counter' + (editBeatCounters ? ' editable' : '')
+          div.className = `beat-counter ${row.strength}` + (editBeatCounters ? ' editable' : '')
             + (row.key === selectedBeatCounter ? ' selected' : '') + (edit.hidden ? ' hidden-count' : '');
+          const accent = row.strength === 'downbeat' ? 'downbeat' : row.strength === 'strong' ? 'strong beat' : 'weak beat';
+          div.title = `Beat count ${text} · ${accent}`;
           if (editBeatCounters) {
             label.style.pointerEvents = 'auto';
             div.setAttribute('role', 'button'); div.setAttribute('tabindex', '0');
-            div.setAttribute('aria-label', `Measure ${row.measure - measureOffset}, count ${text}. Adjust count`);
+            div.setAttribute('aria-label', `Measure ${row.measure - measureOffset}, count ${text}, ${accent}. Adjust count`);
             const select = () => {
               selectedBeatCounter = row.key;
               container.querySelectorAll('.beat-counter.selected').forEach(n => n.classList.remove('selected'));

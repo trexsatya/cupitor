@@ -2,6 +2,16 @@
 const EPS = 1e-6;
 const rounded = n => Math.round(n * 1e6) / 1e6;
 
+// Accent the notated meter, independent of a manually renamed counter. For
+// asymmetric meters, only the unambiguous downbeat is assumed.
+export function beatStrength(number, numerator, denominator) {
+  if (Math.abs(number - Math.round(number)) > EPS) return 'weak';
+  if (number === 1) return 'downbeat';
+  const compound = numerator > 3 && numerator % 3 === 0 && (denominator === 8 || denominator === 16);
+  if ((compound && (number - 1) % 3 === 0) || (numerator === 4 && number === 3)) return 'strong';
+  return 'weak';
+}
+
 // `duration` and `beat` are quarter-note beats. Only the opening short bar is
 // right-aligned to the meter: a one-quarter pickup in 4/4 starts on count 4.
 export function measureBeatCounters({ measure, numerator = 4, denominator = 4, duration, pickup = false }) {
@@ -16,6 +26,7 @@ export function measureBeatCounters({ measure, numerator = 4, denominator = 4, d
   return slots.map(k => ({
     key: `${measure}:${rounded(k + 1)}`, measure,
     number: rounded(k + 1), label: String(rounded(k + 1)), beat: rounded(k * unit - shift),
+    strength: beatStrength(rounded(k + 1), numerator, denominator),
   }));
 }
 
