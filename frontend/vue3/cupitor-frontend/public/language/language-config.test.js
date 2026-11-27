@@ -27,13 +27,14 @@ test('unknown and unimplemented study languages have an explicit unsupported sta
 })
 test.each([
   ['spanish', 'es', 'es-ES'], ['french', 'fr', 'fr-FR'], ['german', 'de', 'de-DE'],
+  ['portuguese', 'pt', 'pt-PT'], ['chinese', 'zh', 'zh-CN'], ['thai', 'th', 'th-TH'],
 ])('%s vocabulary uses its own data, subtitle suffix and speech locale', (name, code, locale) => {
   const language = requireStudyLanguage(at('?lang=' + name))
   expect(language.code).toBe(code)
   expect(language.definition.subtitleSuffix).toBe('.' + code + '.srt')
   expect(defaultDataRoot(language.fullName)).toBe('db/language/' + name)
   expect(speechLocale(name)).toBe(locale)
-  expect(() => requireStudyLanguage(at('?lang=unknown'))).toThrow('Swedish, Spanish, French or German')
+  expect(() => requireStudyLanguage(at('?lang=unknown'))).toThrow('Swedish, Spanish, French, German, Portuguese, Chinese or Thai')
 })
 test('study calls retain named-language and explicit locale support independently of study capabilities', () => {
   expect(speechLocale('hindi')).toBe('hi-IN')

@@ -9,6 +9,9 @@ const definitions = [
   ['english', 'en', 'en-US', false, null],
   ['french', 'fr', 'fr-FR', true, null],
   ['german', 'de', 'de-DE', true, null],
+  ['portuguese', 'pt', 'pt-PT', true, null],
+  ['chinese', 'zh', 'zh-CN', true, null],
+  ['thai', 'th', 'th-TH', true, null],
   ['hindi', 'hi', 'hi-IN', false, null],
   ['greek', 'el', 'el-GR', false, null],
 ]
