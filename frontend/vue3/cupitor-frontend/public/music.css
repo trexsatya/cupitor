@@ -82,3 +82,15 @@
 /* Per-row delete button in Manage Library: quiet until hovered. */
 .pieceDel { border: none; background: none; cursor: pointer; opacity: .55; padding: 0 .25em; }
 .pieceDel:hover { opacity: 1; }
+/* Beat-count labels are passive until Adjust counts is enabled. */
+.beat-counter { border:1px solid transparent; border-radius:4px; box-sizing:border-box; }
+.beat-counter.editable { cursor:move; touch-action:none; user-select:none; background:#eff6ff; border-color:#93c5fd; }
+.beat-counter.editable.selected { background:#dbeafe; border-color:#1d4ed8; }
+.beat-counter.hidden-count { opacity:.5; text-decoration:line-through; }
+.beat-count-editor { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px; margin:6px 0; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:13px; }
+.beat-count-editor[hidden] { display:none; }
+.beat-count-editor > span:first-child { flex-basis:100%; }
+.beat-count-editor fieldset { display:flex; flex-wrap:wrap; align-items:center; gap:8px; border:0; padding:0; margin:0; }
+.beat-count-editor input[type=number] { width:5em; }
+#beatCountEditBtn[aria-pressed=true] { background:#dbeafe; border-color:#1d4ed8; }
+#osmdPreview [id^=osmdCanvasPage] { padding-bottom:24px; }

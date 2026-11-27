@@ -2,6 +2,7 @@
 // Rendering for the music study app: pure measure-mapping helpers (TDD) +
 // a thin OSMD wrapper (injectable factory) for whole-piece / segment rendering.
 import { primaryVoice, canonicalChordSpans } from './music-encoding.js';
+import { beatCounterLayout, copyBeatCounterEdits } from './music-beats.js';
 import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, verticalChords, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
 import { chordByAnyName } from './music-reference-data.js';
 import { indexAssignments, colorMap, toggleNote, firstTagForKey, revealedTagForKey, renameInAssignments, noteId as tagNoteId } from './music-tags.js';
@@ -982,6 +983,11 @@ export function createMusicRenderer(container, opts = {}) {
   let alignBars = null;      // printed bars forced to start a line, or null for the score as engraved
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
   let noteNames = false;
+  let showBeatCounters = opts.beatCounters !== false;
+  let editBeatCounters = false;
+  let beatCounterEdits = {};
+  let selectedBeatCounter = null;
+  let beatCounterRows = [];
   let showChords = false;        // draw stacked chord-candidate labels above each chord area
   let dimConnectors = true;      // grey out beams/stems/slurs by default to cut visual noise
   let currentZoom = 1;           // OSMD zoom in effect; system-gap detection must scale with it
@@ -1084,6 +1090,102 @@ export function createMusicRenderer(container, opts = {}) {
   function applyVoiceColors() { paintVoiceColors(osmd, colorVoices, voiceIndexByRef); }
 
   function applyNoteNames() { paintNoteNames(osmd, container, noteNames); }
+
+  function selectedCounter() {
+    const row = beatCounterRows.find(r => r.key === selectedBeatCounter);
+    if (!row) return null;
+    return { key: row.key, measure: row.measure, number: row.number,
+      label: row.label, dx: 0, dy: 0, hidden: false, ...(beatCounterEdits[row.key] || {}) };
+  }
+  function notifyCounterSelection() {
+    if (opts.onBeatCounterSelect) opts.onBeatCounterSelect(selectedCounter());
+  }
+  function saveCounterEdits() {
+    if (opts.onBeatCountersChange) opts.onBeatCountersChange(copyBeatCounterEdits(beatCounterEdits));
+  }
+  function applyBeatCounters() {
+    if (!container || !container.querySelectorAll) return;
+    if (!showBeatCounters) {
+      container.querySelectorAll('.beat-counter-layer').forEach(n => n.remove());
+      return;
+    }
+    beatCounterRows = beatCounterLayout(osmd, container, { from: shownFrom, to: shownTo });
+    if (selectedBeatCounter && !beatCounterRows.some(r => r.key === selectedBeatCounter)) {
+      selectedBeatCounter = null; notifyCounterSelection();
+    }
+    container.querySelectorAll('svg').forEach(svg => {
+      swapOverlayLayer(svg, 'beat-counter-layer', layer => {
+        layer.style.pointerEvents = 'none';
+        beatCounterRows.filter(r => r.svg === svg).forEach(row => {
+          const edit = beatCounterEdits[row.key] || {};
+          if (edit.hidden && !editBeatCounters) return;
+          const text = edit.label == null ? row.label : edit.label;
+          const width = Math.max(26, text.length * 8 + 12);
+          const label = svgHtmlLabel(document, {
+            x: row.x + (edit.dx || 0), y: row.y + (edit.dy || 0), fontSize: 11,
+            anchor: 'middle', vAlign: 'middle', text: text || (editBeatCounters ? '·' : ''),
+            css: 'font-family:system-ui,sans-serif;font-weight:600;color:#374151;'
+              + 'text-shadow:0 0 3px #fff,0 0 3px #fff;',
+          });
+          label.setAttribute('x', row.x + (edit.dx || 0) - width / 2);
+          label.setAttribute('width', width);
+          label.setAttribute('data-counter-key', row.key);
+          const div = label.firstChild;
+          div.className = 'beat-counter' + (editBeatCounters ? ' editable' : '')
+            + (row.key === selectedBeatCounter ? ' selected' : '') + (edit.hidden ? ' hidden-count' : '');
+          if (editBeatCounters) {
+            label.style.pointerEvents = 'auto';
+            div.setAttribute('role', 'button'); div.setAttribute('tabindex', '0');
+            div.setAttribute('aria-label', `Measure ${row.measure - measureOffset}, count ${text}. Adjust count`);
+            const select = () => {
+              selectedBeatCounter = row.key;
+              container.querySelectorAll('.beat-counter.selected').forEach(n => n.classList.remove('selected'));
+              div.classList.add('selected');
+              notifyCounterSelection();
+            };
+            div.addEventListener('keydown', e => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); select(); }
+            });
+            div.addEventListener('click', e => { e.stopPropagation(); select(); });
+            div.addEventListener('pointerdown', e => {
+              if (e.button !== 0) return;
+              e.preventDefault(); e.stopPropagation(); select();
+              const matrix = svg.getScreenCTM();
+              if (!matrix) return;
+              const inverse = matrix.inverse();
+              const point = ev => { const p = svg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY; return p.matrixTransform(inverse); };
+              const start = point(e);
+              let dx = 0, dy = 0;
+              const move = ev => {
+                if (ev.pointerId !== e.pointerId) return;
+                ev.preventDefault(); const p = point(ev); dx = p.x - start.x; dy = p.y - start.y;
+                label.setAttribute('transform', `translate(${dx},${dy})`);
+              };
+              const finish = ev => {
+                if (ev.pointerId !== e.pointerId) return;
+                document.removeEventListener('pointermove', move);
+                document.removeEventListener('pointerup', finish);
+                document.removeEventListener('pointercancel', cancel);
+                if (Math.abs(dx) + Math.abs(dy) > 1) {
+                  beatCounterEdits = copyBeatCounterEdits({ ...beatCounterEdits,
+                    [row.key]: { ...edit, dx: (edit.dx || 0) + dx, dy: (edit.dy || 0) + dy } });
+                  saveCounterEdits();
+                }
+                applyBeatCounters(); notifyCounterSelection();
+              };
+              const cancel = ev => { dx = 0; dy = 0; finish(ev); };
+              document.addEventListener('pointermove', move, { passive: false });
+              document.addEventListener('pointerup', finish);
+              document.addEventListener('pointercancel', cancel);
+            });
+          }
+          layer.appendChild(label);
+        });
+      });
+      // Counts under the final staff can extend past OSMD's tight SVG bounds.
+      svg.style.overflow = 'visible';
+    });
+  }
 
   // A VexFlow key ("c#/4") → pitch-class name ("C#"), preserving the notated accidental so
   // it matches the key-spelled chord tones in allChords.
@@ -2554,6 +2656,7 @@ export function createMusicRenderer(container, opts = {}) {
   function postRender() {
     applyDimConnectors();
     applyNoteNames();
+    applyBeatCounters();
     applyMeasureHighlight();
     applyChordOverlay();
     applyChordWindow();
@@ -2769,6 +2872,8 @@ export function createMusicRenderer(container, opts = {}) {
         return { ok: false, reason: 'not-musicxml' };
       }
       sourceXml = detail.source;   // kept so the layout can be rebuilt without the caller re-supplying it
+      beatCounterEdits = copyBeatCounterEdits(detail.beatCounters);
+      selectedBeatCounter = null;
       alignBars = null;            // a fresh piece is drawn as engraved
       wantScrollTop = null;        // a new piece opens at its beginning, not at the last one's place
       applyAlignRules();
@@ -2867,6 +2972,19 @@ export function createMusicRenderer(container, opts = {}) {
     setZoom,
     setVoiceColors(on) { colorVoices = !!on; redraw(); },
     setNoteNames(on) { noteNames = !!on; redraw(); },
+    setBeatCounters(on) { showBeatCounters = !!on; applyBeatCounters(); },
+    setBeatCounterEditing(on) { editBeatCounters = !!on; applyBeatCounters(); notifyCounterSelection(); },
+    getBeatCounters() { return copyBeatCounterEdits(beatCounterEdits); },
+    getSelectedBeatCounter: selectedCounter,
+    updateBeatCounter(key, edit) {
+      if (!beatCounterRows.some(r => r.key === key)) return;
+      beatCounterEdits = copyBeatCounterEdits({ ...beatCounterEdits, [key]: edit });
+      applyBeatCounters(); saveCounterEdits(); notifyCounterSelection();
+    },
+    resetBeatCounter(key) {
+      if (key) delete beatCounterEdits[key]; else beatCounterEdits = {};
+      applyBeatCounters(); saveCounterEdits(); notifyCounterSelection();
+    },
     getVoiceColors() { return colorVoices; },
     // A snapshot of the colours the sheet is wearing: (note identity) → colour, or null for "nothing
     // says otherwise". For the compare view, which draws the same piece in its own OSMD and has to reach
