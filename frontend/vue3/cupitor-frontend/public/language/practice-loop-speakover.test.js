@@ -73,6 +73,33 @@ function fixture({ pauseOnRecordStart = false } = {}) {
 }
 
 describe('continuous Practice Speak Over loop', () => {
+  test.each([[0, 4], [4.4, 4.49]])('normal playback keeps its padded end after the clock moves from %s to %s', (previous, current) => {
+    const h = fixture()
+    h.state.clipStart = 0
+    h.state.clipStop = 4.5
+    h.context._pracRecWatch()
+    h.setPosition(previous)
+    h.tick()
+    h.setPosition(current)
+    h.tick()
+    expect(h.sourcePaused()).toBe(false)
+    h.setPosition(4.5)
+    h.tick()
+    expect(h.sourcePaused()).toBe(true)
+  })
+
+  test('a saved take extending the clip is also played through its actual end', () => {
+    const h = fixture()
+    h.state.clipStop = 3
+    h.context._pracRecClipEnd = () => 6.3
+    h.context._pracRecWatch()
+    h.setPosition(0); h.tick()
+    h.setPosition(6); h.tick()
+    expect(h.sourcePaused()).toBe(false)
+    h.setPosition(6.3); h.tick()
+    expect(h.sourcePaused()).toBe(true)
+  })
+
   test('an ad parks loop seeks until content returns', async () => {
     const h = fixture()
     h.context.isYoutubeAdPlaying = () => true
