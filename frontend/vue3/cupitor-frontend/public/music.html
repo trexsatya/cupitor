@@ -803,16 +803,32 @@
     <button id="originalViewBtn" class="btn" title="Show the piece in its original form — clear all Motif / Phrase / Rhythm highlighting, dimming and playback muting. Your tags, phrases and rhythms are kept; any highlight action brings its view back."><span class="ic">↺</span><span class="txt">Original view</span></button>
     <button class="btn toggle" data-for="voiceColorChk" title="Color the voices"><span class="ic">🎨</span><span class="txt">Color voices</span></button>
     <button class="btn toggle" data-for="noteNameChk" title="Show note names"><span class="ic">🔤</span><span class="txt">Note names</span></button>
+    <button class="btn toggle" data-for="beatCountChk" title="Show beat counts derived from the time signature and score timing"><span class="ic">123</span><span class="txt">Beat counts</span></button>
+    <button id="beatCountEditBtn" class="btn" aria-pressed="false" aria-controls="beatCountEditor" title="Rename, hide or move beat counts"><span class="ic">✎</span><span class="txt">Adjust counts</span></button>
     <button class="btn toggle" data-for="chordChk" title="Show chords"><span class="ic">🎵</span><span class="txt">Show chords</span></button>
     <button class="btn toggle" data-for="dimConnChk" title="Dim beams / stems"><span class="ic">〰️</span><span class="txt">Dim beams/stems</span></button>
     <button class="btn toggle" data-for="chordWindowChk" title="Draggable chord window"><span class="ic">🔲</span><span class="txt">Chord window</span></button>
     <button class="btn toggle" data-for="globalMatchChk" title="When on, clicking a chord name highlights every occurrence of it across the visible sheet"><span class="ic">🌐</span><span class="txt">Global</span></button>
     <input type="checkbox" id="voiceColorChk" checked hidden>
     <input type="checkbox" id="noteNameChk" hidden>
+    <input type="checkbox" id="beatCountChk" checked hidden>
     <input type="checkbox" id="chordChk" checked hidden>
     <input type="checkbox" id="dimConnChk" checked hidden>
     <input type="checkbox" id="chordWindowChk" hidden>
     <input type="checkbox" id="globalMatchChk" hidden>
+  </div>
+  <div id="beatCountEditor" class="beat-count-editor" hidden>
+    <span>Click a count to edit it, or drag it into place. Counts follow the time-signature unit (6/8: 1–6).</span>
+    <span id="beatCountSelection" role="status">Select a count on the score.</span>
+    <fieldset id="beatCountFields" disabled>
+      <label>Count <input id="beatCountLabel" type="text" maxlength="32" size="6"></label>
+      <label>Horizontal offset <input id="beatCountX" type="number" step="any" min="-2000" max="2000" value="0"></label>
+      <label>Vertical offset <input id="beatCountY" type="number" step="any" min="-2000" max="2000" value="0"></label>
+      <label><input id="beatCountHidden" type="checkbox"> Hide count</label>
+      <button id="beatCountReset" type="button" class="btn">Reset this count</button>
+    </fieldset>
+    <button id="beatCountResetAll" type="button" class="btn">Reset all counts</button>
+    <span id="beatCountSaveStatus" role="status"></span>
   </div>
   <div id="suppressPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#fff8f0; border:1px solid #ffd9b0; border-radius:4px">
     <button class="btn toggle" data-for="suppressModeChk" title="Click notes to silence them"><span class="ic">🔇</span><span class="txt">Suppress notes</span></button>
@@ -1477,6 +1493,7 @@ Can you hear it?       &gt; ask()"></textarea>
         { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange, onSuppressionChange: onSuppressionChange,
           onPatternsChange: onPatternsChange, onPhrasesChange: onPhrasesChange,
           onRhythmGroupsChange: onRhythmGroupsChange, onSeek: onSeek,
+          onBeatCountersChange, onBeatCounterSelect,
           // The compare panes wear the sheet's colours; a repaint of the sheet is a repaint of theirs.
           onAfterRender: cmpRecolor });
       fbPanel = initFretboard(renderer, {
@@ -2583,6 +2600,9 @@ Can you hear it?       &gt; ask()"></textarea>
     updateFab(); positionFab();                     // the FAB is now shown (mobile) — place & label it
     startFabSync();                                 // keep its icon honest while the piece is open
     currentDetail = null; currentPreviewId = null; currentVocabEntry = null;   // cleared until a piece fully renders
+    setBeatCounterEditing(false);
+    onBeatCounterSelect(null);
+    document.getElementById('beatCountSaveStatus').textContent = '';
     openedVocabId = null;   // a plain Preview; the vocab paths below re-set this after they call us
     midiPlaying = false;
     document.getElementById('metroChk').checked = false;
@@ -2959,6 +2979,63 @@ Can you hear it?       &gt; ask()"></textarea>
     renderColorLegend();   // with colouring off there are no voice colours to name
   };
   document.getElementById('noteNameChk').onchange = (e) => { if (renderer) renderer.setNoteNames(e.target.checked); };
+  document.getElementById('beatCountChk').onchange = e => {
+    if (renderer) renderer.setBeatCounters(e.target.checked);
+    if (!e.target.checked) setBeatCounterEditing(false);
+  };
+  function setBeatCounterEditing(on) {
+    document.getElementById('beatCountEditBtn').setAttribute('aria-pressed', String(on));
+    document.getElementById('beatCountEditor').hidden = !on;
+    if (on) { document.getElementById('beatCountChk').checked = true; syncToggles(); }
+    if (renderer) { if (on) renderer.setBeatCounters(true); renderer.setBeatCounterEditing(on); }
+  }
+  document.getElementById('beatCountEditBtn').onclick = () => {
+    setBeatCounterEditing(document.getElementById('beatCountEditor').hidden);
+  };
+  function onBeatCounterSelect(count) {
+    document.getElementById('beatCountFields').disabled = !count;
+    document.getElementById('beatCountSelection').textContent = count
+      ? `Measure ${toPrintedMeasure(count.measure)}, automatic count ${count.number}` : 'Select a count on the score.';
+    if (!count) return;
+    document.getElementById('beatCountLabel').value = count.label;
+    document.getElementById('beatCountX').value = Math.round(count.dx * 10) / 10;
+    document.getElementById('beatCountY').value = Math.round(count.dy * 10) / 10;
+    document.getElementById('beatCountHidden').checked = count.hidden;
+  }
+  function updateSelectedBeatCounter() {
+    const count = renderer && renderer.getSelectedBeatCounter();
+    if (!count) return;
+    const x = document.getElementById('beatCountX'), y = document.getElementById('beatCountY');
+    if (!x.checkValidity() || !y.checkValidity() || x.value === '' || y.value === '') return;
+    renderer.updateBeatCounter(count.key, {
+      label: document.getElementById('beatCountLabel').value,
+      dx: Number(x.value), dy: Number(y.value), hidden: document.getElementById('beatCountHidden').checked,
+    });
+  }
+  ['beatCountLabel', 'beatCountX', 'beatCountY', 'beatCountHidden'].forEach(id => {
+    document.getElementById(id).addEventListener('change', updateSelectedBeatCounter);
+  });
+  document.getElementById('beatCountReset').onclick = () => {
+    const count = renderer && renderer.getSelectedBeatCounter();
+    if (count) renderer.resetBeatCounter(count.key);
+  };
+  document.getElementById('beatCountResetAll').onclick = () => { if (renderer) renderer.resetBeatCounter(); };
+  async function onBeatCountersChange(edits) {
+    if (!currentDetail || !currentPreviewId) return;
+    const id = currentPreviewId, detail = currentDetail, savedSystem = system;
+    const entry = index.find(e => e.id === id);
+    if (!entry) return;
+    detail.beatCounters = edits;
+    const status = document.getElementById('beatCountSaveStatus');
+    status.textContent = 'Saving…';
+    try {
+      await store.putPieces(savedSystem, [{ entry, detail }]);
+      unpushedIds.add(id); render(); updatePushBtn();
+      if (currentPreviewId === id) status.textContent = 'Saved locally · Push changes to sync.';
+    } catch (e) {
+      if (currentPreviewId === id) status.textContent = 'Could not save counts: ' + e.message;
+    }
+  }
   document.getElementById('chordChk').onchange = (e) => { if (renderer) renderer.setShowChords(e.target.checked); };
   document.getElementById('dimConnChk').onchange = (e) => { if (renderer) renderer.setDimConnectors(e.target.checked); };
   document.getElementById('chordWindowChk').onchange = (e) => {
