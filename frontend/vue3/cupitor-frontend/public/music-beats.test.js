@@ -83,6 +83,31 @@ test('undrawn measures and stale DOM entries cannot create phantom labels', () =
   expect(beatCounterLayout(osmd, host)).toEqual([]);
 });
 
+test('count row clears tablature whose VexFlow TabNote has a null attrs.el', () => {
+  const { host, svg, osmd } = fixture();
+  const tab = osmd.graphic.measureList[1][1];
+  tab.isTabMeasure = true;
+  const vf = tab.staffEntries[0].graphicalVoiceEntries[0].notes[0].vfnote[0];
+  vf.attrs.el.id = 'vf-tab-counter-regression';
+  const text = document.createElementNS(svg.namespaceURI, 'text');
+  text.getBBox = () => ({ x: 25, y: 175, width: 10, height: 10 });
+  vf.attrs.el.replaceChildren(text);
+  vf.attrs = { el: null, id: 'tab-counter-regression' };
+  const rows = beatCounterLayout(osmd, host).filter(r => r.measure === 2);
+  expect(rows).toHaveLength(4);
+  expect(rows.every(r => r.y > tab.stave.getBottomLineY())).toBe(true);
+  osmd.graphic.measureList = [[tab]];
+  expect(beatCounterLayout(osmd, host).map(r => r.key)).toEqual(['2:1', '2:2', '2:3', '2:4']);
+});
+
+test('an empty drawn lower staff also keeps counts below the complete system', () => {
+  const { host, osmd } = fixture();
+  const lower = osmd.graphic.measureList[1][1];
+  lower.staffEntries = [];
+  lower.ParentStaffLine = {};
+  expect(beatCounterLayout(osmd, host).find(r => r.key === '2:1').y).toBe(198);
+});
+
 test('each page owns its count row', () => {
   const { host, svg, osmd } = fixture();
   const second = document.createElementNS(svg.namespaceURI, 'svg'); host.appendChild(second);
@@ -166,7 +191,7 @@ test('piece storage round-trip preserves overrides without leaking them to anoth
   expect((await store.getDetail('western', 'other-piece')).beatCounters).toBeUndefined();
 });
 
-test('vendored OSMD uses sequential edit keys even when its pickup is measure zero', async () => {
+test('vendored OSMD pickup numbering and tablature geometry contracts', async () => {
   // Exercise the real model and SVG output, rather than assuming the shape of
   // OSMD timestamps/rest flags. Only text metrics and browser SVG bounds are stubbed.
   const canvas = jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
@@ -192,6 +217,14 @@ test('vendored OSMD uses sequential edit keys even when its pickup is measure ze
     expect(rows.map(r => `${r.measure}:${r.label}`)).toEqual(['1:4', '2:1', '2:2', '2:3', '2:4']);
     const rest = osmd.graphic.measureList[1][0];
     expect(rows.find(r => r.key === '2:1').x).toBe(rest.stave.getNoteStartX() + 5);
+    const fs = require('fs'), path = require('path');
+    await osmd.load(fs.readFileSync(path.join(__dirname, '../tests/browser/fixtures/guitar-notation-tab.musicxml'), 'utf8'));
+    osmd.render();
+    const tab = osmd.graphic.measureList[0].find(m => m && m.isTabMeasure);
+    expect(tab).toBeDefined();
+    const guitarRows = beatCounterLayout(osmd, host);
+    expect(guitarRows).toHaveLength(4);
+    expect(guitarRows.filter(r => r.measure === 1).every(r => r.y > tab.getVFStave().getBottomLineY())).toBe(true);
   } finally {
     osmd.clear(); canvas.mockRestore();
     if (oldBox) SVGElement.prototype.getBBox = oldBox; else delete SVGElement.prototype.getBBox;

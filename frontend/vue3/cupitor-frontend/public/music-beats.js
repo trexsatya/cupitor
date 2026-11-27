@@ -95,7 +95,11 @@ export function beatCounterLayout(osmd, container, { from = 1, to = Infinity } =
           (voice.notes || []).forEach(note => {
             if (note.sourceNote && note.sourceNote.IsGraceNote) return;
             const vf = note.vfnote && note.vfnote[0];
-            const el = vf && vf.attrs && vf.attrs.el;
+            // VexFlow's TabNote.draw creates a real SVG group but leaves
+            // attrs.el null. Resolve that group by its generated id as well.
+            const attrs = vf && vf.attrs;
+            const el = attrs && (attrs.el || (attrs.id && container.ownerDocument
+              && container.ownerDocument.getElementById(`vf-${attrs.id}`)));
             if (!el || el.isConnected === false || !container.contains(el)) return;
             connected = true; svg = el.ownerSVGElement;
             // A whole-bar rest is centered, not a timed beat-zero anchor.
@@ -103,7 +107,8 @@ export function beatCounterLayout(osmd, container, { from = 1, to = Infinity } =
               || (typeof note.sourceNote.isWholeRest === 'function' && note.sourceNote.isWholeRest()))) return;
             if (!Number.isFinite(beat)) return;
             const heads = el.querySelectorAll('.vf-notehead');
-            const head = heads[note.vfnoteIndex || 0] || heads[0];
+            const head = heads[note.vfnoteIndex || 0] || heads[0]
+              || (m.isTabMeasure && el.querySelector('text'));
             if (!head || !head.getBBox) return;
             let b; try { b = head.getBBox(); } catch (_) { return; }
             const x = b.x + b.width / 2;
@@ -111,7 +116,9 @@ export function beatCounterLayout(osmd, container, { from = 1, to = Infinity } =
           });
         });
       });
-      if (!connected) return;
+      // An empty staff still contributes to the system's lower edge. A live
+      // ParentStaffLine distinguishes it from an undrawn cached measure.
+      if (!connected && !m.ParentStaffLine) return;
       start = Math.min(start, stave.getNoteStartX() + 5);
       end = Math.max(end, stave.getNoteEndX() - 5);
       bottom = Math.max(bottom, stave.getBottomLineY());
