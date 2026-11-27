@@ -945,8 +945,20 @@ export function createMusicRenderer(container, opts = {}) {
   osmd.render = (...a) => {
     clampCursorToDrawnRange();   // never let OSMD update a cursor that sits outside the drawn window (it throws)
     settleUntil = Date.now() + 400;
+    if (osmd.rules && Number.isFinite(counterSystemGap)) {
+      osmd.rules.MinSkyBottomDistBetweenSystems = showBeatCounters
+        ? Math.max(counterSystemGap, 4.5 * counterLabelScale()) : counterSystemGap;
+    }
     const out = _osmdRender(...a);
-    if (!_inRender) { _inRender = true; try { postRender(); } finally { _inRender = false; } }
+    if (!_inRender) {
+      _inRender = true;
+      try {
+        // OSMD gives sustained-note bars very little horizontal space. Reserve
+        // enough for their counters, then let the engraver wrap the score.
+        for (let pass = 0; pass < 4 && fitBeatCounterBars(); pass++) _osmdRender(...a);
+        postRender();
+      } finally { _inRender = false; }
+    }
     restoreScroll();
     // Again once layout has settled: the SVG's final height can land after this call returns, and a
     // restore against the old height is a restore to the wrong place.
@@ -988,6 +1000,8 @@ export function createMusicRenderer(container, opts = {}) {
   let beatCounterEdits = {};
   let selectedBeatCounter = null;
   let beatCounterRows = [];
+  const counterBarWidths = new Map();
+  const counterSystemGap = osmd.rules && osmd.rules.MinSkyBottomDistBetweenSystems;
   let showChords = false;        // draw stacked chord-candidate labels above each chord area
   let dimConnectors = true;      // grey out beams/stems/slurs by default to cut visual noise
   let currentZoom = 1;           // OSMD zoom in effect; system-gap detection must scale with it
@@ -1103,6 +1117,37 @@ export function createMusicRenderer(container, opts = {}) {
   function saveCounterEdits() {
     if (opts.onBeatCountersChange) opts.onBeatCountersChange(copyBeatCounterEdits(beatCounterEdits));
   }
+  function counterLabelScale() {
+    const zoom = Number.isFinite(osmd.Zoom) && osmd.Zoom > 0 ? osmd.Zoom : currentZoom;
+    return 1 / Math.min(1, zoom || 1);
+  }
+  function fitBeatCounterBars() {
+    if (!showBeatCounters || !container || !container.querySelectorAll) return false;
+    const rows = beatCounterLayout(osmd, container, { from: shownFrom, to: shownTo });
+    const sources = (osmd.Sheet && osmd.Sheet.SourceMeasures) || [];
+    const gap = 28 * counterLabelScale(), factors = new Map();
+    for (let i = 1; i < rows.length; i++) {
+      const a = rows[i - 1], b = rows[i];
+      if (a.measure !== b.measure) continue;
+      const distance = b.x - a.x;
+      if (distance > 0 && distance < gap - .1) factors.set(b.measure, Math.max(factors.get(b.measure) || 1, gap / distance));
+    }
+    if (!factors.size) return false;
+    // Snapshot original factors so turning the overlay off restores engraving.
+    sources.forEach(s => { if (!counterBarWidths.has(s)) counterBarWidths.set(s, s.WidthFactor); });
+    let changed = false;
+    factors.forEach((factor, measure) => {
+      const source = sources[measure - 1];
+      if (!source) return;
+      const before = source.WidthFactor || 1, after = Math.min(32, before * factor * 1.03);
+      if (after > before + .001) { source.WidthFactor = after; changed = true; }
+    });
+    return changed;
+  }
+  function restoreCounterBarWidths() {
+    counterBarWidths.forEach((value, source) => { source.WidthFactor = value; });
+    counterBarWidths.clear();
+  }
   function applyBeatCounters() {
     if (!container || !container.querySelectorAll) return;
     if (!showBeatCounters) {
@@ -1110,6 +1155,7 @@ export function createMusicRenderer(container, opts = {}) {
       return;
     }
     beatCounterRows = beatCounterLayout(osmd, container, { from: shownFrom, to: shownTo });
+    const scale = counterLabelScale();
     if (selectedBeatCounter && !beatCounterRows.some(r => r.key === selectedBeatCounter)) {
       selectedBeatCounter = null; notifyCounterSelection();
     }
@@ -1120,19 +1166,22 @@ export function createMusicRenderer(container, opts = {}) {
           const edit = beatCounterEdits[row.key] || {};
           if (edit.hidden && !editBeatCounters) return;
           const text = edit.label == null ? row.label : edit.label;
-          const width = Math.max(26, text.length * 8 + 12);
+          const width = Math.max(26, text.length * 8 + 12) * scale;
+          const y = row.y + 18 * (scale - 1) + (edit.dy || 0);
           const label = svgHtmlLabel(document, {
-            x: row.x + (edit.dx || 0), y: row.y + (edit.dy || 0), fontSize: 11,
+            x: row.x + (edit.dx || 0), y, fontSize: 11 * scale,
             anchor: 'middle', vAlign: 'middle', text: text || (editBeatCounters ? '·' : ''),
             css: 'font-family:ui-monospace,SFMono-Regular,Consolas,monospace;',
           });
           label.setAttribute('x', row.x + (edit.dx || 0) - width / 2);
           label.setAttribute('width', width);
-          label.setAttribute('y', row.y + (edit.dy || 0) - 12);
-          label.setAttribute('height', 24);
+          label.setAttribute('y', y - 12 * scale);
+          label.setAttribute('height', 24 * scale);
           label.setAttribute('data-counter-key', row.key);
           label.setAttribute('data-beat-strength', row.strength);
           const div = label.firstChild;
+          div.style.height = `${24 * scale}px`;
+          div.style.lineHeight = `${22 * scale}px`;
           div.className = `beat-counter ${row.strength}` + (editBeatCounters ? ' editable' : '')
             + (row.key === selectedBeatCounter ? ' selected' : '') + (edit.hidden ? ' hidden-count' : '');
           const accent = row.strength === 'downbeat' ? 'downbeat' : row.strength === 'strong' ? 'strong beat' : 'weak beat';
@@ -2882,6 +2931,7 @@ export function createMusicRenderer(container, opts = {}) {
       wantScrollTop = null;        // a new piece opens at its beginning, not at the last one's place
       applyAlignRules();
       await osmd.load(stripBracketOnlyTuplets(detail.source));
+      counterBarWidths.clear();
       currentKey = (detail.meta && detail.meta.key) || null;   // powers the chord detector's power-chord fallback
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
       computeMeasureOffset();
@@ -2926,6 +2976,7 @@ export function createMusicRenderer(container, opts = {}) {
       // always drawn is the one from the bytes it has always loaded.
       const wasFull = shownFrom <= 1 && shownTo >= totalMeasures;
       await osmd.load(stripBracketOnlyTuplets(alignBars ? setSystemBreaks(sourceXml, alignBars) : sourceXml));
+      counterBarWidths.clear();
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
       computeMeasureOffset();
       // A load starts a fresh sheet, so everything the VIEW had to say about the old one has to be said
@@ -2976,7 +3027,11 @@ export function createMusicRenderer(container, opts = {}) {
     setZoom,
     setVoiceColors(on) { colorVoices = !!on; redraw(); },
     setNoteNames(on) { noteNames = !!on; redraw(); },
-    setBeatCounters(on) { showBeatCounters = !!on; applyBeatCounters(); },
+    setBeatCounters(on) {
+      showBeatCounters = !!on;
+      if (!showBeatCounters) restoreCounterBarWidths();
+      redraw();
+    },
     setBeatCounterEditing(on) { editBeatCounters = !!on; applyBeatCounters(); notifyCounterSelection(); },
     getBeatCounters() { return copyBeatCounterEdits(beatCounterEdits); },
     getSelectedBeatCounter: selectedCounter,

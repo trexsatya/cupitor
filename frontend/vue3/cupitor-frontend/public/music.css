@@ -83,8 +83,8 @@
 .pieceDel { border: none; background: none; cursor: pointer; opacity: .55; padding: 0 .25em; }
 .pieceDel:hover { opacity: 1; }
 /* Beat-count labels are passive until Adjust counts is enabled. */
-.beat-counter { border:1px solid #b8d4da; border-radius:999px; box-sizing:border-box; height:24px; line-height:22px !important; background:#f1f8f9; color:#3e6973; font-weight:600; font-variant-numeric:tabular-nums; }
-.beat-counter.downbeat { background:#0d5968; border:2px solid #0d5968; color:#fff; font-weight:800; line-height:20px !important; }
+.beat-counter { border:1px solid #b8d4da; border-radius:999px; box-sizing:border-box; height:24px; line-height:22px; background:#f1f8f9; color:#3e6973; font-weight:600; font-variant-numeric:tabular-nums; }
+.beat-counter.downbeat { background:#0d5968; border:2px solid #0d5968; color:#fff; font-weight:800; }
 .beat-counter.strong { background:#c7e8ec; border-color:#398894; color:#154e5a; font-weight:800; }
 .beat-counter.editable { cursor:move; touch-action:none; user-select:none; outline:1px dashed #45828e; outline-offset:2px; }
 .beat-counter.editable.selected { outline:2px solid #b45309; outline-offset:2px; }

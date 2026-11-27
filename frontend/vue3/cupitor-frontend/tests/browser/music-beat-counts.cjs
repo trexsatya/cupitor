@@ -66,6 +66,13 @@ async function verify(browser, mobile) {
     assert.equal(style.color, 'rgb(255, 255, 255)');
     assert.equal(style.radius, '999px');
     assert(style.height > 10, 'badges are visible after responsive zoom');
+    const collisions = await page.locator('#osmdPreview [data-counter-key]').evaluateAll(nodes => {
+      const rows = nodes.map(n => ({ key: n.dataset.counterKey, box: n.getBoundingClientRect() }));
+      return rows.slice(1).filter((r, i) => rows[i].key.split(':')[0] === r.key.split(':')[0]
+        && rows[i].box.right > r.box.left + .5).map(r => r.key);
+    });
+    assert.deepEqual(collisions, [], 'automatic badges must not overlap in narrow or sustained-note bars');
+    assert(style.height >= 22, 'beat badges keep a readable size on mobile');
     await page.locator('#viewOptions').scrollIntoViewIfNeeded();
     await fs.promises.mkdir(screenshots, { recursive: true });
     await page.locator('#musicPreview').screenshot({ path: path.join(screenshots, mobile ? 'beat-counts-mobile.png' : 'beat-counts-desktop.png') });
