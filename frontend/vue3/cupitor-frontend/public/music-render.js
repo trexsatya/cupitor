@@ -5,6 +5,7 @@ import { primaryVoice, canonicalChordSpans } from './music-encoding.js';
 import { beatCounterLayout, copyBeatCounterEdits } from './music-beats.js';
 import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, verticalChords, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
 import { chordByAnyName } from './music-reference-data.js';
+import { exploreChordReplacements } from './music-chord-what-if.js';
 import { indexAssignments, colorMap, toggleNote, firstTagForKey, revealedTagForKey, renameInAssignments, noteId as tagNoteId } from './music-tags.js';
 import { findScopedMatches, pcHistogram, guessKey, keyLabel } from './music-pattern.js';
 import { findRhythmPatterns, soloMutedIndices } from './music-rhythm.js';
@@ -3305,6 +3306,21 @@ export function createMusicRenderer(container, opts = {}) {
     // The signature comes from the loaded piece's own key string, so a transposed/combined sheet is
     // judged against the signature it is actually drawn in.
     guessBestKey() { return detectedKey(orderedRenderedNotes()); },
+    getWhatIfChords(options = {}) {
+      const ordered = orderedRenderedNotes();
+      const result = exploreChordReplacements(chordNotes(ordered), { key: detectedKey(ordered), ...options });
+      const sources = (osmd.Sheet && osmd.Sheet.SourceMeasures) || [];
+      result.contexts.forEach(c => {
+        const source = sources.find(m => m.MeasureNumber === c.measure);
+        const ts = source && source.ActiveTimeSignature;
+        const start = source && source.AbsoluteTimestamp && source.AbsoluteTimestamp.RealValue * 4;
+        const unit = ts && ts.Denominator ? 4 / ts.Denominator : 1;
+        const duration = source && source.Duration && source.Duration.RealValue * 4;
+        const pickup = source === sources[0] && ts ? Math.max(0, ts.Numerator * unit - duration) : 0;
+        c.beat = Number.isFinite(start) ? Math.round((1 + (c.onset - start + pickup) / unit) * 1000) / 1000 : null;
+      });
+      return result;
+    },
     // Note identities [{measure,midi,beats}] matched by the most recent searchTagPatterns (flattened
     // across occurrences) — so Play-tags can include them. Reset when the tag selection / patterns change.
     getPatternMatchNotes() {

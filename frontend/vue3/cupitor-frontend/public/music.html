@@ -841,10 +841,24 @@
     <span id="voiceChips"></span>
     <span id="registerChips" role="group" aria-label="Suppress by pitch" style="display:none"></span>
     <button id="recalculateChordsBtn" type="button" class="btn" aria-label="Recalculate chords" title="Recalculate chords from the notes left audible"><span class="ic">↻</span><span class="txt">Recalculate chords</span></button>
+    <button id="whatIfChordsBtn" type="button" class="btn" aria-expanded="false" aria-controls="chordWhatIfPanel" title="Explore chords after moving any note up or down in the chosen scale"><span class="ic">↕</span><span class="txt">What-if chords</span></button>
     <span id="suppressHint" style="font-size:.8em;color:#a0660a"></span>
     <input type="checkbox" id="suppressModeChk" hidden>
     <input type="checkbox" id="hearAllChk" hidden>
   </div>
+  <section id="chordWhatIfPanel" aria-label="What-if chords" hidden style="margin:.4rem 0;padding:.6rem;border:1px solid #97bdc9;border-radius:6px;background:#f4fafb">
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+      <strong>What-if chords</strong>
+      <label>Key <select id="chordWhatIfKey" aria-label="What-if key"></select></label>
+      <select id="chordWhatIfMinor" aria-label="Minor scale"><option value="natural">Natural minor</option><option value="harmonic">Harmonic minor</option></select>
+      <label>Changes <select id="chordWhatIfChanges"><option value="1">One pitch</option><option value="2">Up to two pitches</option></select></label>
+      <label title="Original note groups with no complete chord covering every pitch class"><input type="checkbox" id="chordWhatIfUnidentified" checked> Only unidentified</label>
+      <button id="chordWhatIfClose" type="button" class="btn">Close</button>
+    </div>
+    <p style="font-size:.85em;margin:.5rem 0">Move any sounding pitch to the next scale note below or above, including pitches already in the key. Hypothetical results cover every resulting pitch class; score and playback stay as written. Held notes are included. Bars labelled “collected notes” are arpeggio guesses.</p>
+    <p id="chordWhatIfSummary" role="status" style="font-size:.9em"></p>
+    <div id="chordWhatIfResults" style="max-height:28rem;overflow:auto"></div>
+  </section>
   <div id="windowPanel" style="display:none">
     <div id="windowNudge" class="win-nudge" title="Move / resize the window (easier than dragging on touch)">
       <button type="button" id="winMoveL" class="win-btn" title="Move window left" aria-label="Move window left">◀</button>
@@ -1233,7 +1247,7 @@ Can you hear it?       &gt; ask()"></textarea>
   import { parseScript, describeStep, tempoForPass, COMMANDS, renameTagInScript, renamePhraseInScript,
     parseCalls, proseCut, formatLine, ARG_UI } from './music-script.js';
   import { safeHtml } from './music-richtext.js';
-  import { keyExplanation } from './music-key.js';
+  import { keyExplanation, keyLabelOf } from './music-key.js';
   import { buildChordQuery, buildMelodyQuery, matchSummary } from './music-search-ui.js';
   import { createMusicStore } from './music-local-store.js';
   import { PRACTICE_STATUSES, statusMeta, weekStart, weekLabel, makeEntry, upsertEntry, removeEntry, sortEntries, mergeFieldName } from './music-practice.js';
@@ -2116,6 +2130,7 @@ Can you hear it?       &gt; ask()"></textarea>
     });
   }
   function onSuppressionChange() {
+    resetChordWhatIf();
     renderVoiceChips();
     renderRegisterChips();
     const n = (renderer && renderer.getSuppressedNotes) ? renderer.getSuppressedNotes().length : 0;
@@ -2151,7 +2166,74 @@ Can you hear it?       &gt; ask()"></textarea>
     renderer.recalculateChords();
     setMediaMsg('Chords recalculated from the audible notes.', 'ok');
   };
-  document.getElementById('hearAllChk').onchange = (e) => { if (renderer) renderer.setHearAll(e.target.checked); };
+  let chordWhatIfReport = null;
+  function resetChordWhatIf() {
+    document.getElementById('chordWhatIfPanel').hidden = true;
+    document.getElementById('whatIfChordsBtn').setAttribute('aria-expanded', 'false');
+    document.getElementById('chordWhatIfResults').replaceChildren();
+    chordWhatIfReport = null;
+  }
+  function renderChordWhatIf() {
+    if (!chordWhatIfReport) return;
+    const { contexts, scale, error } = chordWhatIfReport;
+    const onlyUnknown = document.getElementById('chordWhatIfUnidentified').checked;
+    const rows = contexts.filter(c => !onlyUnknown || !c.originalChords.length);
+    const matched = rows.filter(c => c.suggestions.length);
+    const summary = document.getElementById('chordWhatIfSummary');
+    const box = document.getElementById('chordWhatIfResults'); box.replaceChildren();
+    summary.textContent = error || `${scale.label} · ${scale.tones.map(t => t.name).join(' ')} · ${matched.length} of ${rows.length} note groups have alternatives (${rows.reduce((n, c) => n + c.tried, 0)} moves checked).`;
+    if (!matched.length) {
+      const p = document.createElement('p');
+      p.textContent = 'No complete chord found with these settings. Try up to two pitches, another key/scale, or turn off “Only unidentified”.';
+      box.appendChild(p); return;
+    }
+    matched.forEach(c => {
+      const card = document.createElement('details'); card.className = 'chord-what-if-card';
+      card.style.cssText = 'background:white;border:1px solid #cbdde2;border-radius:4px;padding:.4rem .5rem;margin:.35rem 0';
+      const heading = document.createElement('summary');
+      heading.textContent = `m${c.measure}${c.beat != null ? ` · beat ${c.beat}` : ''}${c.kind === 'bar' ? ' · collected notes' : ''} · ${c.notes.join(' ')} · Original: ${c.originalChords.map(chordDisplayName).join(' / ') || 'unidentified'} · ${c.suggestions.length} alternatives`;
+      card.appendChild(heading);
+      card.open = matched.indexOf(c) < 3;
+      const scroll = document.createElement('div'); scroll.style.overflowX = 'auto';
+      const table = document.createElement('table'); table.style.cssText = 'width:100%;font-size:.9em;border-collapse:collapse;margin-top:.4rem';
+      const header = table.createTHead().insertRow();
+      ['Replacement', 'Resulting notes', 'Possible chords'].forEach(text => { const th = document.createElement('th'); th.textContent = text; th.style.cssText = 'text-align:left;padding:.3rem;border-bottom:1px solid #cbdde2'; header.appendChild(th); });
+      const body = table.createTBody();
+      c.suggestions.forEach(s => {
+        const row = body.insertRow();
+        [s.changes.map(change => `${change.delta < 0 ? '↓' : '↑'} ${change.from} → ${change.to}${change.outsideKey ? ' (outside key)' : ''}`).join('; '), s.notes.join(' '), s.chords.map(chordDisplayName).join(' / ')].forEach(text => {
+          const cell = row.insertCell(); cell.textContent = text; cell.style.cssText = 'padding:.3rem;border-bottom:1px solid #edf2f3;vertical-align:top';
+        });
+      });
+      scroll.appendChild(table); card.appendChild(scroll); box.appendChild(card);
+    });
+  }
+  function calculateChordWhatIf() {
+    if (!renderer || document.getElementById('chordWhatIfPanel').hidden) return;
+    const [pc, mode] = document.getElementById('chordWhatIfKey').value.split(':');
+    const minor = document.getElementById('chordWhatIfMinor'); minor.hidden = mode !== 'minor';
+    chordWhatIfReport = renderer.getWhatIfChords({ key: { tonicPc: Number(pc), mode }, minorScale: minor.value,
+      maxChanges: Number(document.getElementById('chordWhatIfChanges').value) });
+    renderChordWhatIf();
+  }
+  document.getElementById('whatIfChordsBtn').onclick = () => {
+    if (!renderer) return;
+    const panel = document.getElementById('chordWhatIfPanel');
+    if (!panel.hidden) { resetChordWhatIf(); return; }
+    const keySelect = document.getElementById('chordWhatIfKey'); keySelect.replaceChildren();
+    for (const mode of ['major', 'minor']) for (let pc = 0; pc < 12; pc++) {
+      const option = document.createElement('option'); option.value = `${pc}:${mode}`; option.textContent = keyLabelOf(pc, mode); keySelect.appendChild(option);
+    }
+    const key = renderer.guessBestKey();
+    if (key) keySelect.value = `${key.tonicPc}:${key.mode}`;
+    panel.hidden = false;
+    document.getElementById('whatIfChordsBtn').setAttribute('aria-expanded', 'true');
+    calculateChordWhatIf();
+  };
+  document.getElementById('chordWhatIfClose').onclick = resetChordWhatIf;
+  ['chordWhatIfKey', 'chordWhatIfMinor', 'chordWhatIfChanges'].forEach(id => document.getElementById(id).onchange = calculateChordWhatIf);
+  document.getElementById('chordWhatIfUnidentified').onchange = renderChordWhatIf;
+  document.getElementById('hearAllChk').onchange = (e) => { resetChordWhatIf(); if (renderer) renderer.setHearAll(e.target.checked); };
   // Switching Follow on jumps to the cursor straight away rather than waiting for the next note —
   // the usual reason to turn it on is that you have lost track of where playback is.
   document.getElementById('followChk').onchange = (e) => {
@@ -2483,6 +2565,7 @@ Can you hear it?       &gt; ask()"></textarea>
   // currentDetail.source is updated so playback and variations use the transposed pitches too.
   async function applyTranspose(targetPc, mode) {
     if (!currentDetail || pieceOriginalSource == null) return;
+    resetChordWhatIf();
     const semis = nearestSemitones(pieceOriginalPc, targetPc);
     const src = semis === 0 ? pieceOriginalSource : transposeMusicXml(pieceOriginalSource, semis, targetPc, mode);
     const keyLabel = `${TRANSPOSE_NAMES[targetPc]} ${mode}`;
@@ -2512,6 +2595,7 @@ Can you hear it?       &gt; ask()"></textarea>
   // (sheet + chords + fretboard). Shared by Combine and Reset. Re-guesses the key so Transpose is right.
   async function reloadPieceSource(newSource) {
     if (!currentDetail) return;
+    resetChordWhatIf();
     currentDetail = { ...currentDetail, source: newSource };
     pieceOriginalSource = newSource;
     const renderer = await ensureRenderer();
@@ -5572,6 +5656,7 @@ Can you hear it?       &gt; ask()"></textarea>
   // Everything that depends on WHICH notes are drawn: the rhythm list, and the colour legend (a segment
   // can hold fewer voices than the whole piece).
   function onDrawnRangeChanged() {
+    resetChordWhatIf();
     refreshRhythmIfOpen();
     // A group's "what these bars hold" line reads the DRAWN notes, so it changes with the view too.
     if (document.getElementById('rhythmPanel').open) renderRhythmGroups();
