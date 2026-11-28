@@ -852,10 +852,11 @@
       <label>Key <select id="chordWhatIfKey" aria-label="What-if key"></select></label>
       <select id="chordWhatIfMinor" aria-label="Minor scale"><option value="natural">Natural minor</option><option value="harmonic">Harmonic minor</option></select>
       <label>Changes <select id="chordWhatIfChanges"><option value="1">One pitch</option><option value="2">Up to two pitches</option></select></label>
-      <label title="Original note groups with no complete chord covering every pitch class"><input type="checkbox" id="chordWhatIfUnidentified" checked> Only unidentified</label>
+      <label title="Filter the individual note groups; original arpeggio readings remain available above"><input type="checkbox" id="chordWhatIfUnidentified" checked> Only moments without exact matches</label>
       <button id="chordWhatIfClose" type="button" class="btn">Close</button>
     </div>
-    <p style="font-size:.85em;margin:.5rem 0">Move any sounding pitch to the next scale note below or above, including pitches already in the key. Hypothetical results cover every resulting pitch class; score and playback stay as written. Held notes are included. Bars labelled “collected notes” are arpeggio guesses.</p>
+    <p style="font-size:.85em;margin:.5rem 0">Original arpeggio readings collect notes across a bar. A “+” note is additional to the named chord. Below, explore moving any pitch to the next scale note below or above. Each moment is checked separately, including held notes; “no exact match” at a moment does not rule out harmony across the bar.</p>
+    <div id="chordOriginalReadings" style="max-height:14rem;overflow:auto"></div>
     <p id="chordWhatIfSummary" role="status" style="font-size:.9em"></p>
     <div id="chordWhatIfResults" style="max-height:28rem;overflow:auto"></div>
   </section>
@@ -1152,7 +1153,7 @@ Can you hear it?       &gt; ask()"></textarea>
     <strong id="chordWhatIfScoreText"></strong>
     <button id="chordWhatIfScoreClear" type="button" class="btn" style="margin-left:.4rem">Clear preview</button>
     <div id="chordWhatIfScoreNotes" style="display:flex;align-items:center;flex-wrap:wrap;gap:.35rem;margin:.3rem 0"></div>
-    <div style="font-size:.85em">Matching note labels identify the notes used. <span style="color:#0f766e">Teal: retained</span> · <span style="color:#7e22ce">Purple: replaced</span>. This is a hypothetical chord.</div>
+    <div id="chordWhatIfScoreLegend" style="font-size:.85em"></div>
   </div>
   <div id="osmdPreview"></div>
   <details id="variationsSection" class="np-panel">
@@ -2186,12 +2187,57 @@ Can you hear it?       &gt; ask()"></textarea>
     document.getElementById('chordWhatIfPanel').hidden = true;
     document.getElementById('whatIfChordsBtn').setAttribute('aria-expanded', 'false');
     document.getElementById('chordWhatIfResults').replaceChildren();
+    document.getElementById('chordOriginalReadings').replaceChildren();
     chordWhatIfReport = null;
+  }
+  function previewChordReading(c, s, button, original = false) {
+    const selected = button.getAttribute('aria-pressed') === 'true';
+    clearChordWhatIfScore();
+    if (selected || !renderer.setChordWhatIf({ measure: c.measure, onset: c.onset, kind: c.kind, changes: s.changes,
+      chords: s.chords, evidence: s.evidence, chordTones: s.chordTones, original, displayName: s.displayName })) return;
+    button.setAttribute('aria-pressed', 'true'); button.closest('tr').style.background = '#f3e8ff';
+    const location = `m${c.measure}${c.beat != null ? ` beat ${c.beat}` : ''}`;
+    document.getElementById('chordWhatIfScoreText').textContent = original
+      ? `Original harmony · ${location} · ${s.displayName} (arpeggio reading)`
+      : `What if · ${location} · ${s.changes.map(change => `${change.from} → ${change.to}`).join('; ')} ⇒ ${s.chords.map(chordDisplayName).join(' / ')}${c.kind === 'bar' ? ' (collected notes)' : ''}`;
+    const notesUsed = document.getElementById('chordWhatIfScoreNotes'); notesUsed.replaceChildren();
+    const caption = document.createElement('strong'); caption.textContent = 'Notes used:'; notesUsed.appendChild(caption);
+    s.evidence.forEach(item => {
+      const chip = document.createElement('span'); chip.className = 'chord-what-if-evidence-chip'; chip.dataset.noteId = item.id;
+      const color = item.extra ? '#a16207' : item.changed ? '#7e22ce' : '#0f766e';
+      chip.style.cssText = `border:1px solid ${color};border-radius:4px;padding:2px 5px;color:${color};background:white;font-size:.9em`;
+      chip.textContent = `${item.id} · ${item.changed ? `${item.from} → ${item.to}` : item.from}${item.extra ? ' (additional)' : ''}`; notesUsed.appendChild(chip);
+    });
+    const formula = document.createElement('strong'); formula.textContent = `⇒ ${chordDisplayName(s.chords[0])} = ${(s.chordTones[0] || []).join(' + ')}`; notesUsed.appendChild(formula);
+    document.getElementById('chordWhatIfScoreLegend').textContent = original
+      ? 'Original notes across this bar: teal marks chord tones; amber marks additional notes. Labels match the score.'
+      : 'Matching labels identify the notes used. Teal: retained · Purple: replaced. This is a hypothetical chord.';
+    document.getElementById('chordWhatIfScore').hidden = false;
+    const mark = document.querySelector('#osmdPreview .chord-what-if-layer');
+    if (mark) mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  function renderOriginalHarmony(harmonies) {
+    const box = document.getElementById('chordOriginalReadings'); box.replaceChildren();
+    if (!harmonies.length) return;
+    const heading = document.createElement('strong'); heading.textContent = 'Original harmony — arpeggio readings'; box.appendChild(heading);
+    const table = document.createElement('table'); table.style.cssText = 'width:100%;font-size:.9em;border-collapse:collapse';
+    const body = table.createTBody();
+    harmonies.forEach(h => h.readings.slice(0, 2).forEach(reading => {
+      const row = body.insertRow(); row.dataset.measure = h.measure;
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn chord-what-if-show original-harmony-show';
+      button.textContent = 'Show on score'; button.style.cssText = 'font-size:.85em;white-space:nowrap'; button.setAttribute('aria-pressed', 'false');
+      button.onclick = () => previewChordReading(h, reading, button, true); row.insertCell().appendChild(button);
+      [`m${h.measure}`, reading.displayName, reading.notes.join(' ') + (reading.additionalNotes.length ? `; additional: ${reading.additionalNotes.join(' ')}` : '')].forEach(text => {
+        const cell = row.insertCell(); cell.textContent = text; cell.style.cssText = 'padding:.35rem;border-bottom:1px solid #cbdde2';
+      });
+    }));
+    box.appendChild(table);
   }
   function renderChordWhatIf() {
     if (!chordWhatIfReport) return;
     clearChordWhatIfScore();
-    const { contexts, scale, error } = chordWhatIfReport;
+    const { contexts, scale, error, originalHarmony = [] } = chordWhatIfReport;
+    renderOriginalHarmony(originalHarmony);
     const onlyUnknown = document.getElementById('chordWhatIfUnidentified').checked;
     const rows = contexts.filter(c => !onlyUnknown || !c.originalChords.length);
     const matched = rows.filter(c => c.suggestions.length);
@@ -2200,14 +2246,14 @@ Can you hear it?       &gt; ask()"></textarea>
     summary.textContent = error || `${scale.label} · ${scale.tones.map(t => t.name).join(' ')} · ${matched.length} of ${rows.length} note groups have alternatives (${rows.reduce((n, c) => n + c.tried, 0)} moves checked).`;
     if (!matched.length) {
       const p = document.createElement('p');
-      p.textContent = 'No complete chord found with these settings. Try up to two pitches, another key/scale, or turn off “Only unidentified”.';
+      p.textContent = 'No complete chord after a pitch change with these settings. Try up to two pitches, another key/scale, or show moments that already have an exact match.';
       box.appendChild(p); return;
     }
     matched.forEach(c => {
       const card = document.createElement('details'); card.className = 'chord-what-if-card';
       card.style.cssText = 'background:white;border:1px solid #cbdde2;border-radius:4px;padding:.4rem .5rem;margin:.35rem 0';
       const heading = document.createElement('summary');
-      heading.textContent = `m${c.measure}${c.beat != null ? ` · beat ${c.beat}` : ''}${c.kind === 'bar' ? ' · collected notes' : ''} · ${c.notes.join(' ')} · Original: ${c.originalChords.map(chordDisplayName).join(' / ') || 'unidentified'} · ${c.suggestions.length} alternatives`;
+      heading.textContent = `m${c.measure}${c.beat != null ? ` · beat ${c.beat}` : ''}${c.kind === 'bar' ? ' · collected notes' : ''} · ${c.notes.join(' ')} · ${c.kind === 'bar' ? 'Group' : 'Moment'}: ${c.originalChords.map(chordDisplayName).join(' / ') || 'no exact match'}${c.barChords.length ? ` · Across bar: ${c.barChords.join(' / ')}` : ''} · ${c.suggestions.length} alternatives`;
       card.appendChild(heading);
       card.open = matched.indexOf(c) < 3;
       const scroll = document.createElement('div'); scroll.style.overflowX = 'auto';
@@ -2222,25 +2268,7 @@ Can you hear it?       &gt; ask()"></textarea>
         });
         const preview = document.createElement('button'); preview.type = 'button'; preview.className = 'btn chord-what-if-show';
         preview.textContent = 'Show on score'; preview.style.cssText = 'font-size:.85em;white-space:nowrap'; preview.setAttribute('aria-pressed', 'false');
-        preview.onclick = () => {
-          const selected = preview.getAttribute('aria-pressed') === 'true';
-          clearChordWhatIfScore();
-          if (selected || !renderer.setChordWhatIf({ measure: c.measure, onset: c.onset, kind: c.kind, changes: s.changes, chords: s.chords, evidence: s.evidence, chordTones: s.chordTones })) return;
-          preview.setAttribute('aria-pressed', 'true'); row.style.background = '#f3e8ff';
-          document.getElementById('chordWhatIfScoreText').textContent = `What if · m${c.measure}${c.beat != null ? ` beat ${c.beat}` : ''} · ${s.changes.map(change => `${change.from} → ${change.to}`).join('; ')} ⇒ ${s.chords.map(chordDisplayName).join(' / ')}${c.kind === 'bar' ? ' (collected notes)' : ''}`;
-          const notesUsed = document.getElementById('chordWhatIfScoreNotes'); notesUsed.replaceChildren();
-          const caption = document.createElement('strong'); caption.textContent = 'Notes used:'; notesUsed.appendChild(caption);
-          s.evidence.forEach(item => {
-            const chip = document.createElement('span'); chip.className = 'chord-what-if-evidence-chip'; chip.dataset.noteId = item.id;
-            const color = item.changed ? '#7e22ce' : '#0f766e';
-            chip.style.cssText = `border:1px solid ${color};border-radius:4px;padding:2px 5px;color:${color};background:white;font-size:.9em`;
-            chip.textContent = `${item.id} · ${item.changed ? `${item.from} → ${item.to}` : item.from}`; notesUsed.appendChild(chip);
-          });
-          const formula = document.createElement('strong'); formula.textContent = `⇒ ${chordDisplayName(s.chords[0])} = ${(s.chordTones[0] || []).join(' + ')}`; notesUsed.appendChild(formula);
-          document.getElementById('chordWhatIfScore').hidden = false;
-          const mark = document.querySelector('#osmdPreview .chord-what-if-layer');
-          if (mark) mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        };
+        preview.onclick = () => previewChordReading(c, s, preview);
         row.insertCell(0).appendChild(preview);
       });
       scroll.appendChild(table); card.appendChild(scroll); box.appendChild(card);

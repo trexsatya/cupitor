@@ -2,6 +2,18 @@
 import { matchingChords, guessChordsForMeasure, guessChords, guessChordAreas, chordDisplayName, chordOccurrenceNotes,
   stackInfo, rankMatches, bestChords, bestChordsCompleting, verticalStacks, stackChord, verticalChords } from './music-chords.js';
 
+test('diminished and flat-nine chords recognize the score’s enharmonic spellings', () => {
+  const notes = ['F', 'D', 'Ab', 'B', 'E'].map((name, left) => ({ name, left }));
+  expect(matchingChords(notes).map(c => c.name)).toEqual(expect.arrayContaining(['Fdim7', 'E7b9']));
+  expect(chordOccurrenceNotes(notes, 'Fdim7').map(n => n.name)).toEqual(['F', 'D', 'Ab', 'B']);
+  expect(chordOccurrenceNotes(notes, 'E7b9')).toHaveLength(5);
+});
+
+test('equivalent chord names prefer the spelling actually written in the score', () => {
+  expect(stackChord(['F#', 'A#', 'D'].map((name, i) => ({ name, left: 0, midi: [54, 58, 62][i] }))).name).toBe('F#aug');
+  expect(stackChord(['Eb', 'G', 'Bb'].map((name, i) => ({ name, left: 0, midi: [51, 55, 58][i] }))).name).toBe('Ebmaj');
+});
+
 // Notes printed vertically (sharing a beat) are the harmony the score states outright — those chords
 // must always be reported, never lost to a melodic guess or a display cap.
 describe('vertical (same-beat) chords', () => {
