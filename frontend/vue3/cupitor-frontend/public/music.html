@@ -839,6 +839,8 @@
     <button class="btn toggle" data-for="suppressModeChk" title="Click notes to silence them"><span class="ic">🔇</span><span class="txt">Suppress notes</span></button>
     <button class="btn toggle" data-for="hearAllChk" title="Temporarily hear every suppressed note"><span class="ic">👂</span><span class="txt">Hear all</span></button>
     <span id="voiceChips"></span>
+    <span id="registerChips" role="group" aria-label="Suppress by pitch" style="display:none"></span>
+    <button id="recalculateChordsBtn" type="button" class="btn" aria-label="Recalculate chords" title="Recalculate chords from the notes left audible"><span class="ic">↻</span><span class="txt">Recalculate chords</span></button>
     <span id="suppressHint" style="font-size:.8em;color:#a0660a"></span>
     <input type="checkbox" id="suppressModeChk" hidden>
     <input type="checkbox" id="hearAllChk" hidden>
@@ -2115,13 +2117,39 @@ Can you hear it?       &gt; ask()"></textarea>
   }
   function onSuppressionChange() {
     renderVoiceChips();
+    renderRegisterChips();
     const n = (renderer && renderer.getSuppressedNotes) ? renderer.getSuppressedNotes().length : 0;
     document.getElementById('suppressHint').textContent = n ? `${n} note${n === 1 ? '' : 's'} suppressed` : '';
   }
+  function renderRegisterChips() {
+    const box = document.getElementById('registerChips');
+    box.innerHTML = '';
+    if (!renderer || !renderer.listRegisters) return;
+    renderer.listRegisters().forEach(group => {
+      const name = group.id[0].toUpperCase() + group.id.slice(1);
+      const chip = document.createElement('button');
+      chip.type = 'button'; chip.className = 'voiceChip registerChip' + (group.allSuppressed ? ' active' : '');
+      chip.textContent = name; chip.dataset.register = group.id;
+      chip.disabled = !group.count;
+      chip.setAttribute('aria-pressed', String(group.allSuppressed));
+      chip.title = `${group.allSuppressed ? 'Restore' : 'Suppress'} ${name.toLowerCase()} sounding pitches at each note’s start, including held notes (${group.count} notes)`;
+      chip.onclick = () => renderer.suppressRegister(group.id, !group.allSuppressed);
+      box.appendChild(chip);
+    });
+  }
+  function showSuppressChoices(on) {
+    document.getElementById('voiceChips').style.display = on ? 'inline' : 'none';
+    document.getElementById('registerChips').style.display = on ? 'inline-flex' : 'none';
+  }
   document.getElementById('suppressModeChk').onchange = (e) => {
     if (renderer) renderer.setSuppressMode(e.target.checked);
-    document.getElementById('voiceChips').style.display = e.target.checked ? 'inline' : 'none';
-    if (e.target.checked) renderVoiceChips();
+    showSuppressChoices(e.target.checked);
+    if (e.target.checked) onSuppressionChange();
+  };
+  document.getElementById('recalculateChordsBtn').onclick = () => {
+    if (!renderer) return;
+    renderer.recalculateChords();
+    setMediaMsg('Chords recalculated from the audible notes.', 'ok');
   };
   document.getElementById('hearAllChk').onchange = (e) => { if (renderer) renderer.setHearAll(e.target.checked); };
   // Switching Follow on jumps to the cursor straight away rather than waiting for the next note —
@@ -2669,7 +2697,7 @@ Can you hear it?       &gt; ask()"></textarea>
     document.getElementById('suppressPanel').style.display = '';
     document.getElementById('suppressModeChk').checked = false;
     document.getElementById('hearAllChk').checked = false;
-    document.getElementById('voiceChips').style.display = 'none';
+    showSuppressChoices(false);
     // Pattern tags: the renderer loaded detail.patterns on load; reset the tag controls and rebuild
     // the tag UI for the fresh piece. Keep the panel's visibility following its toggle.
     document.getElementById('tagModeChk').checked = false;
@@ -6489,7 +6517,7 @@ Can you hear it?       &gt; ask()"></textarea>
     if (renderer) renderer.setSuppressedNotes(entry.suppressed || []);
     document.getElementById('suppressModeChk').checked = false;
     document.getElementById('hearAllChk').checked = false;
-    document.getElementById('voiceChips').style.display = 'none';
+    showSuppressChoices(false);
     document.getElementById('suppressPanel').style.display = '';
     syncToggles();           // reflect suppress-mode/hear-all buttons as off
     onSuppressionChange();   // refresh chips + hint

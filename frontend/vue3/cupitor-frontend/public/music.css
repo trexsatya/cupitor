@@ -65,6 +65,9 @@
   cursor: pointer;
 }
 #voiceChips { display: none; }   /* shown only while in suppress edit-mode */
+#registerChips { gap:4px; margin-left:6px; }
+.registerChip.active { background:#a35b12; border-color:#a35b12; color:#fff; }
+.registerChip:disabled { opacity:.45; cursor:default; }
 
 /* Library tag-filter chips: click to toggle; lit when the tag is in the active filter. */
 .tagChip {

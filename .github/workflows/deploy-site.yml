@@ -102,7 +102,7 @@ jobs:
 
       - name: Test language, sync and deployment
         run: |
-          npx jest public/music-beats.test.js public/music-render.test.js public/music-local-store.test.js --runInBand --silent
+          npx jest public/music-beats.test.js public/music-render.test.js public/music-suppression.test.js public/music-local-store.test.js --runInBand --silent
           npx jest public/language public/github-utils.test.js --runInBand --silent
           node --test public/page-scripts/*.test.mjs
           node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs scripts/build-language-catalog.test.cjs
@@ -128,7 +128,9 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Verify beat count styling on desktop and mobile
-        run: node tests/browser/music-beat-counts.cjs
+        run: |
+          node tests/browser/music-beat-counts.cjs
+          node tests/browser/music-suppression.cjs
 
       - name: Save beat count screenshots
         if: always()
@@ -146,6 +148,7 @@ jobs:
 
       - name: Test vocabulary storage and multilingual saves
         run: |
+          CUPITOR_TEST_ASSETS=dist node tests/browser/music-suppression.cjs
           node tests/browser/language-routing.cjs
           CUPITOR_TEST_ASSETS=dist node tests/browser/language-routing.cjs
 
