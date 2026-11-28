@@ -56,7 +56,8 @@ function chordIndex(dict, scale) {
     const mask = maskOf(pcs), root = pcs[0];
     const label = name.replace(/^[A-G][#b]*/, spelling.get(root) || SHARPS[root]);
     if (!index.has(mask)) index.set(mask, []);
-    if (!index.get(mask).some(c => c.name === label)) index.get(mask).push({ name: label, root });
+    if (!index.get(mask).some(c => c.name === label)) index.get(mask).push({ name: label, root,
+      tones: pcs.map(p => spelling.get(p) || SHARPS[p]) });
   });
   return index;
 }
@@ -95,32 +96,45 @@ export function exploreChordReplacements(notes, { key, minorScale = 'natural', m
   const scale = replacementScale(key, minorScale);
   if (!scale) return { error: 'Choose a key to explore replacements.', contexts: [], scale: null };
   const index = chordIndex(dict, scale), scalePcs = new Set(scale.tones.map(t => t.pc));
-  const chordsFor = ns => {
+  const matchesFor = ns => {
     const bass = mod(Math.min(...ns.map(n => n.midi)));
     return (index.get(maskOf(ns.map(n => mod(n.midi)))) || []).slice()
-      .sort((a, b) => Number(b.root === bass) - Number(a.root === bass) || a.name.localeCompare(b.name)).map(c => c.name);
+      .sort((a, b) => Number(b.root === bass) - Number(a.root === bass) || a.name.localeCompare(b.name));
   };
   const contexts = whatIfContexts(notes).map(context => {
     const original = context.notes, suggestions = [];
+    // Retain the exact source attacks behind each pitch in the tested group.
+    // A collected-bar pitch can occur several times; each of those occurrences
+    // must carry the same evidence label on the score. Grace notes never enter.
+    const sourceNotes = (notes || []).filter(n => !n.grace && Number.isFinite(n.midi) && Number.isFinite(n.onsetBeats)
+      && (context.kind === 'bar' ? n.measure === context.measure
+        : n.onsetBeats <= context.onset + EPS && n.onsetBeats + (n.durBeats || 0) > context.onset + EPS));
     const options = original.map(n => neighboringScaleNotes(n.midi, scale));
     let tried = 0;
     function consider(changes) {
       tried++;
       const byMidi = new Map(changes.map(c => [c.from.midi, c.to]));
       const hypothetical = original.map(n => byMidi.get(n.midi) || n);
-      const chords = chordsFor(hypothetical);
-      if (chords.length) suggestions.push({ changes: changes.map(c => ({
+      const matches = matchesFor(hypothetical);
+      if (matches.length) suggestions.push({ changes: changes.map(c => ({
         from: pitchLabel(c.from), to: pitchLabel(c.to), delta: c.to.delta,
         fromMidi: c.from.midi, toMidi: c.to.midi,
         outsideKey: !scalePcs.has(mod(c.from.midi)),
-      })), notes: hypothetical.map(pitchLabel), chords });
+      })), notes: hypothetical.map(pitchLabel), chords: matches.map(c => c.name), chordTones: matches.map(c => c.tones.slice()),
+      evidence: original.map((n, i) => ({ id: `n${i + 1}`, from: pitchLabel(n), to: pitchLabel(hypothetical[i]),
+        fromMidi: n.midi, toMidi: hypothetical[i].midi, changed: byMidi.has(n.midi),
+        sources: [...new Map(sourceNotes.filter(s => s.midi === n.midi).map(s => {
+          const id = { measure: s.measure, midi: s.midi, onsetBeats: s.onsetBeats };
+          return [`${id.measure}:${id.midi}:${id.onsetBeats}`, id];
+        })).values()],
+      })) });
     }
     original.forEach((from, i) => options[i].forEach(to => consider([{ from, to }])));
     if (Number(maxChanges) >= 2) original.forEach((from, i) => {
       for (let j = i + 1; j < original.length; j++) options[i].forEach(to => options[j].forEach(other =>
         consider([{ from, to }, { from: original[j], to: other }])));
     });
-    return { ...context, notes: original.map(pitchLabel), originalChords: chordsFor(original), tried, suggestions };
+    return { ...context, notes: original.map(pitchLabel), originalChords: matchesFor(original).map(c => c.name), tried, suggestions };
   });
   return { scale, contexts };
 }

@@ -1767,16 +1767,21 @@ export function createMusicRenderer(container, opts = {}) {
     if (!container || !container.querySelectorAll) return false;
     container.querySelectorAll('.chord-what-if-layer').forEach(el => el.remove());
     if (!chordWhatIf) return false;
-    const { measure, onset, kind, changes, chords } = chordWhatIf;
+    const { measure, onset, changes, chords, evidence = [], chordTones = [] } = chordWhatIf;
     const ordered = chordNotes(orderedRenderedNotes());
-    const context = ordered.filter(n => kind === 'bar' ? n.measure === measure
-      : n.onsetBeats <= onset + 1e-6 && n.onsetBeats + (n.durBeats || 0) > onset + 1e-6);
-    const changed = context.filter(n => changes.some(c => c.fromMidi === n.midi));
+    const used = [];
+    evidence.forEach(item => {
+      const seen = new Set();
+      ordered.filter(n => !n.grace && item.sources.some(s => n.measure === s.measure && n.midi === s.midi
+        && Math.abs(n.onsetBeats - s.onsetBeats) < 1e-6)).forEach(n => {
+        if (!seen.has(n.el)) { seen.add(n.el); used.push({ note: n, item }); }
+      });
+    });
     const anchor = ordered.find(n => n.measure === measure && Math.abs(n.onsetBeats - onset) < 1e-6);
     const svg = overlaySvg();
-    if (!svg || !anchor || !changed.length) return false;
+    if (!svg || !anchor || !used.length) return false;
     const layer = mkSvg('g', { class: 'chord-what-if-layer', 'pointer-events': 'none', role: 'img',
-      'aria-label': `What if ${changes.map(c => `${c.from} becomes ${c.to}`).join(', ')}: ${chords.map(chordDisplayName).join(' or ')}` });
+      'aria-label': `What if ${changes.map(c => `${c.from} becomes ${c.to}`).join(', ')}: ${chords.map(chordDisplayName).join(' or ')}. Notes used: ${evidence.map(e => `${e.id}: ${e.changed ? `${e.from} becomes ${e.to}` : e.from}`).join(', ')}` });
     const box = elBox(anchor.el);
     if (!box) return false;
     const band = staffBoxes()[anchor.band];
@@ -1784,20 +1789,27 @@ export function createMusicRenderer(container, opts = {}) {
     const svgWidth = (svg.viewBox && svg.viewBox.baseVal.width) || (svg.width && svg.width.baseVal.value) || 900;
     const x = Math.max(4, Math.min(box.left + 12, svgWidth - width - 4));
     const y = Math.max(4 * scale, (band ? band.top : box.top) - height - 36 * scale);
-    changed.forEach(n => {
+    used.forEach(({ note: n, item }) => {
       const b = elBox(n.el); if (!b) return;
-      layer.appendChild(mkSvg('path', { d: `M ${x + 8} ${y + height} L ${(b.left + b.right) / 2} ${b.top - 4}`,
+      const color = item.changed ? '#7e22ce' : '#0f766e';
+      if (item.changed) layer.appendChild(mkSvg('path', { d: `M ${x + 8} ${y + height} L ${(b.left + b.right) / 2} ${b.top - 4}`,
         fill: 'none', stroke: '#7e22ce', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
-      layer.appendChild(mkSvg('rect', { class: 'chord-what-if-note', 'data-midi': n.midi, 'data-onset': n.onsetBeats,
+      layer.appendChild(mkSvg('rect', { class: `chord-what-if-evidence ${item.changed ? 'chord-what-if-note replaced' : 'retained'}`,
+        'data-note-id': item.id, 'data-midi': n.midi, 'data-onset': n.onsetBeats,
         x: b.left - 4 * scale, y: b.top - 4 * scale, width: b.right - b.left + 8 * scale, height: b.bottom - b.top + 8 * scale,
-        rx: 5 * scale, fill: '#c084fc', 'fill-opacity': .2, stroke: '#7e22ce', 'stroke-width': 1.5 * scale }));
+        rx: 5 * scale, fill: color, 'fill-opacity': .12, stroke: color, 'stroke-width': 1.5 * scale }));
+      const badge = svgHtmlLabel(document, { x: Math.max(2, b.left - 25 * scale), y: Math.max(2, b.top - 13 * scale), fontSize: 9 * scale, text: item.id,
+        css: `font:700 ${9 * scale}px/${14 * scale}px Arial,sans-serif;background:${color};color:white;text-align:center;border-radius:${3 * scale}px;` });
+      badge.setAttribute('class', 'chord-what-if-note-id'); badge.setAttribute('width', 21 * scale); badge.setAttribute('height', 15 * scale);
+      badge.setAttribute('y', Math.max(2, b.top - 13 * scale)); badge.firstChild.style.width = `${21 * scale}px`;
+      layer.appendChild(badge);
     });
     const label = document.createElementNS(SVG_NS, 'foreignObject');
     Object.entries({ x, y, width, height }).forEach(([key, value]) => label.setAttribute(key, value));
     const div = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
     div.style.cssText = `box-sizing:border-box;display:inline-block;max-width:${width}px;background:#faf5ff;border:${1.5 * scale}px dashed #7e22ce;border-radius:${5 * scale}px;padding:${3 * scale}px ${7 * scale}px;color:#6b21a8;font:${12 * scale}px/${16 * scale}px Arial,sans-serif`;
     const title = document.createElement('strong'); title.textContent = `What if: ${chordDisplayName(chords[0])}?${chords.length > 1 ? ` (+${chords.length - 1})` : ''}`;
-    const sub = document.createElement('div'); sub.textContent = changes.map(c => `${c.from} ${c.delta < 0 ? '↓' : '↑'} ${c.to}`).join('; ');
+    const sub = document.createElement('div'); sub.textContent = (chordTones[0] || evidence.map(e => e.to)).join(' + ');
     div.append(title, sub); label.appendChild(div); layer.appendChild(label); svg.appendChild(layer);
     return true;
   }

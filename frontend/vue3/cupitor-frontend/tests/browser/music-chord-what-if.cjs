@@ -48,6 +48,10 @@ async function verify(browser, mobile) {
     assert.equal(await overlay.count(), 1);
     assert((await overlay.textContent()).includes('What if: D?'));
     assert.equal(await overlay.locator('.chord-what-if-note').getAttribute('data-midi'), '64');
+    assert.equal(await overlay.locator('.chord-what-if-evidence.retained').count(), 2);
+    assert.deepEqual(await overlay.locator('.chord-what-if-evidence').evaluateAll(nodes => nodes.map(n => [n.dataset.noteId, n.dataset.midi])), [['n1', '42'], ['n2', '57'], ['n3', '64']]);
+    assert.deepEqual(await page.locator('#chordWhatIfScoreNotes .chord-what-if-evidence-chip').allTextContents(), ['n1 · F#2', 'n2 · A3', 'n3 · E4 → D4']);
+    assert((await overlay.textContent()).includes('D + F# + A'));
     assert.equal(await preview.getAttribute('aria-pressed'), 'true');
     assert.equal(await page.locator('#chordWhatIfScore').isVisible(), true);
     await page.locator('#chordWhatIfScoreClear').click();
@@ -98,6 +102,7 @@ async function verifyReal(browser, file) {
       const mark = page.locator('#osmdPreview .chord-what-if-note');
       assert.equal(await mark.getAttribute('data-midi'), '64');
       assert.equal(await mark.getAttribute('data-onset'), '0', 'the reconsidered E4 is held from the earlier attack');
+      assert.deepEqual(await page.locator('#osmdPreview .chord-what-if-evidence').evaluateAll(nodes => nodes.map(n => [n.dataset.noteId, n.dataset.midi, n.dataset.onset])), [['n1', '42', '0'], ['n2', '57', '1'], ['n3', '64', '0']]);
       const score = page.locator('#osmdPreview');
       await page.locator('#chordWhatIfScore').evaluate(el => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
       const rect = await score.boundingBox();

@@ -94,6 +94,29 @@ test('analysis leaves original pitches and input note objects unchanged', () => 
   expect(notes.map(n => n.midi)).toEqual([60, 62, 67]);
 });
 
+test('evidence identifies every source pitch and excludes later attacks of the same note', () => {
+  const notes = [note(42, 0, 4), note(64, 0, 4), note(57, 1, 1), note(57, 3, 1)];
+  const c = exploreChordReplacements(notes, { key: 'Bm' }).contexts.find(c => c.onset === 1);
+  const s = c.suggestions.find(s => s.changes.some(c => c.fromMidi === 64 && c.toMidi === 62));
+  expect(s.chordTones).toEqual([['D', 'F#', 'A']]);
+  expect(s.evidence.map(e => [e.id, e.from, e.to, e.changed])).toEqual([
+    ['n1', 'F#2', 'F#2', false], ['n2', 'A3', 'A3', false], ['n3', 'E4', 'D4', true],
+  ]);
+  expect(s.evidence.map(e => e.sources)).toEqual([
+    [{ measure: 1, midi: 42, onsetBeats: 0 }], [{ measure: 1, midi: 57, onsetBeats: 1 }], [{ measure: 1, midi: 64, onsetBeats: 0 }],
+  ]);
+});
+
+test('collected-bar evidence retains all repeated attacks under one pitch label', () => {
+  const notes = [note(60, 0, .25), note(60, 1, .25), note(64, 2, .25), note(66, 3, .25), { ...note(63, 2), grace: true }];
+  const c = exploreChordReplacements(notes, { key: 'C' }).contexts[0];
+  const s = c.suggestions.find(s => s.changes.some(c => c.fromMidi === 66 && c.toMidi === 67));
+  expect(c.kind).toBe('bar');
+  expect(s.evidence.find(e => e.fromMidi === 60).sources.map(s => s.onsetBeats)).toEqual([0, 1]);
+  expect(s.evidence).toHaveLength(3);
+  expect(s.evidence.some(e => e.fromMidi === 63)).toBe(false);
+});
+
 test('empty notes and unknown key have an explicit empty result', () => {
   expect(exploreChordReplacements([], { key: 'C' }).contexts).toEqual([]);
   expect(exploreChordReplacements([note(60)])).toMatchObject({ contexts: [], error: expect.any(String) });
@@ -126,9 +149,15 @@ test('the Samba preview marks its held E4 and survives engraving and zoom withou
     const mark = () => host.querySelector('.chord-what-if-note');
     expect(mark().getAttribute('data-midi')).toBe('64');
     expect(mark().getAttribute('data-onset')).toBe('0');
+    const evidence = () => [...host.querySelectorAll('.chord-what-if-evidence')].map(n => [n.getAttribute('data-note-id'), n.getAttribute('data-midi'), n.getAttribute('data-onset')]);
+    expect(evidence()).toEqual([['n1', '42', '0'], ['n2', '57', '1'], ['n3', '64', '0']]);
+    expect(host.querySelectorAll('.chord-what-if-evidence.retained')).toHaveLength(2);
+    expect(host.querySelectorAll('.chord-what-if-evidence.replaced')).toHaveLength(1);
+    expect(host.querySelector('.chord-what-if-layer').textContent).toContain('D + F# + A');
     renderer.osmd.render();
     expect(host.querySelectorAll('.chord-what-if-layer')).toHaveLength(1);
     expect(mark().getAttribute('data-midi')).toBe('64');
+    expect(evidence()).toHaveLength(3);
     renderer.setZoom(.6);
     expect(host.querySelector('.chord-what-if-layer').textContent).toContain('What if: D?');
     expect(renderer.getGuessedChordSequence()).toEqual(original);

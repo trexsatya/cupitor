@@ -1150,8 +1150,9 @@ Can you hear it?       &gt; ask()"></textarea>
   <div id="colorLegend" class="color-legend" aria-live="polite"></div>
   <div id="chordWhatIfScore" hidden style="margin:.4rem 0;padding:.45rem .6rem;border:1px dashed #7e22ce;border-radius:5px;background:#faf5ff;color:#6b21a8">
     <strong id="chordWhatIfScoreText"></strong>
-    <span style="font-size:.85em"> · Purple marks the original note; this is a hypothetical change.</span>
     <button id="chordWhatIfScoreClear" type="button" class="btn" style="margin-left:.4rem">Clear preview</button>
+    <div id="chordWhatIfScoreNotes" style="display:flex;align-items:center;flex-wrap:wrap;gap:.35rem;margin:.3rem 0"></div>
+    <div style="font-size:.85em">Matching note labels identify the notes used. <span style="color:#0f766e">Teal: retained</span> · <span style="color:#7e22ce">Purple: replaced</span>. This is a hypothetical chord.</div>
   </div>
   <div id="osmdPreview"></div>
   <details id="variationsSection" class="np-panel">
@@ -2224,9 +2225,18 @@ Can you hear it?       &gt; ask()"></textarea>
         preview.onclick = () => {
           const selected = preview.getAttribute('aria-pressed') === 'true';
           clearChordWhatIfScore();
-          if (selected || !renderer.setChordWhatIf({ measure: c.measure, onset: c.onset, kind: c.kind, changes: s.changes, chords: s.chords })) return;
+          if (selected || !renderer.setChordWhatIf({ measure: c.measure, onset: c.onset, kind: c.kind, changes: s.changes, chords: s.chords, evidence: s.evidence, chordTones: s.chordTones })) return;
           preview.setAttribute('aria-pressed', 'true'); row.style.background = '#f3e8ff';
           document.getElementById('chordWhatIfScoreText').textContent = `What if · m${c.measure}${c.beat != null ? ` beat ${c.beat}` : ''} · ${s.changes.map(change => `${change.from} → ${change.to}`).join('; ')} ⇒ ${s.chords.map(chordDisplayName).join(' / ')}${c.kind === 'bar' ? ' (collected notes)' : ''}`;
+          const notesUsed = document.getElementById('chordWhatIfScoreNotes'); notesUsed.replaceChildren();
+          const caption = document.createElement('strong'); caption.textContent = 'Notes used:'; notesUsed.appendChild(caption);
+          s.evidence.forEach(item => {
+            const chip = document.createElement('span'); chip.className = 'chord-what-if-evidence-chip'; chip.dataset.noteId = item.id;
+            const color = item.changed ? '#7e22ce' : '#0f766e';
+            chip.style.cssText = `border:1px solid ${color};border-radius:4px;padding:2px 5px;color:${color};background:white;font-size:.9em`;
+            chip.textContent = `${item.id} · ${item.changed ? `${item.from} → ${item.to}` : item.from}`; notesUsed.appendChild(chip);
+          });
+          const formula = document.createElement('strong'); formula.textContent = `⇒ ${chordDisplayName(s.chords[0])} = ${(s.chordTones[0] || []).join(' + ')}`; notesUsed.appendChild(formula);
           document.getElementById('chordWhatIfScore').hidden = false;
           const mark = document.querySelector('#osmdPreview .chord-what-if-layer');
           if (mark) mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
