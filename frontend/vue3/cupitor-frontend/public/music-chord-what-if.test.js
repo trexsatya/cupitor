@@ -1,0 +1,171 @@
+import { exploreChordReplacements, neighboringScaleNotes, replacementScale, whatIfContexts } from './music-chord-what-if.js';
+import realPieces from '../tests/browser/fixtures/chord-what-if-real.json';
+import { createMusicRenderer } from './music-render.js';
+
+const note = (midi, onsetBeats = 0, durBeats = 1, measure = 1) => ({ midi, onsetBeats, durBeats, measure });
+const explore = (midis, options = {}) => exploreChordReplacements(midis.map(m => note(m)), { key: 'C', ...options }).contexts[0];
+const has = (context, from, to, chord) => context.suggestions.some(s => s.changes.some(c => c.from === from && c.to === to) && s.chords.includes(chord));
+
+test('an in-key note can be the pitch that prevents a complete chord', () => {
+  const c = explore([54, 69, 76], { key: 'Bm' });
+  expect(c.originalChords).toEqual([]);
+  expect(has(c, 'A4', 'B4', 'Bsus4')).toBe(true);
+  expect(has(c, 'E5', 'D5', 'Dmaj')).toBe(true);
+  expect(c.suggestions.every(s => !s.changes[0].outsideKey)).toBe(true);
+});
+
+test('chromatic notes try the nearest scale tone in both directions', () => {
+  const c = explore([60, 64, 66]);
+  expect(c.originalChords).toEqual([]);
+  expect(has(c, 'F#4', 'G4', 'Cmaj')).toBe(true);
+  expect(c.suggestions.find(s => s.changes[0].from === 'F#4').changes[0].outsideKey).toBe(true);
+  expect(neighboringScaleNotes(66, replacementScale('C')).map(n => n.midi)).toEqual([65, 67]);
+});
+
+test('scale neighbors skip the original degree and cross octaves correctly', () => {
+  expect(neighboringScaleNotes(60, replacementScale('C')).map(n => [n.midi, n.name])).toEqual([[59, 'B'], [62, 'D']]);
+  expect(neighboringScaleNotes(71, replacementScale('C')).map(n => [n.midi, n.name])).toEqual([[69, 'A'], [72, 'C']]);
+});
+
+test('natural and harmonic minor distinguish the raised seventh', () => {
+  expect(replacementScale('Bm').tones.map(n => n.name)).toEqual(['B', 'C#', 'D', 'E', 'F#', 'G', 'A']);
+  expect(replacementScale('Bm', 'harmonic').tones.map(n => n.name)).toEqual(['B', 'C#', 'D', 'E', 'F#', 'G', 'A#']);
+  expect(neighboringScaleNotes(70, replacementScale('Bm', 'harmonic')).map(n => n.midi)).toEqual([67, 71]);
+});
+
+test('matches explain every resulting pitch, rather than hiding extra notes', () => {
+  const c = explore([60, 64, 66, 67]);
+  expect(c.originalChords).toEqual([]); // C major with an unexplained F# is not complete.
+  expect(has(c, 'F#4', 'G4', 'Cmaj')).toBe(true);
+});
+
+test('already recognized chromatic chords remain available for comparison', () => {
+  const c = explore([60, 63, 67]);
+  expect(c.originalChords).toContain('Cmin');
+  expect(has(c, 'D#4', 'E4', 'Cmaj')).toBe(true);
+});
+
+test('two-pitch exploration is explicit and single changes are ranked first', () => {
+  const c = explore([60, 61, 66]);
+  expect(c.suggestions.every(s => s.changes.length === 1 && !s.chords.includes('Bmin'))).toBe(true);
+  const two = explore([60, 61, 66], { maxChanges: 2 });
+  expect(two.suggestions.some(s => s.chords.includes('Bmin') && s.changes.length === 2)).toBe(true);
+  const mixed = explore([60, 62, 67], { maxChanges: 2 }).suggestions;
+  expect(mixed.map(s => s.changes.length)).toEqual(mixed.map(s => s.changes.length).sort());
+});
+
+test('enharmonics match by pitch while results use key spellings', () => {
+  const c = explore([58, 62, 65], { key: 'Bb' });
+  expect(c.originalChords).toContain('Bbmaj');
+  expect(replacementScale('F#').tones.map(n => n.name)).toContain('E#');
+});
+
+test('held pitches are included until their end, including across a barline', () => {
+  const notes = [note(48, 0, 4), note(64, 1, 1), note(67, 1, 1), note(65, 4, 1, 2), note(69, 4, 1, 2)];
+  const contexts = whatIfContexts(notes);
+  expect(contexts[0].notes.map(n => n.midi)).toEqual([48, 64, 67]);
+  expect(contexts).toHaveLength(1); // released bass cannot complete the later F-A.
+  notes[0].durBeats = 5;
+  expect(whatIfContexts(notes)[1].notes.map(n => n.midi)).toEqual([48, 65, 69]);
+});
+
+test('unison staff/TAB duplicates do not multiply changes; grace notes are excluded', () => {
+  const notes = [note(60), note(60), note(62), note(67), { ...note(66), grace: true }];
+  const c = exploreChordReplacements(notes, { key: 'C' }).contexts[0];
+  expect(c.notes).toEqual(['C4', 'D4', 'G4']);
+  expect(c.tried).toBe(6);
+});
+
+test('octave doubles retain separate sounding pitches when one changes', () => {
+  const c = explore([48, 60, 64, 67]);
+  expect(c.suggestions.every(s => !(s.changes[0].from === 'C3' && s.chords.includes('Emin')))).toBe(true);
+});
+
+test('arpeggios are labelled as collected bar notes', () => {
+  const notes = [note(60, 0), note(62, 1), note(67, 2)];
+  const c = exploreChordReplacements(notes, { key: 'C' }).contexts[0];
+  expect(c.kind).toBe('bar');
+  expect(has(c, 'D4', 'E4', 'Cmaj')).toBe(true);
+});
+
+test('analysis leaves original pitches and input note objects unchanged', () => {
+  const notes = Object.freeze([60, 62, 67].map(m => Object.freeze(note(m))));
+  exploreChordReplacements(notes, { key: 'C', maxChanges: 2 });
+  expect(notes.map(n => n.midi)).toEqual([60, 62, 67]);
+});
+
+test('evidence identifies every source pitch and excludes later attacks of the same note', () => {
+  const notes = [note(42, 0, 4), note(64, 0, 4), note(57, 1, 1), note(57, 3, 1)];
+  const c = exploreChordReplacements(notes, { key: 'Bm' }).contexts.find(c => c.onset === 1);
+  const s = c.suggestions.find(s => s.changes.some(c => c.fromMidi === 64 && c.toMidi === 62));
+  expect(s.chordTones).toEqual([['D', 'F#', 'A']]);
+  expect(s.evidence.map(e => [e.id, e.from, e.to, e.changed])).toEqual([
+    ['n1', 'F#2', 'F#2', false], ['n2', 'A3', 'A3', false], ['n3', 'E4', 'D4', true],
+  ]);
+  expect(s.evidence.map(e => e.sources)).toEqual([
+    [{ measure: 1, midi: 42, onsetBeats: 0 }], [{ measure: 1, midi: 57, onsetBeats: 1 }], [{ measure: 1, midi: 64, onsetBeats: 0 }],
+  ]);
+});
+
+test('collected-bar evidence retains all repeated attacks under one pitch label', () => {
+  const notes = [note(60, 0, .25), note(60, 1, .25), note(64, 2, .25), note(66, 3, .25), { ...note(63, 2), grace: true }];
+  const c = exploreChordReplacements(notes, { key: 'C' }).contexts[0];
+  const s = c.suggestions.find(s => s.changes.some(c => c.fromMidi === 66 && c.toMidi === 67));
+  expect(c.kind).toBe('bar');
+  expect(s.evidence.find(e => e.fromMidi === 60).sources.map(s => s.onsetBeats)).toEqual([0, 1]);
+  expect(s.evidence).toHaveLength(3);
+  expect(s.evidence.some(e => e.fromMidi === 63)).toBe(false);
+});
+
+test('empty notes and unknown key have an explicit empty result', () => {
+  expect(exploreChordReplacements([], { key: 'C' }).contexts).toEqual([]);
+  expect(exploreChordReplacements([note(60)])).toMatchObject({ contexts: [], error: expect.any(String) });
+});
+
+test.each(realPieces)('$piece m$measure: real score produces the verified replacement', sample => {
+  const report = exploreChordReplacements(sample.notes, { key: sample.key });
+  const c = report.contexts.find(c => c.measure === sample.measure && c.notes.join('|') === sample.originalNotes.join('|'));
+  expect(c).toBeDefined();
+  expect(c.kind).toBe(sample.kind);
+  expect(c.originalChords).toEqual([]);
+  expect(has(c, sample.change.from, sample.change.to, sample.chord)).toBe(true);
+});
+
+test('the Samba preview marks its held E4 and survives engraving and zoom without editing pitches', async () => {
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../tests/browser/fixtures/guitar-notation-tab.musicxml'), 'utf8');
+  const canvas = jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ font: '', measureText: text => ({ width: String(text).length * 6 }) });
+  const oldBox = SVGElement.prototype.getBBox;
+  SVGElement.prototype.getBBox = () => ({ x: 10, y: 10, width: 10, height: 10 });
+  const host = document.createElement('div'); document.body.appendChild(host);
+  Object.defineProperty(host, 'offsetWidth', { value: 900 });
+  const { OpenSheetMusicDisplay } = require('./vendor/opensheetmusicdisplay.min.js');
+  const renderer = createMusicRenderer(host, { beatCounters: false, osmdFactory: c => new OpenSheetMusicDisplay(c, { autoResize: false }) });
+  try {
+    await renderer.loadDetail({ format: 'musicxml', source, meta: { key: 'Bm' } });
+    const c = renderer.getWhatIfChords({ key: 'Bm' }).contexts.find(c => c.measure === 1 && c.onset === 1);
+    const s = c.suggestions.find(s => s.changes.some(change => change.from === 'E4' && change.to === 'D4'));
+    const original = renderer.getGuessedChordSequence();
+    expect(renderer.setChordWhatIf({ ...c, ...s })).toBe(true);
+    const mark = () => host.querySelector('.chord-what-if-note');
+    expect(mark().getAttribute('data-midi')).toBe('64');
+    expect(mark().getAttribute('data-onset')).toBe('0');
+    const evidence = () => [...host.querySelectorAll('.chord-what-if-evidence')].map(n => [n.getAttribute('data-note-id'), n.getAttribute('data-midi'), n.getAttribute('data-onset')]);
+    expect(evidence()).toEqual([['n1', '42', '0'], ['n2', '57', '1'], ['n3', '64', '0']]);
+    expect(host.querySelectorAll('.chord-what-if-evidence.retained')).toHaveLength(2);
+    expect(host.querySelectorAll('.chord-what-if-evidence.replaced')).toHaveLength(1);
+    expect(host.querySelector('.chord-what-if-layer').textContent).toContain('D + F# + A');
+    renderer.osmd.render();
+    expect(host.querySelectorAll('.chord-what-if-layer')).toHaveLength(1);
+    expect(mark().getAttribute('data-midi')).toBe('64');
+    expect(evidence()).toHaveLength(3);
+    renderer.setZoom(.6);
+    expect(host.querySelector('.chord-what-if-layer').textContent).toContain('What if: D?');
+    expect(renderer.getGuessedChordSequence()).toEqual(original);
+    expect(renderer.getSelectedChords()).toEqual([]);
+    renderer.setChordWhatIf(null);
+    expect(host.querySelector('.chord-what-if-layer')).toBeNull();
+  } finally {
+    renderer.osmd.clear(); host.remove(); canvas.mockRestore();
+    if (oldBox) SVGElement.prototype.getBBox = oldBox; else delete SVGElement.prototype.getBBox;
+  }
+});
