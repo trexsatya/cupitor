@@ -1043,6 +1043,7 @@ export function createMusicRenderer(container, opts = {}) {
                                  // occurrence, shaded in the family's colour. Many ranges at once
                                  // (unlike the two single-range bands above), each with its own tint so
                                  // a modified return reads lighter than the phrase's first statement.
+  let chordWhatIf = null;       // transient score annotation; never changes pitches or chord picks
   let extraNoteMarks = null;     // { marks:[{measure,midi}], color } — added-note (variation) highlight,
                                  // re-applied after EVERY render so OSMD's deferred/font-load re-render
                                  // (which rebuilds the SVG) can't wipe it. Cleared on loadDetail.
@@ -1760,6 +1761,45 @@ export function createMusicRenderer(container, opts = {}) {
     });
     // Only touch the highlight when the rebuild actually succeeded (otherwise keep the prior state).
     if (ok) { if (selectedNotes.length) highlightChord(selectedNotes); else clearHighlight(); }
+  }
+
+  function applyChordWhatIf() {
+    if (!container || !container.querySelectorAll) return false;
+    container.querySelectorAll('.chord-what-if-layer').forEach(el => el.remove());
+    if (!chordWhatIf) return false;
+    const { measure, onset, kind, changes, chords } = chordWhatIf;
+    const ordered = chordNotes(orderedRenderedNotes());
+    const context = ordered.filter(n => kind === 'bar' ? n.measure === measure
+      : n.onsetBeats <= onset + 1e-6 && n.onsetBeats + (n.durBeats || 0) > onset + 1e-6);
+    const changed = context.filter(n => changes.some(c => c.fromMidi === n.midi));
+    const anchor = ordered.find(n => n.measure === measure && Math.abs(n.onsetBeats - onset) < 1e-6);
+    const svg = overlaySvg();
+    if (!svg || !anchor || !changed.length) return false;
+    const layer = mkSvg('g', { class: 'chord-what-if-layer', 'pointer-events': 'none', role: 'img',
+      'aria-label': `What if ${changes.map(c => `${c.from} becomes ${c.to}`).join(', ')}: ${chords.map(chordDisplayName).join(' or ')}` });
+    const box = elBox(anchor.el);
+    if (!box) return false;
+    const band = staffBoxes()[anchor.band];
+    const scale = counterLabelScale(), width = 200 * scale, height = 46 * scale;
+    const svgWidth = (svg.viewBox && svg.viewBox.baseVal.width) || (svg.width && svg.width.baseVal.value) || 900;
+    const x = Math.max(4, Math.min(box.left + 12, svgWidth - width - 4));
+    const y = Math.max(4 * scale, (band ? band.top : box.top) - height - 36 * scale);
+    changed.forEach(n => {
+      const b = elBox(n.el); if (!b) return;
+      layer.appendChild(mkSvg('path', { d: `M ${x + 8} ${y + height} L ${(b.left + b.right) / 2} ${b.top - 4}`,
+        fill: 'none', stroke: '#7e22ce', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+      layer.appendChild(mkSvg('rect', { class: 'chord-what-if-note', 'data-midi': n.midi, 'data-onset': n.onsetBeats,
+        x: b.left - 4 * scale, y: b.top - 4 * scale, width: b.right - b.left + 8 * scale, height: b.bottom - b.top + 8 * scale,
+        rx: 5 * scale, fill: '#c084fc', 'fill-opacity': .2, stroke: '#7e22ce', 'stroke-width': 1.5 * scale }));
+    });
+    const label = document.createElementNS(SVG_NS, 'foreignObject');
+    Object.entries({ x, y, width, height }).forEach(([key, value]) => label.setAttribute(key, value));
+    const div = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
+    div.style.cssText = `box-sizing:border-box;display:inline-block;max-width:${width}px;background:#faf5ff;border:${1.5 * scale}px dashed #7e22ce;border-radius:${5 * scale}px;padding:${3 * scale}px ${7 * scale}px;color:#6b21a8;font:${12 * scale}px/${16 * scale}px Arial,sans-serif`;
+    const title = document.createElement('strong'); title.textContent = `What if: ${chordDisplayName(chords[0])}?${chords.length > 1 ? ` (+${chords.length - 1})` : ''}`;
+    const sub = document.createElement('div'); sub.textContent = changes.map(c => `${c.from} ${c.delta < 0 ? '↓' : '↑'} ${c.to}`).join('; ');
+    div.append(title, sub); label.appendChild(div); layer.appendChild(label); svg.appendChild(layer);
+    return true;
   }
 
   // Absolute 1-based measure number for the a-th measure in the rendered measureList. Trust
@@ -2760,6 +2800,7 @@ export function createMusicRenderer(container, opts = {}) {
     promoteUnisonHighlights();   // lift a lit note's greyed unison partner so it isn't hidden / mis-muted
     applyExtraNoteHighlight();   // re-ink variation added-notes onto the fresh noteheads
     if (suppressMode) applySuppressionDim();   // owns the sheet while you are choosing what to silence
+    applyChordWhatIf();
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
@@ -2973,6 +3014,7 @@ export function createMusicRenderer(container, opts = {}) {
       shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
       selectedChords.clear();   // a fresh piece carries no manual chord picks
       extraNoteMarks = null;    // ...and no carried-over variation added-note highlight
+      chordWhatIf = null;
       assignments = (detail.patterns || []).map((p) => ({ name: p.name, notes: (p.notes || []).map((n) => ({ ...n })) }));
       // from/to come back too. They did not, and since a phrase IS its bars, every phrase saved under
       // the current model came back covering nothing and resolving to no notes at all — only the older
@@ -3306,6 +3348,10 @@ export function createMusicRenderer(container, opts = {}) {
     // The signature comes from the loaded piece's own key string, so a transposed/combined sheet is
     // judged against the signature it is actually drawn in.
     guessBestKey() { return detectedKey(orderedRenderedNotes()); },
+    setChordWhatIf(hypothesis) {
+      chordWhatIf = hypothesis ? JSON.parse(JSON.stringify(hypothesis)) : null;
+      return applyChordWhatIf();
+    },
     getWhatIfChords(options = {}) {
       const ordered = orderedRenderedNotes();
       const result = exploreChordReplacements(chordNotes(ordered), { key: detectedKey(ordered), ...options });

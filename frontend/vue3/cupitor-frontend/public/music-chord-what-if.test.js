@@ -1,5 +1,6 @@
 import { exploreChordReplacements, neighboringScaleNotes, replacementScale, whatIfContexts } from './music-chord-what-if.js';
 import realPieces from '../tests/browser/fixtures/chord-what-if-real.json';
+import { createMusicRenderer } from './music-render.js';
 
 const note = (midi, onsetBeats = 0, durBeats = 1, measure = 1) => ({ midi, onsetBeats, durBeats, measure });
 const explore = (midis, options = {}) => exploreChordReplacements(midis.map(m => note(m)), { key: 'C', ...options }).contexts[0];
@@ -105,4 +106,37 @@ test.each(realPieces)('$piece m$measure: real score produces the verified replac
   expect(c.kind).toBe(sample.kind);
   expect(c.originalChords).toEqual([]);
   expect(has(c, sample.change.from, sample.change.to, sample.chord)).toBe(true);
+});
+
+test('the Samba preview marks its held E4 and survives engraving and zoom without editing pitches', async () => {
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../tests/browser/fixtures/guitar-notation-tab.musicxml'), 'utf8');
+  const canvas = jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ font: '', measureText: text => ({ width: String(text).length * 6 }) });
+  const oldBox = SVGElement.prototype.getBBox;
+  SVGElement.prototype.getBBox = () => ({ x: 10, y: 10, width: 10, height: 10 });
+  const host = document.createElement('div'); document.body.appendChild(host);
+  Object.defineProperty(host, 'offsetWidth', { value: 900 });
+  const { OpenSheetMusicDisplay } = require('./vendor/opensheetmusicdisplay.min.js');
+  const renderer = createMusicRenderer(host, { beatCounters: false, osmdFactory: c => new OpenSheetMusicDisplay(c, { autoResize: false }) });
+  try {
+    await renderer.loadDetail({ format: 'musicxml', source, meta: { key: 'Bm' } });
+    const c = renderer.getWhatIfChords({ key: 'Bm' }).contexts.find(c => c.measure === 1 && c.onset === 1);
+    const s = c.suggestions.find(s => s.changes.some(change => change.from === 'E4' && change.to === 'D4'));
+    const original = renderer.getGuessedChordSequence();
+    expect(renderer.setChordWhatIf({ ...c, ...s })).toBe(true);
+    const mark = () => host.querySelector('.chord-what-if-note');
+    expect(mark().getAttribute('data-midi')).toBe('64');
+    expect(mark().getAttribute('data-onset')).toBe('0');
+    renderer.osmd.render();
+    expect(host.querySelectorAll('.chord-what-if-layer')).toHaveLength(1);
+    expect(mark().getAttribute('data-midi')).toBe('64');
+    renderer.setZoom(.6);
+    expect(host.querySelector('.chord-what-if-layer').textContent).toContain('What if: D?');
+    expect(renderer.getGuessedChordSequence()).toEqual(original);
+    expect(renderer.getSelectedChords()).toEqual([]);
+    renderer.setChordWhatIf(null);
+    expect(host.querySelector('.chord-what-if-layer')).toBeNull();
+  } finally {
+    renderer.osmd.clear(); host.remove(); canvas.mockRestore();
+    if (oldBox) SVGElement.prototype.getBBox = oldBox; else delete SVGElement.prototype.getBBox;
+  }
 });

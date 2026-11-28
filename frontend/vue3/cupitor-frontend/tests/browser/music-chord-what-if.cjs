@@ -42,7 +42,20 @@ async function verify(browser, mobile) {
     assert((await results.textContent()).includes('Bsus4'));
     assert.equal(await page.locator('#osmdPreview').innerHTML(), original, 'hypotheses must not change the score or its chord picks');
     assert.equal(await button.getAttribute('aria-expanded'), 'true');
+    const preview = results.locator('tbody tr').filter({ hasText: 'E4 → D4' }).first().getByRole('button', { name: 'Show on score' });
+    await preview.click();
+    const overlay = page.locator('#osmdPreview .chord-what-if-layer');
+    assert.equal(await overlay.count(), 1);
+    assert((await overlay.textContent()).includes('What if: D?'));
+    assert.equal(await overlay.locator('.chord-what-if-note').getAttribute('data-midi'), '64');
+    assert.equal(await preview.getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('#chordWhatIfScore').isVisible(), true);
+    await page.locator('#chordWhatIfScoreClear').click();
+    assert.equal(await overlay.count(), 0);
+    assert.equal(await page.locator('#osmdPreview').innerHTML(), original, 'clearing a preview restores the exact score DOM');
+    await preview.click();
     await page.locator('#chordWhatIfChanges').selectOption('2');
+    assert.equal(await overlay.count(), 0, 'changing the analysis removes an old score annotation');
     assert((await results.textContent()).includes('; '), 'two-pitch combinations appear only when requested');
     await page.locator('#chordWhatIfMinor').selectOption('harmonic');
     assert((await page.locator('#chordWhatIfSummary').textContent()).includes('B minor (harmonic)'));
@@ -79,6 +92,19 @@ async function verifyReal(browser, file) {
     assert((await page.locator('#chordWhatIfResults').textContent()).includes('→'));
     const screenshots = path.resolve('test-results/music-chord-what-if'); fs.mkdirSync(screenshots, { recursive: true });
     await page.locator('#chordWhatIfPanel').screenshot({ path: path.join(screenshots, detail.meta.id.slice(0, 70) + '.png') });
+    if (detail.meta.id.startsWith('samba-do-aviao')) {
+      const row = page.locator('.chord-what-if-card').first().locator('tbody tr').filter({ hasText: 'E4 → D4' });
+      await row.getByRole('button', { name: 'Show on score' }).click();
+      const mark = page.locator('#osmdPreview .chord-what-if-note');
+      assert.equal(await mark.getAttribute('data-midi'), '64');
+      assert.equal(await mark.getAttribute('data-onset'), '0', 'the reconsidered E4 is held from the earlier attack');
+      const score = page.locator('#osmdPreview');
+      await page.locator('#chordWhatIfScore').evaluate(el => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+      const rect = await score.boundingBox();
+      const banner = await page.locator('#chordWhatIfScore').boundingBox();
+      const clip = { x: rect.x, y: Math.max(0, banner.y), width: rect.width, height: Math.min(rect.height, 350) + rect.y - Math.max(0, banner.y) };
+      await page.screenshot({ path: path.join(screenshots, 'samba-what-if-on-score.png'), clip, animations: 'disabled' });
+    }
     const report = await page.evaluate(async detail => {
       const { createMusicRenderer } = await import('./music-render.js');
       const host = document.createElement('div'); host.style.width = '1400px'; document.body.appendChild(host);

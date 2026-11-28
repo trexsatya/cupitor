@@ -111,6 +111,7 @@ export function exploreChordReplacements(notes, { key, minorScale = 'natural', m
       const chords = chordsFor(hypothetical);
       if (chords.length) suggestions.push({ changes: changes.map(c => ({
         from: pitchLabel(c.from), to: pitchLabel(c.to), delta: c.to.delta,
+        fromMidi: c.from.midi, toMidi: c.to.midi,
         outsideKey: !scalePcs.has(mod(c.from.midi)),
       })), notes: hypothetical.map(pitchLabel), chords });
     }
