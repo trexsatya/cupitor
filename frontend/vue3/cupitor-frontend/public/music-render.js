@@ -315,6 +315,33 @@ export function notesOfVoice(notes, voiceId) {
     .map((n) => ({ measure: n.measure, midi: n.midi, beats: n.onsetBeats }));
 }
 
+// Pitch layers at each attack, including notes still held from earlier attacks.
+// Classify the original score each time: repeated clicks must not peel off
+// successive layers just because some notes are already suppressed.
+export function notesOfRegister(notes, register) {
+  if (!['lowest', 'highest', 'middle'].includes(register)) return [];
+  const ordered = (notes || []).filter(n => Number.isFinite(n.midi) && Number.isFinite(n.onsetBeats) && !n.grace)
+    .slice().sort((a, b) => a.onsetBeats - b.onsetBeats);
+  const out = new Map();
+  let active = [];
+  for (let i = 0; i < ordered.length;) {
+    const time = ordered[i].onsetBeats, group = [];
+    while (i < ordered.length && Math.abs(ordered[i].onsetBeats - time) < 1e-6) group.push(ordered[i++]);
+    active = active.filter(n => n.onsetBeats + (n.durBeats || 0) > time + 1e-6);
+    const pitches = [...active, ...group].map(n => n.midi);
+    const low = Math.min(...pitches), high = Math.max(...pitches);
+    group.forEach(n => {
+      if ((register === 'lowest' && n.midi === low) || (register === 'highest' && n.midi === high)
+        || (register === 'middle' && n.midi > low && n.midi < high)) {
+        const id = { measure: n.measure, midi: n.midi, beats: n.onsetBeats };
+        out.set(suppressionKey(id), id);
+      }
+    });
+    active.push(...group);
+  }
+  return [...out.values()];
+}
+
 // Pure: notes currently silenced/dimmed = hearAll ? none : suppressed minus temp-restored.
 // `tempRestored` is a Set of suppressionKey strings; keys not present in `suppressed` are ignored.
 export function effectiveMuted(suppressed, tempRestored, hearAll) {
@@ -1575,13 +1602,18 @@ export function createMusicRenderer(container, opts = {}) {
   // system, so any x-ordered chord scan (overlay detection, global occurrence match) must run
   // within a single system — a global x-sort would conflate notes that share an x-column on
   // different lines. Returns the bands too, for placing each system's labels against its band.
-  function notesBySystem() {
+  function chordNotes(notes, includeSuppressed = false) {
+    if (includeSuppressed) return notes;
+    const keys = new Set(mutedList().map(suppressionKey));
+    return notes.filter(n => !keys.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+  }
+  function notesBySystem({ includeSuppressed = false } = {}) {
     const bands = staffBoxes();                 // [{top,bottom}] per system, indexed by system
     const byMeasure = renderedNotesByMeasure();
     const allNotes = [];
     Object.keys(byMeasure).forEach((m) => allNotes.push(...byMeasure[m]));
     const groups = Array.from({ length: Math.max(1, bands.length) }, () => []);
-    allNotes.forEach((n) => {
+    chordNotes(allNotes, includeSuppressed).forEach((n) => {
       // Prefer OSMD's own system index; fall back to nearest band by y only when it's unavailable.
       let idx = (n.system != null && n.system < groups.length) ? n.system : 0;
       if (n.system == null && bands.length) { const b = elBand(n.el); if (b) idx = nearestStaffIdx(bands, (b.top + b.bottom) / 2); }
@@ -2556,7 +2588,7 @@ export function createMusicRenderer(container, opts = {}) {
 
   function fireWindowChange(selected) {
     if (!onWindowChange) return;
-    const forChords = selected.map((n) => ({ name: n.name, el: n.el, left: n.order }));
+    const forChords = chordNotes(selected).map((n) => ({ name: n.name, el: n.el, left: n.order }));
     const areas = guessChordAreas(forChords, undefined, { maxPerArea: 3 });
     const seen = new Set();
     const chords = [];
@@ -2810,6 +2842,12 @@ export function createMusicRenderer(container, opts = {}) {
     osmd.render();
   }
 
+  function recalculateChords() {
+    selectedChords.clear();
+    redraw();
+    return getGuessedChordSequence();
+  }
+
   function setZoom(factor) { currentZoom = factor || 1; osmd.Zoom = factor; redraw(); }
 
   // The pickup/anacrusis shift between the app's sequential numbering (music-encoding counts the
@@ -2834,15 +2872,11 @@ export function createMusicRenderer(container, opts = {}) {
   // measure chords in reading order; each step's noteNames are the chord's pitch classes with
   // suppressed notes excluded unless includeSuppressed. Reuses measureChordAreas + mutedList.
   function getGuessedChordSequence({ includeSuppressed = false } = {}) {
-    const { groups } = notesBySystem();
-    const mutedKeys = includeSuppressed ? new Set()
-      : new Set(mutedList().map((n) => suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+    const { groups } = notesBySystem({ includeSuppressed });
     const steps = [];
     groups.forEach((notes) => {
       topChordPerMeasure(measureChordAreas(notes)).forEach(({ measure, chord }) => {
-        const live = (chord.notes || []).filter((n) =>
-          !mutedKeys.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
-        const src = live.length ? live : chord.notes;
+        const src = chord.notes || [];
         steps.push({ measure, name: chord.name, notes: noteSetOf(src), seq: seqOf(src), events: eventsOf(src), measures: [measure, measure] });
       });
     });
@@ -3356,7 +3390,28 @@ export function createMusicRenderer(container, opts = {}) {
       return unlitIdentities(out);
     },
     setHearAll(on) { hearAll = !!on; redraw(); if (onSuppressionChange) { try { onSuppressionChange(); } catch (_) {} } },
-    setSuppressMode(on) { suppressMode = !!on; redraw(); },
+    setSuppressMode(on) {
+      const finishing = suppressMode && !on;
+      suppressMode = !!on;
+      if (finishing) recalculateChords(); else redraw();
+    },
+    recalculateChords,
+    suppressRegister(register, on) {
+      notesOfRegister(orderedRenderedNotes(), register).forEach(id => {
+        const key = suppressionKey(id);
+        if (on) suppressedNotes.set(key, id); else suppressedNotes.delete(key);
+        tempRestored.delete(key);
+      });
+      redraw();
+      if (onSuppressionChange) { try { onSuppressionChange(); } catch (_) {} }
+    },
+    listRegisters() {
+      const notes = orderedRenderedNotes();
+      return ['lowest', 'highest', 'middle'].map(id => {
+        const group = notesOfRegister(notes, id);
+        return { id, count: group.length, allSuppressed: group.length > 0 && group.every(n => suppressedNotes.has(suppressionKey(n))) };
+      });
+    },
     // Bulk-suppress (on=true) or restore (on=false) every rendered note of a voice in the view.
     suppressVoice(voiceId, on) {
       notesOfVoice(orderedRenderedNotes(), voiceId).forEach((id) => {
@@ -3439,7 +3494,11 @@ export function createMusicRenderer(container, opts = {}) {
     // Pre-select chords by name (e.g. restoring a saved vocab item) and re-draw the overlay.
     setSelectedChords(names) { selectedChords.clear(); (names || []).forEach((n) => { if (n) selectedChords.add(n); }); applyChordOverlay(); },
     // Guessed chords for the currently-rendered measures: [{ measure, name, notes:[{el,...}] }].
-    getGuessedChords() { return guessChords(renderedNotesByMeasure()); },
+    getGuessedChords() {
+      const byMeasure = renderedNotesByMeasure();
+      Object.keys(byMeasure).forEach(m => { byMeasure[m] = chordNotes(byMeasure[m]); });
+      return guessChords(byMeasure);
+    },
     highlightChord,
     clearHighlight,
     // Recolor every rendered notehead whose (measure, midi) matches one of `marks`
