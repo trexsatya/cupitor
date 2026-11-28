@@ -25,16 +25,16 @@ export function chordDisplayName(name) {
 export function chordOccurrenceNotes(notes, chordName, dict = allChords, { slack = 2 } = {}) {
   const tones = dict[chordName] && dict[chordName].notes;
   if (!tones || !tones.length || !notes || notes.length < tones.length) return [];
-  const toneSet = new Set(tones);
+  const toneSet = new Set(tones.map(pcOf));
   const sorted = notes.slice().sort((a, b) => a.left - b.left);
   const span = tones.length + slack;   // a complete occurrence spans at most this many notes
   const picked = new Set();
   for (let i = 0; i < sorted.length; i++) {
-    if (!toneSet.has(sorted[i].name)) continue;   // a run can only start on a chord tone
+    if (!toneSet.has(pcOf(sorted[i].name))) continue;   // a run can only start on a chord tone
     const seen = new Set();
     const idxs = [];
     for (let j = i; j < sorted.length && j < i + span; j++) {
-      if (toneSet.has(sorted[j].name)) { seen.add(sorted[j].name); idxs.push(j); }
+      if (toneSet.has(pcOf(sorted[j].name))) { seen.add(pcOf(sorted[j].name)); idxs.push(j); }
     }
     if (seen.size === toneSet.size) idxs.forEach((k) => picked.add(k));
   }
@@ -48,15 +48,17 @@ function groupByStep(notes) {
   return [...m.keys()].sort((a, b) => a - b).map((k) => m.get(k));
 }
 
-// Pure: chords from `chordsToScan` whose every tone appears among `notes` (matched by .name).
+// Pure: chords whose every tone appears among `notes`, comparing enharmonic
+// pitch classes so a written Ab can supply an E7b9 chord's G#.
 // Returns [{ name, notes: <the notes that are chord tones>, chordTones }].
 export function matchingChords(notes, chordsToScan = allChords) {
-  const names = notes.map((n) => n.name);
+  const names = notes.map((n) => pcOf(n.name));
   const matches = [];
   Object.keys(chordsToScan).forEach((name) => {
     const tones = chordsToScan[name].notes;
-    if (tones && tones.length && tones.every((t) => names.includes(t))) {
-      matches.push({ name, notes: notes.filter((n) => tones.includes(n.name)), chordTones: tones });
+    if (tones && tones.length && tones.every((t) => pcOf(t) != null && names.includes(pcOf(t)))) {
+      const pcs = tones.map(pcOf);
+      matches.push({ name, notes: notes.filter((n) => pcs.includes(pcOf(n.name))), chordTones: tones });
     }
   });
   return matches;
@@ -65,7 +67,15 @@ export function matchingChords(notes, chordsToScan = allChords) {
 // Pitch-class numbers (enharmonics fold together) so chord roots/tones compare across spellings.
 const PITCH_CLASS = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, 'E#': 5, Fb: 4, F: 5,
   'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11, 'B#': 0, Cb: 11 };
-const pcOf = (name) => PITCH_CLASS[name];
+const pcOf = (name) => {
+  if (PITCH_CLASS[name] != null) return PITCH_CLASS[name];
+  const m = /^([A-G])([#b]+)$/.exec(name || '');
+  return m ? ((PITCH_CLASS[m[1]] + [...m[2]].reduce((n, a) => n + (a === '#' ? 1 : -1), 0)) % 12 + 12) % 12 : undefined;
+};
+const writtenScore = (match, notes) => {
+  const names = new Set(notes.map(n => n.name));
+  return Number(names.has(match.chordTones[0])) * match.chordTones.length + match.chordTones.filter(t => names.has(t)).length;
+};
 
 // The key that says "these notes sound together". `onsetBeats` (the musical beat, from the score
 // model) when the caller has it, else `left` (the x-position). Beat beats x: VexFlow nudges a
@@ -127,7 +137,7 @@ export function stackChord(colNotes, dict = allChords) {
   });
   if (!scored.length) return null;
   scored.sort((a, b) => (a.extra - b.extra) || (b.rootIsBass - a.rootIsBass)
-    || (a.m.chordTones.length - b.m.chordTones.length) || a.m.name.localeCompare(b.m.name));
+    || (a.m.chordTones.length - b.m.chordTones.length) || writtenScore(b.m, colNotes) - writtenScore(a.m, colNotes) || a.m.name.localeCompare(b.m.name));
   return scored[0].m;
 }
 
@@ -162,7 +172,7 @@ export function rankMatches(matches, notes) {
       const f = fullInStack(b) - fullInStack(a); if (f) return f;
       const s = a.chordTones.length - b.chordTones.length; if (s) return s;   // prefer the simpler triad
     }
-    return (b.notes.length - a.notes.length) || (a.chordTones.length - b.chordTones.length);
+    return (b.notes.length - a.notes.length) || (a.chordTones.length - b.chordTones.length) || writtenScore(b, notes) - writtenScore(a, notes);
   });
 }
 
@@ -194,7 +204,7 @@ function powerChordMatch(notes, dict, keyPc, keyMode = 'major') {
   const name = st.bassName + (qual === 'min' ? 'min' : qual === 'dim' ? 'dim' : 'maj');
   if (!dict[name]) return null;
   const tones = dict[name].notes;
-  return { name, notes: (notes || []).filter((n) => tones.includes(n.name)), chordTones: tones };
+  return { name, notes: (notes || []).filter((n) => tones.map(pcOf).includes(pcOf(n.name))), chordTones: tones };
 }
 
 // Key string ('C', 'Am', 'D minor', null) → { keyPc, keyMode } for the power-chord fallback.

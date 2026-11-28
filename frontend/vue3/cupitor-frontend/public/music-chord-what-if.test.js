@@ -1,10 +1,44 @@
-import { exploreChordReplacements, neighboringScaleNotes, replacementScale, whatIfContexts } from './music-chord-what-if.js';
+import { exploreChordReplacements, neighboringScaleNotes, replacementScale, whatIfContexts, analyzeOriginalHarmony } from './music-chord-what-if.js';
 import realPieces from '../tests/browser/fixtures/chord-what-if-real.json';
 import { createMusicRenderer } from './music-render.js';
 
 const note = (midi, onsetBeats = 0, durBeats = 1, measure = 1) => ({ midi, onsetBeats, durBeats, measure });
 const explore = (midis, options = {}) => exploreChordReplacements(midis.map(m => note(m)), { key: 'C', ...options }).contexts[0];
 const has = (context, from, to, chord) => context.suggestions.some(s => s.changes.some(c => c.from === from && c.to === to) && s.chords.includes(chord));
+
+test('Samba m2 already has diminished and flat-nine arpeggio readings with no replacements', () => {
+  const sample = realPieces.find(p => p.piece.startsWith('samba-') && p.measure === 2);
+  const report = exploreChordReplacements(sample.notes, { key: 'Bm' });
+  const h = report.originalHarmony.find(h => h.measure === 2);
+  expect(h.readings[0]).toMatchObject({ name: 'Fdim7', displayName: 'Fdim7 + E', changes: [], additionalNotes: ['E4'], chordTones: [['F', 'Ab', 'B', 'D']] });
+  const full = h.readings.find(r => r.name === 'E7b9');
+  expect(full).toMatchObject({ displayName: 'E7b9/F', changes: [], additionalNotes: [], chordTones: [['E', 'G#', 'B', 'D', 'F']] });
+  expect(full.evidence.every(e => !e.changed && !e.extra)).toBe(true);
+  expect(h.readings[0].evidence.find(e => e.extra).sources.map(s => s.onsetBeats)).toEqual([4, 6]);
+  expect(report.contexts.filter(c => c.measure === 2).every(c => c.barChords.includes('E7b9/F'))).toBe(true);
+});
+
+test('two complete chord changes are not merged into a single extended bar chord', () => {
+  const notes = [60, 64, 67].map(m => note(m, 0, 2)).concat([55, 59, 62].map(m => note(m, 2, 2)));
+  expect(analyzeOriginalHarmony(notes, { key: 'C' })).toEqual([]);
+});
+
+test('a bass held across the barline contributes to the next bar’s arpeggio reading', () => {
+  const notes = [note(48, 0, 8), note(64, 4, .25, 2), note(67, 5, .25, 2), note(71, 6, .25, 2)];
+  const h = analyzeOriginalHarmony(notes, { key: 'C' }).find(h => h.measure === 2);
+  expect(h.readings[0].name).toBe('Cmaj7');
+  expect(h.readings[0].evidence[0].sources).toEqual([{ measure: 1, midi: 48, onsetBeats: 0 }]);
+  notes[0].durBeats = 4;
+  expect(analyzeOriginalHarmony(notes, { key: 'C' }).find(h => h.measure === 2).readings.some(r => r.name === 'Cmaj7')).toBe(false);
+});
+
+test('original harmony does not borrow across bars or silently drop multiple unrelated pitch classes', () => {
+  const notes = [note(48, 0, 4), note(60, 0, .25), note(64, 1, .25), note(67, 2, .25), note(71, 3, .25), note(62, 4, .25, 2)];
+  const h = analyzeOriginalHarmony(notes, { key: 'C' });
+  expect(h[0].readings[0].name).toBe('Cmaj7');
+  expect(h[0].readings[0].evidence.flatMap(e => e.sources).every(s => s.measure === 1)).toBe(true);
+  expect(analyzeOriginalHarmony([note(48, 0, 4), note(60, 0, .1), note(61, 1, .1), note(62, 2, .1), note(63, 3, .1)], { key: 'C' })).toEqual([]);
+});
 
 test('an in-key note can be the pitch that prevents a complete chord', () => {
   const c = explore([54, 69, 76], { key: 'Bm' });
@@ -164,6 +198,16 @@ test('the Samba preview marks its held E4 and survives engraving and zoom withou
     expect(renderer.getSelectedChords()).toEqual([]);
     renderer.setChordWhatIf(null);
     expect(host.querySelector('.chord-what-if-layer')).toBeNull();
+    renderer.setShowChords(true);
+    const labels = [...host.querySelectorAll('.chord-area-layer foreignObject')].map(n => n.textContent);
+    expect(labels).toContain('Fdim7 + E · arp.');
+    expect(labels).toContain('E7b9/F · arp.');
+    const h = renderer.getWhatIfChords({ key: 'Bm' }).originalHarmony.find(h => h.measure === 2);
+    expect(renderer.setChordWhatIf({ ...h, ...h.readings[0], original: true })).toBe(true);
+    expect(host.querySelector('.chord-what-if-layer').textContent).toContain('Original: Fdim7 + E');
+    expect(host.querySelectorAll('.chord-what-if-evidence.additional')).toHaveLength(2);
+    expect(host.querySelectorAll('.chord-what-if-evidence.replaced')).toHaveLength(0);
+    expect([...host.querySelectorAll('.chord-what-if-evidence.additional')].map(n => n.getAttribute('data-onset'))).toEqual(['4', '6']);
   } finally {
     renderer.osmd.clear(); host.remove(); canvas.mockRestore();
     if (oldBox) SVGElement.prototype.getBBox = oldBox; else delete SVGElement.prototype.getBBox;

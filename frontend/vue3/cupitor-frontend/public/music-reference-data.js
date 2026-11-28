@@ -3,21 +3,21 @@ import {permutate, logJson, number, schedule, uuid, uniqueByJsonRepresentation, 
 export const majorScales = {
   'G': 'G - A - B - C - D - E - F#',
   'Gb': 'Gb - Ab - Bb - Cb - Db - Eb - F',
-  'G#': 'G# - A# - B# - C# - D# - E# - F#',
+  'G#': 'G# - A# - B# - C# - D# - E# - F##',
   'F': 'F - G - A - Bb - C - D - E',
   'F#': 'F# - G# - A# - B - C# - D# - E#',
   'E': 'E - F# - G# - A - B - C# - D#',
   'Eb': 'Eb - F - G - Ab - Bb - C - D',
   'D': 'D - E - F# - G - A - B - C#',
   'Db': 'Db - Eb - F - Gb - Ab - Bb - C',
-  'D#': 'D# - E# - F# - G# - A# - B# - C#',
+  'D#': 'D# - E# - F## - G# - A# - B# - C##',
   'C': 'C - D - E - F - G - A - B',
   'C#': 'C# - D# - E# - F# - G# - A# - B#',
   'B': 'B - C# - D# - E - F# - G# - A#',
   'Bb': 'Bb - C - D - Eb - F - G - A',
   'A': 'A - B - C# - D - E - F# - G#',
   'Ab': 'Ab - Bb - C - Db - Eb - F - G',
-  'A#': 'A# - B# - C# - D# - E# - F# - G#',
+  'A#': 'A# - B# - C## - D# - E# - F## - G##',
 };
 
 const minorScales = {
@@ -75,6 +75,7 @@ export const chordPatterns = {
   '6+9': pattern([1, 3, 5, 6, 9]),
   'min6+9': pattern([1, '3b', 5, 6, 9]),
   '7': pattern([1, '3', '5','7b']), //a.k.a majMin7 a.k.a. dom7
+  '7b9': pattern([1, 3, 5, '7b', '9b']),
   'maj7': pattern([1, '3', '5', 7]),
   'min7': pattern([1, '3b', '5','7b']),
   'minMaj7': pattern([1, '3b', '5',7]),

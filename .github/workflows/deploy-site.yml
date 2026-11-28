@@ -102,7 +102,7 @@ jobs:
 
       - name: Test language, sync and deployment
         run: |
-          npx jest public/music-beats.test.js public/music-render.test.js public/music-suppression.test.js public/music-chord-what-if.test.js public/music-local-store.test.js --runInBand --silent
+          npx jest public/music-beats.test.js public/music-render.test.js public/music-suppression.test.js public/music-chord-what-if.test.js public/music-chords.test.js public/music-reference-data.test.js public/music-local-store.test.js --runInBand --silent
           npx jest public/language public/github-utils.test.js --runInBand --silent
           node --test public/page-scripts/*.test.mjs
           node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs scripts/build-language-catalog.test.cjs

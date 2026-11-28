@@ -4,11 +4,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { serveFixtures } = require('./language-dialogs.cjs');
 
-const pitch = (name, octave, chord = false) => `<note>${chord ? '<chord/>' : ''}<pitch><step>${name[0]}</step>${name[1] === '#' ? '<alter>1</alter>' : ''}<octave>${octave}</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type></note>`;
+const xmlNote = (name, octave, { chord = false, duration = 4, voice = 1, type = 'whole' } = {}) => `<note>${chord ? '<chord/>' : ''}<pitch><step>${name[0]}</step>${name[1] ? `<alter>${name[1] === '#' ? 1 : -1}</alter>` : ''}<octave>${octave}</octave></pitch><duration>${duration}</duration><voice>${voice}</voice><type>${type}</type></note>`;
+const pitch = (name, octave, chord = false) => xmlNote(name, octave, { chord });
 const source = `<?xml version="1.0"?><score-partwise version="3.1"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1">
 <measure number="1"><attributes><divisions>1</divisions><key><fifths>2</fifths><mode>minor</mode></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>${pitch('F#', 2)}${pitch('A', 3, true)}${pitch('E', 4, true)}</measure>
 <measure number="2">${pitch('F', 2)}${pitch('B', 3, true)}${pitch('E', 4, true)}</measure>
 <measure number="3">${pitch('C', 3)}${pitch('C#', 4, true)}${pitch('F#', 4, true)}</measure>
+<measure number="4"><attributes><divisions>2</divisions></attributes>${xmlNote('F', 2, { duration: 8 })}<backup><duration>8</duration></backup>
+<note><rest/><duration>1</duration><voice>2</voice><type>eighth</type></note>
+${[['D', 3], ['Ab', 3], ['B', 3], ['E', 4], ['D', 4], ['B', 3], ['D', 4]].map(([name, octave]) => xmlNote(name, octave, { duration: 1, voice: 2, type: 'eighth' })).join('')}
+<backup><duration>8</duration></backup>${xmlNote('E', 4, { duration: 4, voice: 3, type: 'half' })}<note><rest/><duration>4</duration><voice>3</voice><type>half</type></note></measure>
 </part></score-partwise>`;
 const study = { format: 'musicxml', source, voices: [], meta: { id: 'chord-what-if-study', title: 'Key-note and chromatic replacements', key: 'Bm' } };
 
@@ -66,6 +71,16 @@ async function verify(browser, mobile) {
     await page.locator('#chordWhatIfKey').selectOption('0:major');
     assert.equal(await page.locator('#chordWhatIfMinor').isVisible(), false);
     assert((await page.locator('#chordWhatIfSummary').textContent()).includes('C major'));
+    const originals = page.locator('#chordOriginalReadings tr[data-measure="4"]');
+    await originals.filter({ hasText: 'Fdim7 + E' }).getByRole('button', { name: 'Show on score' }).click();
+    assert((await page.locator('#chordWhatIfScoreText').textContent()).includes('Original harmony · m4'));
+    assert.equal(await overlay.locator('.chord-what-if-evidence.additional').count(), 2);
+    assert.equal(await overlay.locator('.chord-what-if-evidence.replaced').count(), 0);
+    await originals.filter({ hasText: 'E7b9/F' }).getByRole('button', { name: 'Show on score' }).click();
+    assert.equal(await overlay.locator('.chord-what-if-evidence.additional').count(), 0);
+    assert((await overlay.textContent()).includes('Original: E7b9/F'));
+    await page.locator('#chordWhatIfScoreClear').click();
+    assert.equal(await page.locator('#osmdPreview').innerHTML(), original);
     await page.locator('#chordWhatIfUnidentified').uncheck();
     await page.locator('#chordWhatIfClose').click();
     assert.equal(await page.locator('#chordWhatIfPanel').isVisible(), false);
@@ -73,6 +88,8 @@ async function verify(browser, mobile) {
     await page.locator('[data-for="suppressModeChk"]').click();
     assert.equal(await page.locator('#chordWhatIfPanel').isVisible(), false, 'changing the audible notes invalidates the report');
     await page.locator('[data-register="highest"]').click();
+    await page.locator('[data-register="lowest"]').click();
+    await page.locator('[data-register="middle"]').click();
     await button.click();
     assert((await page.locator('#chordWhatIfSummary').textContent()).includes('0 of 0'));
     assert((await results.textContent()).includes('No complete chord'));
@@ -109,6 +126,25 @@ async function verifyReal(browser, file) {
       const banner = await page.locator('#chordWhatIfScore').boundingBox();
       const clip = { x: rect.x, y: Math.max(0, banner.y), width: rect.width, height: Math.min(rect.height, 350) + rect.y - Math.max(0, banner.y) };
       await page.screenshot({ path: path.join(screenshots, 'samba-what-if-on-score.png'), clip, animations: 'disabled' });
+      const originalRows = page.locator('#chordOriginalReadings tr[data-measure="2"]');
+      assert((await originalRows.allTextContents()).some(t => t.includes('Fdim7 + E')));
+      assert((await originalRows.allTextContents()).some(t => t.includes('E7b9/F')));
+      const scoreLabels = await page.locator('#osmdPreview .chord-area-layer foreignObject').allTextContents();
+      assert(scoreLabels.includes('Fdim7 + E · arp.'));
+      assert(scoreLabels.includes('E7b9/F · arp.'));
+      await originalRows.filter({ hasText: 'Fdim7 + E' }).getByRole('button', { name: 'Show on score' }).click();
+      assert((await page.locator('#chordWhatIfScoreText').textContent()).includes('Original harmony · m2'));
+      assert.equal(await page.locator('#osmdPreview .chord-what-if-evidence.additional').count(), 2);
+      assert.equal(await page.locator('#osmdPreview .chord-what-if-evidence.replaced').count(), 0);
+      await page.locator('#chordWhatIfScore').evaluate(el => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+      const originalBox = await score.boundingBox(), originalBanner = await page.locator('#chordWhatIfScore').boundingBox();
+      await page.screenshot({ path: path.join(screenshots, 'samba-m2-original-harmony.png'), clip: {
+        x: originalBox.x, y: Math.max(0, originalBanner.y), width: originalBox.width,
+        height: Math.min(originalBox.height, 350) + originalBox.y - Math.max(0, originalBanner.y),
+      }, animations: 'disabled' });
+      await originalRows.filter({ hasText: 'E7b9/F' }).getByRole('button', { name: 'Show on score' }).click();
+      assert.equal(await page.locator('#osmdPreview .chord-what-if-evidence.additional').count(), 0);
+      assert((await page.locator('#chordWhatIfScoreText').textContent()).includes('E7b9/F'));
     }
     const report = await page.evaluate(async detail => {
       const { createMusicRenderer } = await import('./music-render.js');

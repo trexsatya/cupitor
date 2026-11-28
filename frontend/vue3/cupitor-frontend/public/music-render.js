@@ -5,7 +5,7 @@ import { primaryVoice, canonicalChordSpans } from './music-encoding.js';
 import { beatCounterLayout, copyBeatCounterEdits } from './music-beats.js';
 import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, verticalChords, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
 import { chordByAnyName } from './music-reference-data.js';
-import { exploreChordReplacements } from './music-chord-what-if.js';
+import { exploreChordReplacements, analyzeOriginalHarmony } from './music-chord-what-if.js';
 import { indexAssignments, colorMap, toggleNote, firstTagForKey, revealedTagForKey, renameInAssignments, noteId as tagNoteId } from './music-tags.js';
 import { findScopedMatches, pcHistogram, guessKey, keyLabel } from './music-pattern.js';
 import { findRhythmPatterns, soloMutedIndices } from './music-rhythm.js';
@@ -1651,6 +1651,7 @@ export function createMusicRenderer(container, opts = {}) {
   // Shape matches the old areas — [{ x, top, chords }] — so the placement/de-crowding code is unchanged.
   const LOOK_BEATS = 1.5;   // how far across a barline a completing tone may sit
   function measureChordAreas(notes) {
+    const arpeggios = new Map(analyzeOriginalHarmony(notes, { key: currentKey }).map(h => [h.measure, h]));
     // A note is "stacked" if another note in this system shares its BEAT — those carry the measure's
     // own harmony and are never borrowed across the barline (only melodic singletons are). Keyed by
     // beat, not x: VexFlow offsets a notehead in a cluster/cross-staff chord, so x split real stacks.
@@ -1671,6 +1672,13 @@ export function createMusicRenderer(container, opts = {}) {
           x: c.x != null ? c.x : Math.min(...mn.map((n) => n.left)), top: 0, measure: m,
           chords: [{ name: c.name, notes: c.notes, chordTones: c.chordTones }],
         }));
+        return;
+      }
+      const arpeggio = arpeggios.get(m);
+      if (arpeggio) {
+        out.push({ x: Math.min(...mn.map(n => n.left)), top: 0, measure: m,
+          chords: arpeggio.readings.slice(0, 2).map(r => ({ name: r.name, displayName: r.displayName, kind: 'arpeggio',
+            notes: mn.filter(n => r.evidence.some(e => !e.extra && e.fromMidi === n.midi)), chordTones: r.chordTones[0] })) });
         return;
       }
       // Nothing sounds together in this bar → guess from the melody, allowing a completing tone just
@@ -1743,8 +1751,9 @@ export function createMusicRenderer(container, opts = {}) {
             fontSize: isSel ? 11 : 9, anchor: 'start',
             css: `font-weight:700;cursor:pointer;color:${isSel ? '#c62828' : '#1565c0'};`
               + (isSel ? 'text-decoration:underline;' : ''),
-            text: (isSel ? '✓ ' : '') + chordDisplayName(ch.name),
+            text: (isSel ? '✓ ' : '') + (ch.displayName || chordDisplayName(ch.name)) + (ch.kind === 'arpeggio' ? ' · arp.' : ''),
           });
+          if (ch.kind === 'arpeggio') fo.firstChild.title = 'Arpeggio reading collected across this measure; the notes need not sound together. A + note is additional to the named chord.';
           fo.firstChild.addEventListener('click', () => {
             if (selectedChords.has(ch.name)) selectedChords.delete(ch.name); else selectedChords.add(ch.name);
             applyChordOverlay();
@@ -1767,7 +1776,7 @@ export function createMusicRenderer(container, opts = {}) {
     if (!container || !container.querySelectorAll) return false;
     container.querySelectorAll('.chord-what-if-layer').forEach(el => el.remove());
     if (!chordWhatIf) return false;
-    const { measure, onset, changes, chords, evidence = [], chordTones = [] } = chordWhatIf;
+    const { measure, onset, changes, chords, evidence = [], chordTones = [], original = false, displayName } = chordWhatIf;
     const ordered = chordNotes(orderedRenderedNotes());
     const used = [];
     evidence.forEach(item => {
@@ -1781,7 +1790,7 @@ export function createMusicRenderer(container, opts = {}) {
     const svg = overlaySvg();
     if (!svg || !anchor || !used.length) return false;
     const layer = mkSvg('g', { class: 'chord-what-if-layer', 'pointer-events': 'none', role: 'img',
-      'aria-label': `What if ${changes.map(c => `${c.from} becomes ${c.to}`).join(', ')}: ${chords.map(chordDisplayName).join(' or ')}. Notes used: ${evidence.map(e => `${e.id}: ${e.changed ? `${e.from} becomes ${e.to}` : e.from}`).join(', ')}` });
+      'aria-label': `${original ? 'Original harmony' : 'What if ' + changes.map(c => `${c.from} becomes ${c.to}`).join(', ')}: ${displayName || chords.map(chordDisplayName).join(' or ')}. Notes used: ${evidence.map(e => `${e.id}: ${e.changed ? `${e.from} becomes ${e.to}` : e.from}${e.extra ? ' (additional note)' : ''}`).join(', ')}` });
     const box = elBox(anchor.el);
     if (!box) return false;
     const band = staffBoxes()[anchor.band];
@@ -1791,10 +1800,10 @@ export function createMusicRenderer(container, opts = {}) {
     const y = Math.max(4 * scale, (band ? band.top : box.top) - height - 36 * scale);
     used.forEach(({ note: n, item }) => {
       const b = elBox(n.el); if (!b) return;
-      const color = item.changed ? '#7e22ce' : '#0f766e';
+      const color = item.extra ? '#a16207' : item.changed ? '#7e22ce' : '#0f766e';
       if (item.changed) layer.appendChild(mkSvg('path', { d: `M ${x + 8} ${y + height} L ${(b.left + b.right) / 2} ${b.top - 4}`,
         fill: 'none', stroke: '#7e22ce', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
-      layer.appendChild(mkSvg('rect', { class: `chord-what-if-evidence ${item.changed ? 'chord-what-if-note replaced' : 'retained'}`,
+      layer.appendChild(mkSvg('rect', { class: `chord-what-if-evidence ${item.extra ? 'additional' : item.changed ? 'chord-what-if-note replaced' : 'retained'}`,
         'data-note-id': item.id, 'data-midi': n.midi, 'data-onset': n.onsetBeats,
         x: b.left - 4 * scale, y: b.top - 4 * scale, width: b.right - b.left + 8 * scale, height: b.bottom - b.top + 8 * scale,
         rx: 5 * scale, fill: color, 'fill-opacity': .12, stroke: color, 'stroke-width': 1.5 * scale }));
@@ -1808,7 +1817,7 @@ export function createMusicRenderer(container, opts = {}) {
     Object.entries({ x, y, width, height }).forEach(([key, value]) => label.setAttribute(key, value));
     const div = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
     div.style.cssText = `box-sizing:border-box;display:inline-block;max-width:${width}px;background:#faf5ff;border:${1.5 * scale}px dashed #7e22ce;border-radius:${5 * scale}px;padding:${3 * scale}px ${7 * scale}px;color:#6b21a8;font:${12 * scale}px/${16 * scale}px Arial,sans-serif`;
-    const title = document.createElement('strong'); title.textContent = `What if: ${chordDisplayName(chords[0])}?${chords.length > 1 ? ` (+${chords.length - 1})` : ''}`;
+    const title = document.createElement('strong'); title.textContent = original ? `Original: ${displayName || chordDisplayName(chords[0])}` : `What if: ${chordDisplayName(chords[0])}?${chords.length > 1 ? ` (+${chords.length - 1})` : ''}`;
     const sub = document.createElement('div'); sub.textContent = (chordTones[0] || evidence.map(e => e.to)).join(' + ');
     div.append(title, sub); label.appendChild(div); layer.appendChild(label); svg.appendChild(layer);
     return true;
@@ -3368,7 +3377,7 @@ export function createMusicRenderer(container, opts = {}) {
       const ordered = orderedRenderedNotes();
       const result = exploreChordReplacements(chordNotes(ordered), { key: detectedKey(ordered), ...options });
       const sources = (osmd.Sheet && osmd.Sheet.SourceMeasures) || [];
-      result.contexts.forEach(c => {
+      result.contexts.concat(result.originalHarmony || []).forEach(c => {
         const source = sources.find(m => m.MeasureNumber === c.measure);
         const ts = source && source.ActiveTimeSignature;
         const start = source && source.AbsoluteTimestamp && source.AbsoluteTimestamp.RealValue * 4;
