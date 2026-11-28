@@ -82,10 +82,11 @@ async function check(browser, mobile) {
     for (const noOp of [false, true]) {
       const out = await page.evaluate(async ({ id, name, full, english, partial, noOp }) => {
         const t = window.__subtitleTest
-        const detail = { videoId: id, sourceLang: 'sv', videoUrl: 'https://www.youtube.com/watch?v=' + id,
+        const detail = { videoId: id, sourceLang: 'sv', query: 'Burka', videoUrl: 'https://www.youtube.com/watch?v=' + id,
           lines: [{ start: 6.919, end: 10.759, text: '>> Ja, både burka och är ju uttryck för eh' }] }
         const item = { id: 'pushed', detail }
         let committedIndex
+        let captureWords
         const indexText = JSON.stringify([{ link: id, name, source: 'youtube', category: 'concurrent metadata' },
           { link: 'unrelated', name: 'Other media', source: 'youtube' }])
         t.saveCapturedBuffer([null, item])
@@ -95,6 +96,10 @@ async function check(browser, mobile) {
           // First transform pass is superseded by a simulated 409 retry.
           for (const file of files) await file.getContent(file.path.endsWith('/index.json') ? indexText : file.path.endsWith('.sv.srt') ? partial : null)
           for (const file of files) {
+            if (file.path.endsWith('/subtitle-capture-words.json')) {
+              captureWords = JSON.parse(await file.getContent(noOp ? '["burka","uttryck"]' : '["uttryck"]'))
+              continue
+            }
             const text = await file.getContent(file.path.endsWith('/index.json') ? indexText : file.path.endsWith('.sv.srt') ? full : english)
             if (file.path.endsWith('/index.json')) committedIndex = JSON.parse(text)
           }
@@ -105,9 +110,10 @@ async function check(browser, mobile) {
         const cache = (await t._cacheReadAll()).get(id)
         return { result, sv: window.allSubtitles[id].sv, en: window.allSubtitles[id].en,
           staleParse: !!window.allSubtitles[id]._parsedSv || !!window.allSubtitles[id]._parsedEn,
-          cache, cueCount: t.srtToJson(window.allSubtitles[id].sv).length, committedIndex }
+          cache, cueCount: t.srtToJson(window.allSubtitles[id].sv).length, committedIndex, captureWords }
       }, { id, name, full, english, partial, noOp })
       assert.equal(out.cueCount, 17)
+      assert.deepEqual(out.captureWords, ['burka', 'uttryck'], 'capture terms survive retries without duplicates')
       assert.equal(out.en, english, 'untranslated capture retains the full translation')
       assert.equal(out.staleParse, false)
       assert.equal(out.cache.sv, out.sv)

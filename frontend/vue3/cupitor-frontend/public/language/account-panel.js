@@ -13,7 +13,8 @@
 import {
   OWNER, OTHER_DATA_KEYS, loadAccount, saveAccount, sameLogin, isOwnerLogin, normalizeOtherData,
 } from './account-state.js'
-import { layerStats } from './data-source.js'
+import { langFromLocation, layerStats } from './data-source.js'
+import { fetchSubtitleCaptureWordCount } from './subtitle-capture-words.js'
 import {
   fetchUsers, cachedUsers, ownerEntry, runSetup, listingStatus, SetupError,
   signInWithToken, signOut, reconcileLogin, installUnauthorizedHandler, fetchLogin,
@@ -141,7 +142,7 @@ function userLabel(u) {
 // or null while unknown. setup: { steps: { repo, listing }, error, running }.
 // reconcile: the boot check's answer ('ok'|'unchecked'|'no_token'|null).
 export function accountPanelVM({
-  state, users, inApp = false, bridge = inApp, listing = null, setup = null, reconcile = null,
+  state, users, captureWordCounts = new Map(), inApp = false, bridge = inApp, listing = null, setup = null, reconcile = null,
   notices = [], message = null, busy = false, signedOutRecently = false, repoName = null,
 }) {
   const status = statusOf(state)
@@ -190,7 +191,13 @@ export function accountPanelVM({
   }
   const chosen = state.other ? state.other.login : ''
   const otherOptions = [{ value: '', label: 'none', selected: chosen === '' }]
-    .concat(list.map(u => ({ value: u.login, label: userLabel(u), selected: chosen !== '' && sameLogin(u.login, chosen) })))
+    .concat(list.map(u => {
+      const count = captureWordCounts.get(u.login)
+      const suffix = count === null ? ' · capture count unavailable'
+        : count === undefined ? ''
+          : ` · ${count.toLocaleString()} captured ${count === 1 ? 'word or phrase' : 'words or phrases'}`
+      return { value: u.login, label: userLabel(u) + suffix, selected: chosen !== '' && sameLogin(u.login, chosen) }
+    }))
 
   const err = setup && setup.error ? setup.error : null
   const running = !!(setup && setup.running)
@@ -239,7 +246,7 @@ export function accountPanelVM({
 // ---- live state and dependencies (replaceable in tests) ----
 
 const defaultDeps = () => ({
-  loadAccount, saveAccount, fetchUsers, cachedUsers, runSetup, listingStatus, fetchLogin,
+  loadAccount, saveAccount, fetchUsers, cachedUsers, runSetup, listingStatus, fetchLogin, fetchSubtitleCaptureWordCount,
   signInWithToken, signOut, reconcileLogin, installUnauthorizedHandler,
   requestAppSignIn, requestAppSignOut, requestAppStatus, appBridgeAvailable, installAckListener,
   layerStats,
@@ -254,7 +261,7 @@ let ui = freshUi()
 function freshUi() {
   return {
     users: null, listing: null, setup: null, reconcile: null, message: null, busy: false, repoName: null, bootState: null, open: false,
-    hiddenBanners: [], otherDraft: null,
+    hiddenBanners: [], otherDraft: null, captureWordCounts: new Map(),
   }
 }
 
@@ -341,7 +348,7 @@ function currentVM() {
   const state = D.loadAccount()
   const inApp = D.inApp()
   const vm = accountPanelVM({
-    state, users: currentUsers(), inApp, bridge: D.appBridgeAvailable(), listing: ui.listing,
+    state, users: currentUsers(), captureWordCounts: ui.captureWordCounts, inApp, bridge: D.appBridgeAvailable(), listing: ui.listing,
     setup: ui.setup, reconcile: ui.reconcile, notices: [], message: ui.message, busy: ui.busy,
     signedOutRecently: signedOutRecently(), repoName: ui.repoName,
   })
@@ -424,7 +431,8 @@ export function renderAccountPanel() {
     vm.otherOptions.forEach(o => $sel.append($('<option></option>').val(o.value).text(o.label)))
     $sel.val(vm.otherOptions.find(option => sameLogin(option.value, draft.login))?.value || '')
     const $other = $('<div class="acct-other"></div>')
-      .append($('<label></label>').append('Also load data from ', $sel))
+      .append($('<label></label>').append('Also load data from ', $sel),
+        para('Capture totals count distinct search terms tracked for this language.'))
     if (draft.login) {
       const $choices = $('<fieldset class="acct-other-data"></fieldset>')
         .append($('<legend></legend>').text('Show alongside your data'))
@@ -615,6 +623,7 @@ export function openAccountDialog(message = null) {
   if (!$d.length) $d = $('<div id="accountDialog" title="Account"></div>').appendTo('body')
   if (ui.bootState === null) ui.bootState = snapshot()
   ui.open = true
+  const captureWordCounts = ui.captureWordCounts = new Map()
   renderAccountPanel()
   const opts = {
     title: 'Account',
@@ -646,8 +655,22 @@ export function openAccountDialog(message = null) {
   if ($d.hasClass('ui-dialog-content')) $d.dialog('option', opts).dialog('open')
   else $d.dialog(opts)
   // Show the cached list now, the fresh one when it arrives.
-  Promise.resolve().then(() => D.fetchUsers()).then(u => {
-    if (Array.isArray(u) && u.length) { ui.users = u; renderAccountPanel() }
+  Promise.resolve().then(() => D.fetchUsers()).then(async users => {
+    const isCurrent = () => ui.open && ui.captureWordCounts === captureWordCounts
+    if (!isCurrent()) return
+    if (Array.isArray(users) && users.length) { ui.users = users; renderAccountPanel() }
+    const state = D.loadAccount()
+    const listed = currentUsers().filter(user => !sameLogin(user.login, state.login))
+    if (state.other && !sameLogin(state.other.login, state.login) && !listed.some(user => sameLogin(user.login, state.other.login))) {
+      listed.push(state.other)
+    }
+    const lang = langFromLocation()
+    for (let i = 0; i < listed.length && isCurrent(); i += 6) {
+      await Promise.all(listed.slice(i, i + 6).map(async user => {
+        captureWordCounts.set(user.login, await D.fetchSubtitleCaptureWordCount(user, lang))
+      }))
+      if (isCurrent()) renderAccountPanel()
+    }
   }).catch(() => {})
   const state = D.loadAccount()
   if (state.login && state.repo && !state.legacy && !isOwnerLogin(state.login)) {

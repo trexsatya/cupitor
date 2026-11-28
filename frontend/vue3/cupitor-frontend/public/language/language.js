@@ -14,6 +14,9 @@ import { LANGUAGES, languageFromLocation, requireStudyLanguage, speechLocale, un
 import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
 import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js';
 import { retainCaptionEnds } from './caption-capture.js';
+import {
+  SUBTITLE_CAPTURE_WORDS_FILE, capturedSubtitleTerms, mergeSubtitleCaptureTerms,
+} from './subtitle-capture-words.js';
 import { matchingCompanionSubtitle, openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
 import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.js';
 import { browserRecordingAvailable, createBrowserSpeakOverRecorder } from './browser-speakover.js';
@@ -12526,6 +12529,15 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
   }
   if (!chunks.length) chunks.push([])
   if (indexSpec) chunks[chunks.length - 1].push(indexSpec)
+  const terms = capturedSubtitleTerms(videoSpecs.flatMap(video => video.slot.details))
+  if (terms.length) {
+    // Write the terms after all subtitle chunks succeed. The transform unions
+    // them with the current remote list on every commit retry.
+    chunks[chunks.length - 1].push({
+      path: `${_langRepoDir()}/${SUBTITLE_CAPTURE_WORDS_FILE}`,
+      getContent: current => mergeSubtitleCaptureTerms(current, terms),
+    })
+  }
   const nonEmpty = chunks.filter(c => c.length)
 
   let anyCommitted = false

@@ -257,6 +257,7 @@ function setup({ state = guest, inApp = false, bridge = false, ...over } = {}) {
     loadAccount: jest.fn(() => current),
     saveAccount: jest.fn(s => { current = s; return true }),
     fetchUsers: jest.fn(async () => users),
+    fetchSubtitleCaptureWordCount: jest.fn(async user => user.login === 'bob' ? 8 : 1),
     cachedUsers: jest.fn(() => users),
     runSetup: jest.fn(async () => ({ status: 'awaiting' })),
     listingStatus: jest.fn(async () => 'awaiting'),
@@ -461,6 +462,9 @@ describe('init and the set-up prompt', () => {
     expect([...document.querySelectorAll('#acctOther option')].map(o => o.value)).toEqual(['', 'trexsatya'])
     await flush()
     expect([...document.querySelectorAll('#acctOther option')].map(o => o.value)).toEqual(['', 'trexsatya', 'bob'])
+    expect(jq('#acctOther option[value="trexsatya"]').text()).toMatch(/1 captured word or phrase$/)
+    expect(jq('#acctOther option[value="bob"]').text()).toMatch(/8 captured words or phrases$/)
+    expect(deps.fetchSubtitleCaptureWordCount).toHaveBeenCalledTimes(2)
     expect(deps.listingStatus).toHaveBeenCalledWith({ login: 'alice' })
     expect(jq('#accountDialog').text()).toMatch(/Waiting for approval/)
   })
